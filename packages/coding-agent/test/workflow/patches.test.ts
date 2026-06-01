@@ -1,0 +1,205 @@
+import { describe, expect, it } from "bun:test";
+import { parseWorkflowDefinition } from "../../src/workflow/definition";
+import {
+	applyWorkflowGraphPatch,
+	applyWorkflowGraphPatchToRun,
+	proposeWorkflowGraphPatch,
+	WorkflowGraphPatchError,
+	type WorkflowGraphPatchOperation,
+} from "../../src/workflow/patches";
+import { reconstructWorkflowRuns, startWorkflowRun, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
+
+const source = `
+name: patch-demo
+version: 1
+models:
+  roles:
+    reviewer: provider/reviewer:high
+  defaults: {}
+nodes:
+  build:
+    type: agent
+    agent: task
+  review:
+    type: review
+    model:
+      role: reviewer
+    writes:
+      - /verdict
+edges:
+  - from: build
+    to: review
+`;
+
+interface CapturedEntry {
+	type: "custom";
+	customType: string;
+	data?: unknown;
+}
+
+function createHost(): WorkflowRunStoreHost & { entries: CapturedEntry[] } {
+	const entries: CapturedEntry[] = [];
+	return {
+		entries,
+		appendCustomEntry: (customType, data) => {
+			entries.push({ type: "custom", customType, data });
+			return `entry-${entries.length}`;
+		},
+		getBranch: () => entries,
+	};
+}
+
+function patchOperations(): WorkflowGraphPatchOperation[] {
+	return [
+		{
+			op: "add_node",
+			node: {
+				id: "finish",
+				type: "script",
+				reads: ["/verdict"],
+			},
+		},
+		{
+			op: "add_edge",
+			edge: { from: "review", to: "finish", condition: { source: 'state.verdict == "finish"' } },
+		},
+		{
+			op: "replace_edge_condition",
+			from: "build",
+			to: "review",
+			condition: "state.ready == true",
+		},
+		{
+			op: "replace_node_model",
+			nodeId: "review",
+			model: { selector: "provider/reviewer-v2:high" },
+		},
+		{
+			op: "replace_node_permissions",
+			nodeId: "review",
+			reads: ["/draft"],
+			writes: ["/verdict", "/score"],
+		},
+	];
+}
+
+describe("workflow graph patch API", () => {
+	it("lets ordinary agent contexts propose patches but not apply them", () => {
+		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
+		const patch = patchOperations();
+
+		const proposal = proposeWorkflowGraphPatch(definition, patch, {
+			actor: "agent",
+			proposalId: "proposal-1",
+			reason: "add finish branch",
+		});
+
+		expect(proposal).toMatchObject({
+			id: "proposal-1",
+			status: "proposed",
+			reason: "add finish branch",
+			preview: {
+				addedNodes: ["finish"],
+				addedEdges: [{ from: "review", to: "finish" }],
+				changedNodes: ["review"],
+			},
+		});
+		expect(definition.nodes.map(node => node.id)).toEqual(["build", "review"]);
+		expect(() => applyWorkflowGraphPatch(definition, patch, { actor: "agent" })).toThrow(
+			"workflow graph patch apply requires supervisor or human approval",
+		);
+	});
+
+	it("applies patches in authorized contexts and reports graph and model impact", () => {
+		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
+
+		const result = applyWorkflowGraphPatch(definition, patchOperations(), {
+			actor: "supervisor",
+			reason: "add finish branch",
+		});
+
+		expect(result.definition.nodes.map(node => node.id)).toEqual(["build", "review", "finish"]);
+		expect(result.definition.edges.map(edge => [edge.from, edge.to, edge.condition?.source])).toEqual([
+			["build", "review", "state.ready == true"],
+			["review", "finish", 'state.verdict == "finish"'],
+		]);
+		expect(result.definition.nodes.find(node => node.id === "review")?.model).toEqual({
+			selector: "provider/reviewer-v2:high",
+		});
+		expect(result.definition.nodes.find(node => node.id === "review")?.reads).toEqual(["/draft"]);
+		expect(result.definition.nodes.find(node => node.id === "review")?.writes).toEqual(["/verdict", "/score"]);
+		expect(result.preview.modelChanges).toEqual([
+			{
+				nodeId: "review",
+				before: { role: "reviewer" },
+				after: { selector: "provider/reviewer-v2:high" },
+			},
+		]);
+		expect(result.preview.permissionChanges).toEqual([
+			{
+				nodeId: "review",
+				before: { writes: ["/verdict"] },
+				after: { reads: ["/draft"], writes: ["/verdict", "/score"] },
+			},
+		]);
+	});
+
+	it("validates patch references, model context, and edge conditions", () => {
+		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
+
+		expect(() =>
+			applyWorkflowGraphPatch(definition, [{ op: "add_edge", edge: { from: "review", to: "missing" } }], {
+				actor: "supervisor",
+			}),
+		).toThrow(WorkflowGraphPatchError);
+		expect(() =>
+			applyWorkflowGraphPatch(
+				definition,
+				[{ op: "replace_edge_condition", from: "build", to: "review", condition: "state.ready = true" }],
+				{ actor: "supervisor" },
+			),
+		).toThrow('workflow graph patch condition is invalid: unexpected token "="');
+		expect(() =>
+			applyWorkflowGraphPatch(
+				definition,
+				[{ op: "replace_node_model", nodeId: "missing", model: { selector: "provider/model:high" } }],
+				{ actor: "supervisor" },
+			),
+		).toThrow('workflow graph patch references unknown node "missing"');
+		expect(() =>
+			applyWorkflowGraphPatch(
+				definition,
+				[
+					{
+						op: "replace_node_model",
+						nodeId: "review",
+						model: { role: "reviewer", selector: "provider/model:high" },
+					},
+				],
+				{ actor: "supervisor" },
+			),
+		).toThrow("workflow graph patch model context must define exactly one of role, selector, or candidates");
+	});
+
+	it("appends graph revisions to runs without mutating earlier graph snapshots", () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
+		const run = startWorkflowRun(host, definition, { runId: "run-1" });
+
+		const result = applyWorkflowGraphPatchToRun(host, run, patchOperations(), {
+			actor: "human",
+			graphRevisionId: "run-1:graph-1",
+			reason: "approved finish branch",
+		});
+
+		expect(result.revision.id).toBe("run-1:graph-1");
+		const reconstructed = reconstructWorkflowRuns(host.getBranch());
+		expect(reconstructed[0]?.graphRevisions.map(revision => revision.id)).toEqual(["run-1:graph-0", "run-1:graph-1"]);
+		expect(reconstructed[0]?.graphRevisions[0]?.definition.nodes.map(node => node.id)).toEqual(["build", "review"]);
+		expect(reconstructed[0]?.graphRevisions[1]?.definition.nodes.map(node => node.id)).toEqual([
+			"build",
+			"review",
+			"finish",
+		]);
+	});
+});
