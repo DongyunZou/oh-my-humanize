@@ -35,6 +35,7 @@ export interface WorkflowNode {
 	prompt?: string;
 	gates?: string[];
 	writes?: string[];
+	waitFor?: string[];
 }
 
 export interface WorkflowDefinition {
@@ -110,7 +111,8 @@ function parseNodes(value: unknown, sourcePath?: string): WorkflowNode[] {
 		const prompt = parseOptionalString(node.prompt, `${path}.prompt`, sourcePath);
 		const gates = parseOptionalStringList(node.gates, `${path}.gates`, sourcePath);
 		const writes = parseOptionalStringList(node.writes, `${path}.writes`, sourcePath);
-		return compactNode({ id, type, agent, model, prompt, gates, writes });
+		const waitFor = parseOptionalStringList(node.waitFor, `${path}.waitFor`, sourcePath);
+		return compactNode({ id, type, agent, model, prompt, gates, writes, waitFor });
 	});
 }
 
@@ -212,6 +214,7 @@ function compactNode(node: WorkflowNode): WorkflowNode {
 	if (node.prompt !== undefined) result.prompt = node.prompt;
 	if (node.gates !== undefined) result.gates = node.gates;
 	if (node.writes !== undefined) result.writes = node.writes;
+	if (node.waitFor !== undefined) result.waitFor = node.waitFor;
 	return result;
 }
 
