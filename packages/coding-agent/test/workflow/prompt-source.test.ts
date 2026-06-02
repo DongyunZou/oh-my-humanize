@@ -158,6 +158,62 @@ edges:
 		);
 	});
 
+	it("fails before running a downstream node when an output prompt exceeds read scopes", async () => {
+		const definition = parseWorkflowDefinition(
+			`
+name: scoped-agent-produced-prompt-demo
+version: 1
+nodes:
+  planner:
+    type: agent
+    agent: planner
+  build:
+    type: agent
+    agent: task
+    reads:
+      - /summary
+    prompt:
+      output:
+        node: planner
+        path: /data/nextPrompt
+        activation: latest-completed
+edges:
+  - from: planner
+    to: build
+`,
+			{ sourcePath: "workflow.yml" },
+		);
+		const host = createHost();
+		let buildRan = false;
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async input => {
+				if (input.node.id === "planner") {
+					return {
+						summary: "planned",
+						data: { nextPrompt: "Build the scoped prompt." },
+					};
+				}
+				buildRan = true;
+				return { summary: "built" };
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			startNodeId: "planner",
+			runtimeHost,
+		});
+
+		expect(buildRan).toBe(false);
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["planner", "completed"],
+			["build", "failed"],
+		]);
+		expect(result.scheduler.activations[1]?.error).toBe('workflow state read from "/data/nextPrompt" is not allowed');
+	});
+
 	it("resolves package-local prompt files before agent execution", async () => {
 		const dir = await createTempDir();
 		await Bun.write(path.join(dir, "prompts", "build.md"), "Implement the package workflow.\n");

@@ -84,7 +84,9 @@ function readOutputPromptValue(
 			`workflow prompt source for node "${node.id}" references activation "${activation.id}" without output`,
 		);
 	}
-	return readPointer(activation.output as Record<string, unknown>, source.path);
+	return readWorkflowState(activation.output as Record<string, unknown>, source.path, {
+		allowedReadPaths: node.reads,
+	});
 }
 
 function selectOutputPromptActivation(
@@ -182,27 +184,4 @@ function contentHash(value: string): string {
 	const hasher = new Bun.CryptoHasher("sha256");
 	hasher.update(value);
 	return `sha256:${hasher.digest("hex")}`;
-}
-
-function readPointer(root: Record<string, unknown>, pointer: string): unknown {
-	let current: unknown = root;
-	for (const segment of parseJsonPointer(pointer)) {
-		if (!isRecord(current)) return undefined;
-		current = current[segment];
-	}
-	return current;
-}
-
-function parseJsonPointer(pointer: string): string[] {
-	if (!pointer.startsWith("/")) {
-		throw new WorkflowPromptSourceError(`workflow prompt source path must be a JSON pointer: ${pointer}`);
-	}
-	return pointer
-		.slice(1)
-		.split("/")
-		.map(segment => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
