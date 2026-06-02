@@ -52,6 +52,7 @@ function activation(nodeId: string): WorkflowActivation {
 	return {
 		id: `activation-${nodeId}`,
 		nodeId,
+		graphRevisionId: "test-graph",
 		status: "running",
 		parentActivationIds: [],
 	};

@@ -198,6 +198,14 @@ export function proposeWorkflowGraphPatchToRun(
 		preview: proposal.preview,
 		reason: context.reason,
 	});
+	run.graphPatchProposals.push({
+		id: proposal.id,
+		status: "proposed",
+		actor: context.actor,
+		patch,
+		preview: proposal.preview,
+		reason: context.reason,
+	});
 	return proposal;
 }
 
@@ -231,6 +239,18 @@ export function applyWorkflowGraphPatchToRun(
 		preview: result.preview,
 		graphRevisionId: revision.id,
 		parentGraphRevisionId: run.currentGraphRevisionId,
+		reason: context.reason,
+	});
+	run.currentGraphRevisionId = revision.id;
+	run.definition = result.definition;
+	run.graphRevisions.push(revision);
+	run.appliedGraphPatches.push({
+		proposalId: context.proposalId,
+		actor: context.actor,
+		patch,
+		preview: result.preview,
+		graphRevisionId: revision.id,
+		parentGraphRevisionId: revision.parentId,
 		reason: context.reason,
 	});
 	return { ...result, revision };

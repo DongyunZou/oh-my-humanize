@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
+import { applyWorkflowGraphPatchToRun } from "../../src/workflow/patches";
+import { startWorkflowRun, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
 import { runWorkflowScheduler } from "../../src/workflow/scheduler";
 
 const linearWorkflow = `
@@ -97,6 +99,37 @@ edges:
   - from: right
     to: join
 `;
+
+const mutableWorkflow = `
+name: mutable-demo
+version: 1
+nodes:
+  start:
+    type: script
+  mutate:
+    type: script
+edges:
+  - from: start
+    to: mutate
+`;
+
+interface CapturedEntry {
+	type: "custom";
+	customType: string;
+	data?: unknown;
+}
+
+function createHost(): WorkflowRunStoreHost & { entries: CapturedEntry[] } {
+	const entries: CapturedEntry[] = [];
+	return {
+		entries,
+		appendCustomEntry: (customType, data) => {
+			entries.push({ type: "custom", customType, data });
+			return `entry-${entries.length}`;
+		},
+		getBranch: () => entries,
+	};
+}
 
 describe("workflow activation scheduler", () => {
 	it("runs a linear graph in edge order", async () => {
@@ -239,5 +272,42 @@ describe("workflow activation scheduler", () => {
 			throw new Error("expected join, left, and right activations");
 		}
 		expect(join.parentActivationIds).toEqual([left.id, right.id]);
+	});
+
+	it("uses the latest graph revision for future activations after an active-run graph patch", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(mutableWorkflow, { sourcePath: "workflow.yml" });
+		const run = startWorkflowRun(host, definition, { runId: "run-1" });
+
+		const result = await runWorkflowScheduler(run.definition, {
+			startNodeId: "start",
+			getCurrentDefinition: () => run.definition,
+			getCurrentGraphRevisionId: () => run.currentGraphRevisionId,
+			executeNode: async activation => {
+				if (activation.nodeId === "mutate") {
+					applyWorkflowGraphPatchToRun(
+						host,
+						run,
+						[
+							{ op: "add_node", node: { id: "finish", type: "script" } },
+							{ op: "add_edge", edge: { from: "mutate", to: "finish" } },
+						],
+						{
+							actor: "supervisor",
+							graphRevisionId: "run-1:graph-1",
+							reason: "add finish node",
+						},
+					);
+				}
+				return { summary: `ran ${activation.nodeId}` };
+			},
+		});
+
+		expect(result.activations.map(activation => activation.nodeId)).toEqual(["start", "mutate", "finish"]);
+		expect(result.activations.map(activation => activation.graphRevisionId)).toEqual([
+			"run-1:graph-0",
+			"run-1:graph-0",
+			"run-1:graph-1",
+		]);
 	});
 });

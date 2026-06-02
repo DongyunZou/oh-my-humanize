@@ -70,6 +70,8 @@ export async function runWorkflow(options: WorkflowRunnerOptions): Promise<Workf
 		startNodeId: options.startNodeId,
 		maxActivations: options.maxActivations,
 		maxNodeActivations: options.maxNodeActivations,
+		getCurrentDefinition: () => run.definition,
+		getCurrentGraphRevisionId: () => run.currentGraphRevisionId,
 		executeNode: async (activation, node, context) =>
 			executeAndPersistActivation(options, run, activation, node, context),
 	});
@@ -90,7 +92,7 @@ async function executeAndPersistActivation(
 		appendWorkflowActivationStarted(options.host, run.id, {
 			activationId: activation.id,
 			nodeId: node.id,
-			graphRevisionId: run.currentGraphRevisionId,
+			graphRevisionId: activation.graphRevisionId,
 			parentActivationIds: activation.parentActivationIds,
 			input,
 		});
@@ -123,7 +125,7 @@ async function executeAndPersistActivation(
 			appendWorkflowActivationStarted(options.host, run.id, {
 				activationId: activation.id,
 				nodeId: node.id,
-				graphRevisionId: run.currentGraphRevisionId,
+				graphRevisionId: activation.graphRevisionId,
 				parentActivationIds: activation.parentActivationIds,
 			});
 		}
