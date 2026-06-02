@@ -5,6 +5,11 @@ import type { WorkflowDefinition, WorkflowNode } from "./definition";
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "./model-resolution";
 import { executeWorkflowNode, type WorkflowNodeRuntimeHost } from "./node-runtime";
 import {
+	resolveWorkflowPrompt,
+	type WorkflowActivationInputSnapshot,
+	type WorkflowResolvedPrompt,
+} from "./prompt-source";
+import {
 	appendWorkflowActivationCompleted,
 	appendWorkflowActivationFailed,
 	appendWorkflowActivationStarted,
@@ -13,7 +18,12 @@ import {
 	type WorkflowRunSnapshot,
 	type WorkflowRunStoreHost,
 } from "./run-store";
-import { runWorkflowScheduler, type WorkflowActivation, type WorkflowSchedulerResult } from "./scheduler";
+import {
+	runWorkflowScheduler,
+	type WorkflowActivation,
+	type WorkflowSchedulerExecutionContext,
+	type WorkflowSchedulerResult,
+} from "./scheduler";
 import { validateWorkflowActivationOutput, type WorkflowActivationOutput } from "./state";
 
 export interface WorkflowRunnerModelResolutionOptions {
@@ -35,6 +45,8 @@ export interface WorkflowRunnerOptions {
 	modelResolution?: WorkflowRunnerModelResolutionOptions;
 	maxActivations?: number;
 	maxNodeActivations?: number;
+	packageRoot?: string;
+	maxPromptBytes?: number;
 }
 
 export interface WorkflowRunnerResult {
@@ -58,7 +70,8 @@ export async function runWorkflow(options: WorkflowRunnerOptions): Promise<Workf
 		startNodeId: options.startNodeId,
 		maxActivations: options.maxActivations,
 		maxNodeActivations: options.maxNodeActivations,
-		executeNode: async (activation, node) => executeAndPersistActivation(options, run, activation, node),
+		executeNode: async (activation, node, context) =>
+			executeAndPersistActivation(options, run, activation, node, context),
 	});
 	return { run, scheduler };
 }
@@ -68,20 +81,27 @@ async function executeAndPersistActivation(
 	run: WorkflowRunSnapshot,
 	activation: WorkflowActivation,
 	node: WorkflowNode,
+	context: WorkflowSchedulerExecutionContext,
 ): Promise<WorkflowActivationOutput> {
-	appendWorkflowActivationStarted(options.host, run.id, {
-		activationId: activation.id,
-		nodeId: node.id,
-		graphRevisionId: run.currentGraphRevisionId,
-		parentActivationIds: activation.parentActivationIds,
-	});
-	const modelAudit = resolveModelAudit(options, node);
+	let started = false;
 	try {
+		const resolvedPrompt = await resolvePromptForActivation(options, activation, node, context);
+		const input = inputSnapshotFromPrompt(resolvedPrompt);
+		appendWorkflowActivationStarted(options.host, run.id, {
+			activationId: activation.id,
+			nodeId: node.id,
+			graphRevisionId: run.currentGraphRevisionId,
+			parentActivationIds: activation.parentActivationIds,
+			input,
+		});
+		started = true;
+		const nodeForExecution = resolvedPrompt ? { ...node, prompt: resolvedPrompt.value } : node;
+		const modelAudit = resolveModelAudit(options, node);
 		if (modelAudit?.error && nodeRequiresModel(node)) {
 			throw new WorkflowRunnerError(modelAudit.error);
 		}
 		const output = validateWorkflowActivationOutput(
-			await executeWorkflowNode(node, activation, options.runtimeHost),
+			await executeWorkflowNode(nodeForExecution, activation, options.runtimeHost),
 			{
 				allowedWritePaths: node.writes,
 			},
@@ -99,12 +119,42 @@ async function executeAndPersistActivation(
 		});
 		return output;
 	} catch (error) {
+		if (!started) {
+			appendWorkflowActivationStarted(options.host, run.id, {
+				activationId: activation.id,
+				nodeId: node.id,
+				graphRevisionId: run.currentGraphRevisionId,
+				parentActivationIds: activation.parentActivationIds,
+			});
+		}
 		appendWorkflowActivationFailed(options.host, run.id, {
 			activationId: activation.id,
 			error: error instanceof Error ? error.message : String(error),
 		});
 		throw error;
 	}
+}
+
+async function resolvePromptForActivation(
+	options: WorkflowRunnerOptions,
+	activation: WorkflowActivation,
+	node: WorkflowNode,
+	context: WorkflowSchedulerExecutionContext,
+): Promise<WorkflowResolvedPrompt | undefined> {
+	if (!nodeConsumesPrompt(node)) return undefined;
+	return resolveWorkflowPrompt(node, {
+		state: context.state,
+		completedActivations: context.completedActivations,
+		parentActivationIds: activation.parentActivationIds,
+		packageRoot: options.packageRoot,
+		maxPromptBytes: options.maxPromptBytes,
+	});
+}
+
+function inputSnapshotFromPrompt(
+	resolvedPrompt: WorkflowResolvedPrompt | undefined,
+): WorkflowActivationInputSnapshot | undefined {
+	return resolvedPrompt ? { prompt: resolvedPrompt } : undefined;
 }
 
 function resolveModelAudit(
@@ -133,4 +183,8 @@ function resolveAgentModelPattern(
 
 function nodeRequiresModel(node: WorkflowNode): boolean {
 	return node.type === "agent" || node.type === "review" || node.model !== undefined;
+}
+
+function nodeConsumesPrompt(node: WorkflowNode): boolean {
+	return node.type === "agent" || node.type === "review" || node.type === "human";
 }

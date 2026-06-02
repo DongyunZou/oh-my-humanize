@@ -27,12 +27,49 @@ export interface WorkflowEdge {
 	condition?: WorkflowCondition;
 }
 
+export type WorkflowPromptActivationSelector = "parent" | "latest-completed";
+
+export type WorkflowPromptSource =
+	| WorkflowInlinePromptSource
+	| WorkflowFilePromptSource
+	| WorkflowStatePromptSource
+	| WorkflowOutputPromptSource
+	| WorkflowHumanPromptSource;
+
+export interface WorkflowInlinePromptSource {
+	kind: "inline";
+	text: string;
+}
+
+export interface WorkflowFilePromptSource {
+	kind: "file";
+	path: string;
+}
+
+export interface WorkflowStatePromptSource {
+	kind: "state";
+	path: string;
+}
+
+export interface WorkflowOutputPromptSource {
+	kind: "output";
+	node: string;
+	path: string;
+	activation: WorkflowPromptActivationSelector;
+}
+
+export interface WorkflowHumanPromptSource {
+	kind: "human";
+	path: string;
+}
+
 export interface WorkflowNode {
 	id: string;
 	type: WorkflowNodeType;
 	agent?: string;
 	model?: WorkflowModelContext;
 	prompt?: string;
+	promptSource?: WorkflowPromptSource;
 	gates?: string[];
 	reads?: string[];
 	writes?: string[];
@@ -74,6 +111,7 @@ export function parseWorkflowDefinition(
 	const nodes = parseNodes(root.nodes, options.sourcePath);
 	const edges = parseEdges(root.edges, options.sourcePath);
 	validateEdgeReferences(nodes, edges, options.sourcePath);
+	validatePromptSourceReferences(nodes, options.sourcePath);
 	return { name, version, sourcePath: options.sourcePath, models, nodes, edges };
 }
 
@@ -109,12 +147,12 @@ function parseNodes(value: unknown, sourcePath?: string): WorkflowNode[] {
 		const type = parseNodeType(node.type, `${path}.type`, sourcePath);
 		const agent = parseOptionalString(node.agent, `${path}.agent`, sourcePath);
 		const model = parseModelContext(node.model, `${path}.model`, sourcePath);
-		const prompt = parseOptionalString(node.prompt, `${path}.prompt`, sourcePath);
+		const prompt = parsePromptSource(node.prompt, `${path}.prompt`, sourcePath);
 		const gates = parseOptionalStringList(node.gates, `${path}.gates`, sourcePath);
 		const reads = parseOptionalStringList(node.reads, `${path}.reads`, sourcePath);
 		const writes = parseOptionalStringList(node.writes, `${path}.writes`, sourcePath);
 		const waitFor = parseOptionalStringList(node.waitFor, `${path}.waitFor`, sourcePath);
-		return compactNode({ id, type, agent, model, prompt, gates, reads, writes, waitFor });
+		return compactNode({ id, type, agent, model, ...prompt, gates, reads, writes, waitFor });
 	});
 }
 
@@ -174,6 +212,64 @@ function validateEdgeReferences(nodes: WorkflowNode[], edges: WorkflowEdge[], so
 	}
 }
 
+function validatePromptSourceReferences(nodes: WorkflowNode[], sourcePath?: string): void {
+	const nodeIds = new Set(nodes.map(node => node.id));
+	for (const node of nodes) {
+		const source = node.promptSource;
+		if (source?.kind === "output" && !nodeIds.has(source.node)) {
+			throw new WorkflowDefinitionError(
+				`node "${node.id}" prompt references unknown output node "${source.node}"`,
+				sourcePath,
+			);
+		}
+	}
+}
+
+function parsePromptSource(
+	value: unknown,
+	path: string,
+	sourcePath?: string,
+): { prompt?: string; promptSource?: WorkflowPromptSource } {
+	if (value === undefined) return {};
+	if (typeof value === "string") {
+		const prompt = expectString(value, path, sourcePath);
+		return {
+			prompt,
+			promptSource: prompt.startsWith("./") ? { kind: "file", path: prompt } : { kind: "inline", text: prompt },
+		};
+	}
+	const raw = expectRecord(value, path, sourcePath);
+	const sourceKeys = ["inline", "file", "state", "output", "human"].filter(key => raw[key] !== undefined);
+	if (sourceKeys.length !== 1) {
+		throw new WorkflowDefinitionError(
+			`${path} must define exactly one of inline, file, state, output, or human`,
+			sourcePath,
+		);
+	}
+	const sourceKey = sourceKeys[0];
+	if (sourceKey === "inline") {
+		const text = expectString(raw.inline, `${path}.inline`, sourcePath);
+		return { prompt: text, promptSource: { kind: "inline", text } };
+	}
+	if (sourceKey === "file") {
+		const filePath = expectString(raw.file, `${path}.file`, sourcePath);
+		return { prompt: filePath, promptSource: { kind: "file", path: filePath } };
+	}
+	if (sourceKey === "state") {
+		const statePath = expectJsonPointer(raw.state, `${path}.state`, sourcePath);
+		return { promptSource: { kind: "state", path: statePath } };
+	}
+	if (sourceKey === "human") {
+		const humanPath = expectJsonPointer(raw.human, `${path}.human`, sourcePath);
+		return { promptSource: { kind: "human", path: humanPath } };
+	}
+	const output = expectRecord(raw.output, `${path}.output`, sourcePath);
+	const node = expectString(output.node, `${path}.output.node`, sourcePath);
+	const outputPath = expectJsonPointer(output.path, `${path}.output.path`, sourcePath);
+	const activation = parsePromptActivationSelector(output.activation, `${path}.output.activation`, sourcePath);
+	return { promptSource: { kind: "output", node, path: outputPath, activation } };
+}
+
 function parseModelContext(value: unknown, path: string, sourcePath?: string): WorkflowModelContext | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value === "string") return { selector: value };
@@ -209,11 +305,21 @@ function parseNodeType(value: unknown, path: string, sourcePath?: string): Workf
 	throw new WorkflowDefinitionError(`${path} must be agent, script, human, or review`, sourcePath);
 }
 
+function parsePromptActivationSelector(
+	value: unknown,
+	path: string,
+	sourcePath?: string,
+): WorkflowPromptActivationSelector {
+	if (value === "parent" || value === "latest-completed") return value;
+	throw new WorkflowDefinitionError(`${path} must be parent or latest-completed`, sourcePath);
+}
+
 function compactNode(node: WorkflowNode): WorkflowNode {
 	const result: WorkflowNode = { id: node.id, type: node.type };
 	if (node.agent !== undefined) result.agent = node.agent;
 	if (node.model !== undefined) result.model = node.model;
 	if (node.prompt !== undefined) result.prompt = node.prompt;
+	if (node.promptSource !== undefined) result.promptSource = node.promptSource;
 	if (node.gates !== undefined) result.gates = node.gates;
 	if (node.reads !== undefined) result.reads = node.reads;
 	if (node.writes !== undefined) result.writes = node.writes;
@@ -242,6 +348,12 @@ function parseOptionalStringList(value: unknown, path: string, sourcePath?: stri
 function parseOptionalString(value: unknown, path: string, sourcePath?: string): string | undefined {
 	if (value === undefined) return undefined;
 	return expectString(value, path, sourcePath);
+}
+
+function expectJsonPointer(value: unknown, path: string, sourcePath?: string): string {
+	const pointer = expectString(value, path, sourcePath);
+	if (pointer.startsWith("/")) return pointer;
+	throw new WorkflowDefinitionError(`${path} must be a JSON pointer`, sourcePath);
 }
 
 function expectString(value: unknown, path: string, sourcePath?: string): string {

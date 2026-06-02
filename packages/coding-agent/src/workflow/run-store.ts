@@ -1,6 +1,7 @@
 import type { CustomEntry, SessionEntry } from "../session/session-manager";
 import type { WorkflowDefinition } from "./definition";
 import type { WorkflowModelResolutionAudit } from "./model-resolution";
+import type { WorkflowActivationInputSnapshot } from "./prompt-source";
 import type { WorkflowActivationOutput } from "./state";
 import { applyWorkflowStatePatch, type WorkflowStatePatchOperation } from "./state";
 
@@ -48,6 +49,7 @@ export interface AppendWorkflowActivationStartedOptions {
 	nodeId: string;
 	graphRevisionId: string;
 	parentActivationIds: string[];
+	input?: WorkflowActivationInputSnapshot;
 }
 
 export interface AppendWorkflowActivationCompletedOptions {
@@ -69,6 +71,7 @@ export interface WorkflowActivationRecord {
 	graphRevisionId: string;
 	parentActivationIds: string[];
 	status: WorkflowActivationRecordStatus;
+	input?: WorkflowActivationInputSnapshot;
 	output?: WorkflowActivationOutput;
 	modelAudit?: WorkflowModelResolutionAudit;
 	error?: string;
@@ -112,6 +115,7 @@ export interface WorkflowActivationStartedEvent {
 	nodeId: string;
 	graphRevisionId: string;
 	parentActivationIds: string[];
+	input?: WorkflowActivationInputSnapshot;
 }
 
 export interface WorkflowActivationCompletedEvent {
@@ -202,6 +206,7 @@ export function appendWorkflowActivationStarted(
 		graphRevisionId: options.graphRevisionId,
 		parentActivationIds: options.parentActivationIds,
 	};
+	if (options.input !== undefined) event.input = options.input;
 	host.appendCustomEntry(WORKFLOW_RUN_EVENT_TYPE, event);
 }
 
@@ -259,13 +264,15 @@ export function reconstructWorkflowRuns(
 			continue;
 		}
 		if (event.event === "activation_started") {
-			run.activations.push({
+			const activation: WorkflowActivationRecord = {
 				id: event.activationId,
 				nodeId: event.nodeId,
 				graphRevisionId: event.graphRevisionId,
 				parentActivationIds: event.parentActivationIds,
 				status: "running",
-			});
+			};
+			if (event.input !== undefined) activation.input = event.input;
+			run.activations.push(activation);
 			continue;
 		}
 		if (event.event === "activation_completed") {

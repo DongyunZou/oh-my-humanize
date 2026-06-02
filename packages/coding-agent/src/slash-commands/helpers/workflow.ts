@@ -59,6 +59,7 @@ async function handleStartCommand(rest: string, runtime: SlashCommandRuntime): P
 		runId,
 		startNodeId,
 		runtimeHost: await runtime.createWorkflowRuntimeHost(),
+		packageRoot: pkg.rootPath,
 	});
 	const run = reconstructWorkflowRuns(runtime.sessionManager.getBranch()).find(candidate => candidate.id === runId);
 	if (!run) {

@@ -18,7 +18,16 @@ export interface WorkflowSchedulerOptions {
 	initialState?: Record<string, unknown>;
 	maxActivations?: number;
 	maxNodeActivations?: number;
-	executeNode: (activation: WorkflowActivation, node: WorkflowNode) => Promise<WorkflowActivationOutput>;
+	executeNode: (
+		activation: WorkflowActivation,
+		node: WorkflowNode,
+		context: WorkflowSchedulerExecutionContext,
+	) => Promise<WorkflowActivationOutput>;
+}
+
+export interface WorkflowSchedulerExecutionContext {
+	state: Record<string, unknown>;
+	completedActivations: WorkflowActivation[];
 }
 
 export interface WorkflowSchedulerResult {
@@ -70,7 +79,11 @@ export async function runWorkflowScheduler(
 		activation.status = "running";
 		activations.push(activation);
 		try {
-			activation.output = validateWorkflowActivationOutput(await options.executeNode(activation, node), {
+			const context: WorkflowSchedulerExecutionContext = {
+				state,
+				completedActivations: activations.filter(candidate => candidate.status === "completed"),
+			};
+			activation.output = validateWorkflowActivationOutput(await options.executeNode(activation, node, context), {
 				allowedWritePaths: node.writes,
 			});
 			if (activation.output.statePatch) {
