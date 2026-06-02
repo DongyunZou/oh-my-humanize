@@ -4,7 +4,7 @@ import type { WorkflowAgentTaskResult, WorkflowAgentTaskRunner } from "./session
 
 export function createTaskToolAgentRunner(toolSession: ToolSession): WorkflowAgentTaskRunner {
 	return async request => {
-		const taskTool = await TaskTool.create(toolSession);
+		const taskTool = await TaskTool.create(await synchronousTaskToolSession(toolSession));
 		const params: TaskParams = {
 			agent: request.agent,
 			tasks: [request.task],
@@ -30,6 +30,13 @@ export function createTaskToolAgentRunner(toolSession: ToolSession): WorkflowAge
 		if (taskResult.outputPath !== undefined) output.outputPath = taskResult.outputPath;
 		return output;
 	};
+}
+
+async function synchronousTaskToolSession(toolSession: ToolSession): Promise<ToolSession> {
+	if (!toolSession.settings.get("async.enabled")) return toolSession;
+	const settings = await toolSession.settings.cloneForCwd(toolSession.cwd);
+	settings.override("async.enabled", false);
+	return { ...toolSession, settings };
 }
 
 function textContent(content: Array<{ type: string; text?: string }>): string {

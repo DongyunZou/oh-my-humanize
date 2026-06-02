@@ -11,13 +11,13 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-function createToolSession(): ToolSession {
+function createToolSession(settings: Settings = Settings.isolated()): ToolSession {
 	return {
 		cwd: process.cwd(),
 		hasUI: false,
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
-		settings: Settings.isolated(),
+		settings,
 	};
 }
 
@@ -68,7 +68,7 @@ describe("workflow task tool runtime adapter", () => {
 				};
 			},
 		};
-		vi.spyOn(taskModule.TaskTool, "create").mockResolvedValue(taskTool as taskModule.TaskTool);
+		vi.spyOn(taskModule.TaskTool, "create").mockResolvedValue(taskTool as unknown as taskModule.TaskTool);
 		const runner = createTaskToolAgentRunner(createToolSession());
 
 		const result = await runner(createRequest());
@@ -90,5 +90,47 @@ describe("workflow task tool runtime adapter", () => {
 			stderr: "",
 			outputPath: "/tmp/agent-output.md",
 		});
+	});
+
+	it("keeps workflow task execution synchronous when parent async tasks are enabled", async () => {
+		const parentSettings = Settings.isolated({ "async.enabled": true });
+		let capturedSession: ToolSession | undefined;
+		const taskTool = {
+			execute: async (): Promise<AgentToolResult<TaskToolDetails>> => ({
+				content: [{ type: "text", text: "task tool completed" }],
+				details: {
+					projectAgentsDir: null,
+					totalDurationMs: 12,
+					results: [
+						{
+							index: 0,
+							id: "build",
+							agent: "task",
+							agentSource: "project",
+							task: "Implement the workflow feature.",
+							assignment: "Implement the workflow feature.",
+							description: "build",
+							exitCode: 0,
+							output: "agent completed",
+							stderr: "",
+							truncated: false,
+							durationMs: 12,
+							tokens: 0,
+						},
+					],
+				},
+			}),
+		};
+		vi.spyOn(taskModule.TaskTool, "create").mockImplementation(async session => {
+			capturedSession = session;
+			return taskTool as unknown as taskModule.TaskTool;
+		});
+		const runner = createTaskToolAgentRunner(createToolSession(parentSettings));
+
+		const result = await runner(createRequest());
+
+		expect(result.exitCode).toBe(0);
+		expect(capturedSession?.settings.get("async.enabled")).toBe(false);
+		expect(parentSettings.get("async.enabled")).toBe(true);
 	});
 });
