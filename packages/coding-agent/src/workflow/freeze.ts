@@ -1,0 +1,277 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type { WorkflowDefinition, WorkflowNode } from "./definition";
+import type { WorkflowArtifact } from "./package-loader";
+
+export interface FlowFreeze {
+	id: string;
+	schemaVersion: string;
+	flowPath: string;
+	resourceDir: string;
+	mainContentHash: string;
+	resourceHashes: FlowFreezeResourceHash[];
+	resourceSnapshots: FlowFreezeResourceSnapshot[];
+	canonicalGraphHash: string;
+	sourceMapping: WorkflowArtifact["sourceMapping"];
+	staticCheckReport: WorkflowStaticCheckReport;
+	portableDefaults: WorkflowPortableDefaults;
+	definition: WorkflowDefinition;
+}
+
+export interface FlowFreezeResourceHash {
+	path: string;
+	hash: string;
+}
+
+export interface FlowFreezeResourceSnapshot {
+	path: string;
+	hash: string;
+	text: string;
+	byteLength: number;
+}
+
+export interface WorkflowStaticCheckReport {
+	status: "passed";
+	checks: WorkflowStaticCheck[];
+}
+
+export interface WorkflowStaticCheck {
+	name: string;
+	status: "passed";
+}
+
+export interface WorkflowPortableDefaults {
+	models: WorkflowDefinition["models"];
+}
+
+export class WorkflowFreezeError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "WorkflowFreezeError";
+	}
+}
+
+export async function freezeWorkflowArtifact(artifact: WorkflowArtifact): Promise<FlowFreeze> {
+	await ensureResourceDirectory(artifact.resourceDir);
+	validateFreezeMetadata(artifact);
+	const resourceReferences = collectResourceReferences(artifact.definition);
+	await validateReferencedResources(artifact.resourceDir, resourceReferences);
+	const resourceHashes = await hashResourceDirectory(artifact.resourceDir);
+	const resourceSnapshots = await snapshotReferencedResources(artifact.resourceDir, resourceReferences);
+	const canonicalGraphHash = contentHash(stableStringify(canonicalGraph(artifact.definition)));
+	const mainContentHash = contentHash(artifact.source);
+	const schemaVersion = artifact.metadata.schema;
+	const id = `flowfreeze:${contentHash(
+		stableStringify({
+			schemaVersion,
+			mainContentHash,
+			resourceHashes,
+			resourceSnapshots,
+			canonicalGraphHash,
+		}),
+	).slice("sha256:".length)}`;
+	return {
+		id,
+		schemaVersion,
+		flowPath: artifact.flowPath,
+		resourceDir: artifact.resourceDir,
+		mainContentHash,
+		resourceHashes,
+		resourceSnapshots,
+		canonicalGraphHash,
+		sourceMapping: artifact.sourceMapping,
+		staticCheckReport: {
+			status: "passed",
+			checks: [
+				{ name: "parse", status: "passed" },
+				{ name: "policy", status: "passed" },
+				{ name: "resources", status: "passed" },
+				{ name: "canonical-graph", status: "passed" },
+			],
+		},
+		portableDefaults: { models: artifact.definition.models },
+		definition: structuredClone(artifact.definition),
+	};
+}
+
+function validateFreezeMetadata(artifact: WorkflowArtifact): void {
+	if (artifact.metadata.schema !== "omhflow/v1") {
+		throw new WorkflowFreezeError(`unsupported .omhflow schema for production freeze: ${artifact.metadata.schema}`);
+	}
+	const checkpoint = expectRecord(
+		artifact.metadata.checkpoint,
+		".omhflow frontmatter must define checkpoint.stopDeadlineMs for production freeze",
+	);
+	if (typeof checkpoint.stopDeadlineMs !== "number" || !Number.isFinite(checkpoint.stopDeadlineMs)) {
+		throw new WorkflowFreezeError(".omhflow frontmatter must define checkpoint.stopDeadlineMs for production freeze");
+	}
+	const changePolicy = expectRecord(
+		artifact.metadata.changePolicy,
+		".omhflow frontmatter must define changePolicy for production freeze",
+	);
+	if (typeof changePolicy.agentsCanPropose !== "boolean") {
+		throw new WorkflowFreezeError(".omhflow frontmatter changePolicy.agentsCanPropose must be a boolean");
+	}
+	if (typeof changePolicy.humansCanApprove !== "boolean") {
+		throw new WorkflowFreezeError(".omhflow frontmatter changePolicy.humansCanApprove must be a boolean");
+	}
+	if (changePolicy.supervisorsCanApprove !== undefined && typeof changePolicy.supervisorsCanApprove !== "boolean") {
+		throw new WorkflowFreezeError(
+			".omhflow frontmatter changePolicy.supervisorsCanApprove must be a boolean when defined",
+		);
+	}
+}
+
+function expectRecord(value: unknown, message: string): Record<string, unknown> {
+	if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as Record<string, unknown>;
+	throw new WorkflowFreezeError(message);
+}
+
+async function ensureResourceDirectory(resourceDir: string): Promise<void> {
+	try {
+		const stat = await fs.stat(resourceDir);
+		if (stat.isDirectory()) return;
+		throw new WorkflowFreezeError(`workflow resource directory is not a directory: ${resourceDir}`);
+	} catch (error) {
+		if (error instanceof WorkflowFreezeError) throw error;
+		throw new WorkflowFreezeError(`workflow same-name resource directory is not readable: ${resourceDir}`);
+	}
+}
+
+async function validateReferencedResources(resourceDir: string, references: string[]): Promise<void> {
+	for (const reference of references) {
+		await resolveResourcePath(resourceDir, reference);
+	}
+}
+
+function collectResourceReferences(definition: WorkflowDefinition): string[] {
+	const references: string[] = [];
+	for (const node of definition.nodes) {
+		if (node.promptSource?.kind === "file") {
+			references.push(node.promptSource.path);
+		}
+		if (node.script?.file) {
+			references.push(node.script.file);
+		}
+	}
+	return references;
+}
+
+async function resolveResourcePath(resourceDir: string, resourcePath: string): Promise<string> {
+	if (path.isAbsolute(resourcePath)) {
+		throw new WorkflowFreezeError(
+			`workflow resource path "${resourcePath}" escapes the same-name resource directory`,
+		);
+	}
+	const root = path.resolve(resourceDir);
+	const resolved = path.resolve(root, resourcePath);
+	const relative = path.relative(root, resolved);
+	if (relative.startsWith("..") || path.isAbsolute(relative)) {
+		throw new WorkflowFreezeError(
+			`workflow resource path "${resourcePath}" escapes the same-name resource directory`,
+		);
+	}
+	try {
+		const stat = await fs.stat(resolved);
+		if (stat.isFile()) return resolved;
+	} catch {
+		throw new WorkflowFreezeError(
+			`workflow resource path "${resourcePath}" was not found in the same-name resource directory`,
+		);
+	}
+	throw new WorkflowFreezeError(
+		`workflow resource path "${resourcePath}" was not found in the same-name resource directory`,
+	);
+}
+
+async function snapshotReferencedResources(
+	resourceDir: string,
+	references: string[],
+): Promise<FlowFreezeResourceSnapshot[]> {
+	const root = path.resolve(resourceDir);
+	const snapshots: FlowFreezeResourceSnapshot[] = [];
+	const seen = new Set<string>();
+	for (const reference of references) {
+		const resolved = await resolveResourcePath(root, reference);
+		const relative = path.relative(root, resolved).split(path.sep).join("/");
+		if (seen.has(relative)) continue;
+		seen.add(relative);
+		const text = await Bun.file(resolved).text();
+		snapshots.push({
+			path: relative,
+			hash: contentHash(text),
+			text,
+			byteLength: new TextEncoder().encode(text).byteLength,
+		});
+	}
+	return snapshots.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function hashResourceDirectory(resourceDir: string): Promise<FlowFreezeResourceHash[]> {
+	const root = path.resolve(resourceDir);
+	const files = await listFiles(root);
+	const hashes: FlowFreezeResourceHash[] = [];
+	for (const filePath of files) {
+		const relative = path.relative(root, filePath).split(path.sep).join("/");
+		hashes.push({ path: relative, hash: await fileHash(filePath) });
+	}
+	return hashes.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function listFiles(dir: string): Promise<string[]> {
+	const entries = await fs.readdir(dir, { withFileTypes: true });
+	const files: string[] = [];
+	for (const entry of entries) {
+		const entryPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			files.push(...(await listFiles(entryPath)));
+			continue;
+		}
+		if (entry.isFile()) {
+			files.push(entryPath);
+		}
+	}
+	return files;
+}
+
+async function fileHash(filePath: string): Promise<string> {
+	return contentHash(await Bun.file(filePath).arrayBuffer());
+}
+
+function contentHash(value: string | ArrayBuffer): string {
+	const hasher = new Bun.CryptoHasher("sha256");
+	hasher.update(value);
+	return `sha256:${hasher.digest("hex")}`;
+}
+
+function canonicalGraph(definition: WorkflowDefinition): Record<string, unknown> {
+	return {
+		name: definition.name,
+		version: definition.version,
+		models: definition.models,
+		nodes: definition.nodes.map(canonicalNode).sort((left, right) => left.id.localeCompare(right.id)),
+		edges: [...definition.edges].sort((left, right) =>
+			`${left.from}\0${left.to}`.localeCompare(`${right.from}\0${right.to}`),
+		),
+	};
+}
+
+function canonicalNode(node: WorkflowNode): WorkflowNode {
+	return structuredClone(node);
+}
+
+function stableStringify(value: unknown): string {
+	if (value === null) return "null";
+	if (typeof value === "string") return JSON.stringify(value);
+	if (typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(entry => stableStringify(entry)).join(",")}]`;
+	if (typeof value === "object") {
+		const record = value as Record<string, unknown>;
+		const entries = Object.keys(record)
+			.sort()
+			.filter(key => record[key] !== undefined)
+			.map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+		return `{${entries.join(",")}}`;
+	}
+	return JSON.stringify(null);
+}

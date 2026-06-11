@@ -309,9 +309,6 @@ function parseScriptSource(value: unknown, path: string, sourcePath?: string): W
 	if (sourceCount !== 1) {
 		throw new WorkflowDefinitionError(`${path} must define exactly one of inline or file`, sourcePath);
 	}
-	if (file !== undefined && !file.startsWith("./")) {
-		throw new WorkflowDefinitionError(`${path}.file must be package-relative`, sourcePath);
-	}
 	const script: WorkflowScriptSource = {};
 	if (language !== undefined) script.language = language;
 	if (code !== undefined) script.code = code;

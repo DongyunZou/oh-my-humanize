@@ -20,8 +20,7 @@ export interface WorkflowSchedulerOptions {
 	maxActivations?: number;
 	maxNodeActivations?: number;
 	signal?: AbortSignal;
-	getCurrentDefinition?: () => WorkflowDefinition;
-	getCurrentGraphRevisionId?: () => string;
+	graphRevisionId?: string;
 	executeNode: (
 		activation: WorkflowActivation,
 		node: WorkflowNode,
@@ -45,8 +44,8 @@ export async function runWorkflowScheduler(
 	definition: WorkflowDefinition,
 	options: WorkflowSchedulerOptions,
 ): Promise<WorkflowSchedulerResult> {
-	const getCurrentDefinition = options.getCurrentDefinition ?? (() => definition);
-	const getCurrentGraphRevisionId = options.getCurrentGraphRevisionId ?? (() => "workflow-graph");
+	const graphRevisionId = options.graphRevisionId ?? "workflow-graph";
+	const nodesById = new Map(definition.nodes.map(node => [node.id, node]));
 	const state = options.initialState ?? {};
 	const activations: WorkflowActivation[] = [];
 	const completedByNode = new Map<string, WorkflowActivation[]>();
@@ -56,7 +55,7 @@ export async function runWorkflowScheduler(
 	const createNextActivation = (nodeId: string, parentActivationIds: string[]): WorkflowActivation => ({
 		id: `activation-${nextActivationId++}`,
 		nodeId,
-		graphRevisionId: getCurrentGraphRevisionId(),
+		graphRevisionId,
 		status: "queued",
 		parentActivationIds,
 	});
@@ -83,8 +82,6 @@ export async function runWorkflowScheduler(
 			limitReached = true;
 			break;
 		}
-		const definitionForActivation = getCurrentDefinition();
-		const nodesById = new Map(definitionForActivation.nodes.map(node => [node.id, node]));
 		const node = nodesById.get(activation.nodeId);
 		if (!node) {
 			activation.status = "failed";
@@ -120,13 +117,11 @@ export async function runWorkflowScheduler(
 			activation.error = error instanceof Error ? error.message : String(error);
 			continue;
 		}
-		const definitionForTransitions = getCurrentDefinition();
-		const transitionNodesById = new Map(definitionForTransitions.nodes.map(node => [node.id, node]));
-		for (const edge of definitionForTransitions.edges.filter(edge => edge.from === activation.nodeId)) {
+		for (const edge of definition.edges.filter(edge => edge.from === activation.nodeId)) {
 			if (edge.condition && !evaluateWorkflowCondition(edge.condition.source, { state, outputs: outputsByNode })) {
 				continue;
 			}
-			const target = transitionNodesById.get(edge.to);
+			const target = nodesById.get(edge.to);
 			if (target?.waitFor?.length) {
 				const parentActivationIds = collectJoinParentIds(target.waitFor, completedByNode);
 				if (!parentActivationIds) continue;

@@ -1,4 +1,12 @@
 import type { WorkflowNodeType } from "./definition";
+import type {
+	RuntimeBindingSnapshot,
+	WorkflowAttemptStatus,
+	WorkflowChangeRequestRecord,
+	WorkflowCheckpointSnapshot,
+	WorkflowRunAttemptSnapshot,
+	WorkflowRunFamilySnapshot,
+} from "./lifecycle";
 import type { WorkflowResolvedPrompt } from "./prompt-source";
 import type {
 	WorkflowActivationRecord,
@@ -17,6 +25,50 @@ export interface WorkflowInspection {
 	appliedGraphPatches: WorkflowInspectionGraphPatchApplication[];
 	activations: WorkflowInspectionActivation[];
 	modelAssignments: WorkflowInspectionModelAssignment[];
+}
+
+export interface WorkflowLifecycleInspection {
+	familyId: string;
+	objective?: string;
+	freezeIds: string[];
+	attempts: WorkflowLifecycleInspectionAttempt[];
+	checkpoints: WorkflowLifecycleInspectionCheckpoint[];
+	changeRequests: WorkflowLifecycleInspectionChangeRequest[];
+}
+
+export interface WorkflowLifecycleInspectionAttempt {
+	id: string;
+	freezeId: string;
+	startNodeId: string;
+	status: WorkflowAttemptStatus;
+	checkpointId?: string;
+	runtimeBindingSnapshot: RuntimeBindingSnapshot;
+	activationCounts: Record<string, number>;
+	summary?: string;
+	error?: string;
+}
+
+export interface WorkflowLifecycleInspectionCheckpoint {
+	id: string;
+	attemptId: string;
+	completedActivationCount: number;
+	abortedActivationCount: number;
+	frontierNodeIds: string[];
+	sourceMapping: Record<string, string>;
+}
+
+export interface WorkflowLifecycleInspectionChangeRequest {
+	id: string;
+	status: WorkflowChangeRequestRecord["status"];
+	actor: string;
+	origin: WorkflowChangeRequestRecord["origin"];
+	reason: string;
+	attemptId?: string;
+	checkpointId?: string;
+	operationCount: number;
+	frontierMapping: Record<string, string>;
+	approvedBy?: string;
+	rejectedBy?: string;
 }
 
 export interface WorkflowInspectionGraph {
@@ -159,6 +211,64 @@ export function buildWorkflowInspection(run: WorkflowRunSnapshot): WorkflowInspe
 			];
 		}),
 	};
+}
+
+export function buildWorkflowLifecycleInspection(family: WorkflowRunFamilySnapshot): WorkflowLifecycleInspection {
+	const inspection: WorkflowLifecycleInspection = {
+		familyId: family.id,
+		freezeIds: family.freezes.map(freeze => freeze.id),
+		attempts: family.attempts.map(compactLifecycleAttempt),
+		checkpoints: family.checkpoints.map(compactLifecycleCheckpoint),
+		changeRequests: family.changeRequests.map(compactLifecycleChangeRequest),
+	};
+	if (family.objective !== undefined) inspection.objective = family.objective;
+	return inspection;
+}
+
+function compactLifecycleAttempt(attempt: WorkflowRunAttemptSnapshot): WorkflowLifecycleInspectionAttempt {
+	const inspection: WorkflowLifecycleInspectionAttempt = {
+		id: attempt.id,
+		freezeId: attempt.freezeId,
+		startNodeId: attempt.startNodeId,
+		status: attempt.status,
+		runtimeBindingSnapshot: attempt.runtimeBindingSnapshot,
+		activationCounts: attempt.activations.reduce<Record<string, number>>((counts, activation) => {
+			counts[activation.status] = (counts[activation.status] ?? 0) + 1;
+			return counts;
+		}, {}),
+	};
+	if (attempt.checkpointId !== undefined) inspection.checkpointId = attempt.checkpointId;
+	if (attempt.summary !== undefined) inspection.summary = attempt.summary;
+	if (attempt.error !== undefined) inspection.error = attempt.error;
+	return inspection;
+}
+
+function compactLifecycleCheckpoint(checkpoint: WorkflowCheckpointSnapshot): WorkflowLifecycleInspectionCheckpoint {
+	return {
+		id: checkpoint.id,
+		attemptId: checkpoint.attemptId,
+		completedActivationCount: checkpoint.completedActivationIds.length,
+		abortedActivationCount: checkpoint.abortedActivationIds.length,
+		frontierNodeIds: checkpoint.frontierNodeIds,
+		sourceMapping: checkpoint.sourceMapping,
+	};
+}
+
+function compactLifecycleChangeRequest(request: WorkflowChangeRequestRecord): WorkflowLifecycleInspectionChangeRequest {
+	const inspection: WorkflowLifecycleInspectionChangeRequest = {
+		id: request.id,
+		status: request.status,
+		actor: request.actor,
+		origin: request.origin,
+		reason: request.reason,
+		operationCount: request.operations.length,
+		frontierMapping: request.frontierMapping,
+	};
+	if (request.attemptId !== undefined) inspection.attemptId = request.attemptId;
+	if (request.checkpointId !== undefined) inspection.checkpointId = request.checkpointId;
+	if (request.approvedBy !== undefined) inspection.approvedBy = request.approvedBy;
+	if (request.rejectedBy !== undefined) inspection.rejectedBy = request.rejectedBy;
+	return inspection;
 }
 
 function compactEdge(from: string, to: string, condition: string | undefined): WorkflowInspectionEdge {

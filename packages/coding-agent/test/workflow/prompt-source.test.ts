@@ -545,6 +545,44 @@ edges: []
 
 		expect(receivedPrompt).toBe("Implement the package workflow.\n");
 	});
+
+	it("resolves .omhflow resource prompt files relative to the supplied resource root", async () => {
+		const dir = await createTempDir();
+		await Bun.write(path.join(dir, "prompts", "build.md"), "Implement the portable workflow.\n");
+		const definition = parseWorkflowDefinition(
+			`
+name: resource-prompt-demo
+version: 1
+nodes:
+  build:
+    type: agent
+    agent: task
+    prompt:
+      file: prompts/build.md
+edges: []
+`,
+			{ sourcePath: path.join(dir, "release.omhflow") },
+		);
+		const host = createHost();
+		let receivedPrompt: string | undefined;
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async input => {
+				receivedPrompt = input.prompt;
+				return { summary: "built" };
+			},
+		};
+
+		await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			startNodeId: "build",
+			runtimeHost,
+			packageRoot: dir,
+		});
+
+		expect(receivedPrompt).toBe("Implement the portable workflow.\n");
+	});
 });
 
 function completedActivation(id: string, nodeId: string, nextPrompt: string): WorkflowActivation {

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added immutable workflow lifecycle support for `.omhflow` artifacts: strict freeze manifests, runtime binding snapshots, family/attempt/checkpoint/change-request events, lifecycle-aware `/workflow` commands, and HTML export audit data.
+
 ## [15.11.3] - 2026-06-11
 
 ### Fixed

@@ -3,12 +3,13 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
 import type { WorkflowNodeRuntimeHost, WorkflowScriptNodeInput } from "../../src/workflow/node-runtime";
 import { reconstructWorkflowRuns, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
 import { runWorkflow } from "../../src/workflow/runner";
 
-const openAiModel: Model<Api> = {
+const openAiModel: Model<Api> = buildModel({
 	id: "gpt-4o",
 	name: "GPT-4o",
 	api: "openai-completions",
@@ -19,7 +20,7 @@ const openAiModel: Model<Api> = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 128000,
 	maxTokens: 8192,
-};
+});
 
 const source = `
 name: runner-demo

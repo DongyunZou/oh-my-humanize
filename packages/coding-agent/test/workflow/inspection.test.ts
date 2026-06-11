@@ -1,6 +1,21 @@
 import { describe, expect, it } from "bun:test";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
-import { buildWorkflowInspection } from "../../src/workflow/inspection";
+import type { FlowFreeze } from "../../src/workflow/freeze";
+import { buildWorkflowInspection, buildWorkflowLifecycleInspection } from "../../src/workflow/inspection";
+import {
+	appendWorkflowAttemptActivationAborted,
+	appendWorkflowAttemptActivationCompleted,
+	appendWorkflowAttemptActivationStarted,
+	approveWorkflowChangeRequest,
+	createWorkflowCheckpoint,
+	proposeWorkflowChangeRequest,
+	reconstructWorkflowFamilies,
+	recordWorkflowFreeze,
+	requestWorkflowAttemptStop,
+	restartWorkflowAttempt,
+	startWorkflowAttempt,
+	startWorkflowFamily,
+} from "../../src/workflow/lifecycle";
 import {
 	appendWorkflowActivationCompleted,
 	appendWorkflowActivationStarted,
@@ -209,4 +224,150 @@ describe("workflow inspection model", () => {
 			},
 		]);
 	});
+
+	it("summarizes lifecycle family lineage, checkpoints, changes, and bindings", () => {
+		const host = createHost();
+		const freezeA = createFreeze("flowfreeze:a");
+		const freezeB = createFreeze("flowfreeze:b");
+
+		startWorkflowFamily(host, { familyId: "family-1", objective: "ship release" });
+		recordWorkflowFreeze(host, freezeA, { familyId: "family-1" });
+		startWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			freezeId: freezeA.id,
+			startNodeId: "build",
+			runtimeBindingSnapshot: binding("binding-1"),
+		});
+		appendWorkflowAttemptActivationStarted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			nodeId: "build",
+			parentActivationIds: [],
+		});
+		appendWorkflowAttemptActivationCompleted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			output: { summary: "built" },
+		});
+		const request = proposeWorkflowChangeRequest(host, {
+			changeRequestId: "change-1",
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			actor: "agent:reviewer",
+			origin: "internal-agent",
+			reason: "add verification",
+			operations: [{ op: "add_node", node: { id: "verify", type: "script" } }],
+			frontierMapping: { review: "verify" },
+		});
+		approveWorkflowChangeRequest(host, { changeRequestId: request.id, actor: "human:sihao" });
+		requestWorkflowAttemptStop(host, { attemptId: "attempt-1", deadlineMs: 10 });
+		appendWorkflowAttemptActivationAborted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-2",
+			nodeId: "review",
+			reason: "stop deadline elapsed",
+		});
+		createWorkflowCheckpoint(host, {
+			checkpointId: "checkpoint-1",
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			completedActivationIds: ["activation-1"],
+			abortedActivationIds: ["activation-2"],
+			frontierNodeIds: ["review"],
+			state: { build: { summary: "built" } },
+			sourceMapping: { review: "verify" },
+		});
+		recordWorkflowFreeze(host, freezeB, { familyId: "family-1" });
+		restartWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-2",
+			checkpointId: "checkpoint-1",
+			freezeId: freezeB.id,
+			startNodeId: "verify",
+			runtimeBindingSnapshot: binding("binding-2"),
+		});
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		const inspection = buildWorkflowLifecycleInspection(family);
+
+		expect(inspection).toMatchObject({
+			familyId: "family-1",
+			objective: "ship release",
+			freezeIds: ["flowfreeze:a", "flowfreeze:b"],
+			attempts: [
+				{
+					id: "attempt-1",
+					freezeId: "flowfreeze:a",
+					status: "stopped",
+					activationCounts: { completed: 1, aborted: 1 },
+					runtimeBindingSnapshot: { id: "binding-1" },
+				},
+				{
+					id: "attempt-2",
+					freezeId: "flowfreeze:b",
+					status: "running",
+					checkpointId: "checkpoint-1",
+					runtimeBindingSnapshot: { id: "binding-2" },
+				},
+			],
+			checkpoints: [
+				{
+					id: "checkpoint-1",
+					attemptId: "attempt-1",
+					completedActivationCount: 1,
+					abortedActivationCount: 1,
+					frontierNodeIds: ["review"],
+					sourceMapping: { review: "verify" },
+				},
+			],
+			changeRequests: [
+				{
+					id: "change-1",
+					status: "approved",
+					approvedBy: "human:sihao",
+					operationCount: 1,
+					frontierMapping: { review: "verify" },
+				},
+			],
+		});
+	});
 });
+
+function binding(id: string) {
+	return {
+		id,
+		requestedRoles: { builder: "openai/gpt-4o" },
+		resolvedModels: { builder: "openai/gpt-4o" },
+		tools: ["task"],
+		agents: ["task"],
+		unavailable: [],
+		warnings: [],
+	};
+}
+
+function createFreeze(id: string): FlowFreeze {
+	return {
+		id,
+		schemaVersion: "omhflow/v1",
+		flowPath: `${id}.omhflow`,
+		resourceDir: id,
+		mainContentHash: `sha256:main-${id}`,
+		resourceHashes: [],
+		resourceSnapshots: [],
+		canonicalGraphHash: `sha256:graph-${id}`,
+		sourceMapping: {
+			workflowBlocks: [{ id: "workflow:0", language: "yaml" }],
+			nodes: { build: { sourceBlock: "workflow:0" } },
+		},
+		staticCheckReport: { status: "passed", checks: [{ name: "fixture", status: "passed" }] },
+		portableDefaults: { models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } } },
+		definition: {
+			name: id,
+			version: 1,
+			models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } },
+			nodes: [{ id: "build", type: "agent" }],
+			edges: [],
+		},
+	};
+}

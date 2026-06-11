@@ -7,14 +7,7 @@ import type {
 	WorkflowNodeType,
 	WorkflowPromptSource,
 } from "./definition";
-import {
-	appendWorkflowGraphPatchApplied,
-	appendWorkflowGraphPatchProposed,
-	appendWorkflowGraphRevision,
-	type WorkflowGraphRevision,
-	type WorkflowRunSnapshot,
-	type WorkflowRunStoreHost,
-} from "./run-store";
+import { appendWorkflowGraphPatchProposed, type WorkflowRunSnapshot, type WorkflowRunStoreHost } from "./run-store";
 import { readWorkflowState } from "./state";
 
 export type WorkflowGraphPatchActor = "agent" | "supervisor" | "human";
@@ -158,10 +151,6 @@ export interface WorkflowGraphPatchResult {
 	preview: WorkflowGraphPatchPreview;
 }
 
-export interface WorkflowGraphPatchRunResult extends WorkflowGraphPatchResult {
-	revision: WorkflowGraphRevision;
-}
-
 export class WorkflowGraphPatchError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -225,35 +214,14 @@ export function applyWorkflowGraphPatchToRun(
 	run: WorkflowRunSnapshot,
 	patch: WorkflowGraphPatchOperation[],
 	context: WorkflowGraphPatchRunContext,
-): WorkflowGraphPatchRunResult {
-	const result = applyWorkflowGraphPatch(run.definition, patch, context);
-	const revision = appendWorkflowGraphRevision(host, run.id, result.definition, {
-		graphRevisionId: context.graphRevisionId,
-		parentGraphRevisionId: run.currentGraphRevisionId,
-		reason: context.reason,
-	});
-	appendWorkflowGraphPatchApplied(host, run.id, {
-		proposalId: context.proposalId,
-		actor: context.actor,
-		patch,
-		preview: result.preview,
-		graphRevisionId: revision.id,
-		parentGraphRevisionId: run.currentGraphRevisionId,
-		reason: context.reason,
-	});
-	run.currentGraphRevisionId = revision.id;
-	run.definition = result.definition;
-	run.graphRevisions.push(revision);
-	run.appliedGraphPatches.push({
-		proposalId: context.proposalId,
-		actor: context.actor,
-		patch,
-		preview: result.preview,
-		graphRevisionId: revision.id,
-		parentGraphRevisionId: revision.parentId,
-		reason: context.reason,
-	});
-	return { ...result, revision };
+): never {
+	void host;
+	void run;
+	void patch;
+	void context;
+	throw new WorkflowGraphPatchError(
+		"workflow graph patches cannot be applied to an active run; stop, checkpoint, freeze, and restart the workflow instead",
+	);
 }
 
 function applyPatchOperations(

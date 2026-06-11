@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "../../src/config/settings";
 import type { InteractiveModeContext } from "../../src/modes/types";
 import type { AgentSession } from "../../src/session/agent-session";
@@ -10,6 +11,15 @@ import type { SessionManager } from "../../src/session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "../../src/slash-commands/acp-builtins";
 import { executeBuiltinSlashCommand } from "../../src/slash-commands/builtin-registry";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
+import type { FlowFreeze } from "../../src/workflow/freeze";
+import {
+	appendWorkflowAttemptActivationCompleted,
+	appendWorkflowAttemptActivationStarted,
+	reconstructWorkflowFamilies,
+	recordWorkflowFreeze,
+	startWorkflowAttempt,
+	startWorkflowFamily,
+} from "../../src/workflow/lifecycle";
 import type { WorkflowNodeRuntimeHost } from "../../src/workflow/node-runtime";
 import {
 	appendWorkflowActivationCompleted,
@@ -28,7 +38,7 @@ interface CapturedEntry {
 	data?: unknown;
 }
 
-const openAiModel: Model<Api> = {
+const openAiModel: Model<Api> = buildModel({
 	id: "gpt-4o",
 	name: "GPT-4o",
 	api: "openai-completions",
@@ -39,7 +49,7 @@ const openAiModel: Model<Api> = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 128000,
 	maxTokens: 8192,
-};
+});
 
 const tempDirs: string[] = [];
 
@@ -81,7 +91,7 @@ function createRuntime(entries: CapturedEntry[], workflowRuntimeHost?: WorkflowN
 			session,
 			sessionManager,
 			settings: Settings.isolated(),
-			cwd: "/tmp/project",
+			cwd: path.resolve("temp", "project"),
 			output: (text: string) => {
 				output.push(text);
 			},
@@ -154,7 +164,7 @@ describe("/workflow slash command", () => {
 		const result = await executeAcpBuiltinSlashCommand("/workflow inspect", runtime);
 
 		expect(result).toEqual({ consumed: true });
-		expect(output).toEqual(["No workflow runs found."]);
+		expect(output).toEqual(["No workflow runs or workflow families found."]);
 	});
 
 	it("prints a compact inspection summary for the latest workflow run", async () => {
@@ -313,6 +323,153 @@ edges:
 		]);
 	});
 
+	it("freezes .omhflow resources before starting a lifecycle attempt", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "release", "prompts"), { recursive: true });
+		await Bun.write(path.join(dir, "release", "prompts", "build.md"), "Use the frozen prompt.\n");
+		await Bun.write(
+			path.join(dir, "release.omhflow"),
+			`---
+name: portable-slash-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Portable Slash Demo
+
+\`\`\`yaml workflow
+nodes:
+  build:
+    type: script
+  usePrompt:
+    type: agent
+    agent: task
+    prompt:
+      file: prompts/build.md
+edges:
+  - from: build
+    to: usePrompt
+\`\`\`
+`,
+		);
+		const entries: CapturedEntry[] = [];
+		let receivedPrompt: string | undefined;
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => {
+				if (input.node.id === "build") {
+					await Bun.write(path.join(dir, "release", "prompts", "build.md"), "Use the mutated prompt.\n");
+				}
+				return { summary: `ran ${input.node.id}` };
+			},
+			runAgentNode: async input => {
+				receivedPrompt = input.prompt;
+				return { summary: "used prompt" };
+			},
+		};
+		const { output, runtime } = createRuntime(entries, runtimeHost);
+
+		const result = await executeAcpBuiltinSlashCommand(
+			`/workflow start ${path.join(dir, "release.omhflow")} --run-id run-omhflow`,
+			runtime,
+		);
+
+		expect(result).toEqual({ consumed: true });
+		expect(receivedPrompt).toBe("Use the frozen prompt.\n");
+		expect(output[0]).toContain("Workflow run: run-omhflow");
+		const families = reconstructWorkflowFamilies(entries);
+		expect(families).toHaveLength(1);
+		expect(families[0]?.freezes[0]?.flowPath).toBe(path.join(dir, "release.omhflow"));
+		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.freezeId, attempt.status])).toEqual([
+			["run-omhflow:attempt-1", families[0]?.freezes[0]?.id, "completed"],
+		]);
+
+		await executeAcpBuiltinSlashCommand("/workflow inspect", runtime);
+
+		expect(output[1]).toContain("Workflow family: run-omhflow:family");
+		expect(output[1]).toContain(`Freezes: ${families[0]?.freezes[0]?.id}`);
+		expect(output[1]).toContain("run-omhflow:attempt-1 completed");
+		expect(output[1]).toContain("binding=run-omhflow:binding-1");
+	});
+
+	it("freezes artifacts and records file-based change request approvals", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "release"), { recursive: true });
+		await Bun.write(
+			path.join(dir, "release.omhflow"),
+			`---
+name: change-command-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Change Command Demo
+
+\`\`\`yaml workflow
+nodes:
+  build:
+    type: script
+edges: []
+\`\`\`
+`,
+		);
+		await Bun.write(
+			path.join(dir, "change.json"),
+			JSON.stringify({
+				id: "change-1",
+				actor: "agent:reviewer",
+				origin: "internal-agent",
+				reason: "insert verification",
+				operations: [{ op: "add_node", node: { id: "verify", type: "script" } }],
+				frontierMapping: { build: "verify" },
+			}),
+		);
+		const entries: CapturedEntry[] = [];
+		const { output, runtime } = createRuntime(entries);
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow freeze ${path.join(dir, "release.omhflow")} --family-id family-1`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow request-change ${path.join(dir, "change.json")} --family-id family-1 --attempt-id attempt-1`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(
+			await executeAcpBuiltinSlashCommand("/workflow approve-change change-1 --actor human:sihao", runtime),
+		).toEqual({
+			consumed: true,
+		});
+
+		const families = reconstructWorkflowFamilies(entries);
+		expect(output[0]).toContain("Workflow freeze: flowfreeze:");
+		expect(output[1]).toContain("Workflow change request: change-1");
+		expect(output[2]).toBe("Workflow change request approved: change-1");
+		expect(families[0]?.id).toBe("family-1");
+		expect(families[0]?.freezes).toHaveLength(1);
+		expect(families[0]?.changeRequests).toMatchObject([
+			{
+				id: "change-1",
+				status: "approved",
+				actor: "agent:reviewer",
+				origin: "internal-agent",
+				approvedBy: "human:sihao",
+				frontierMapping: { build: "verify" },
+			},
+		]);
+	});
+
 	it("starts agent workflows through the TUI session task runner", async () => {
 		const dir = await createTempDir();
 		await Bun.write(
@@ -359,4 +516,125 @@ edges: []
 		});
 		expect(runs[0]?.activations[0]?.modelAudit?.resolvedModel).toBe("openai/gpt-4o");
 	});
+
+	it("stops a running lifecycle attempt, checkpoints it, and restarts from a freeze", async () => {
+		const entries: CapturedEntry[] = [];
+		const freezeA = createFreeze("flowfreeze:a", ["build", "review"]);
+		const freezeB = createFreeze("flowfreeze:b", ["review"]);
+		const host = createHostFromEntries(entries);
+		startWorkflowFamily(host, { familyId: "family-1" });
+		recordWorkflowFreeze(host, freezeA, { familyId: "family-1" });
+		startWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			freezeId: freezeA.id,
+			startNodeId: "build",
+			runtimeBindingSnapshot: binding("binding-1"),
+		});
+		appendWorkflowAttemptActivationStarted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			nodeId: "build",
+			parentActivationIds: [],
+		});
+		appendWorkflowAttemptActivationCompleted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			output: { summary: "built" },
+		});
+		appendWorkflowAttemptActivationStarted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-2",
+			nodeId: "review",
+			parentActivationIds: ["activation-1"],
+		});
+		recordWorkflowFreeze(host, freezeB, { familyId: "family-1" });
+		const calls: string[] = [];
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => {
+				calls.push(input.node.id);
+				return { summary: `ran ${input.node.id}` };
+			},
+		};
+		const { output, runtime } = createRuntime(entries, runtimeHost);
+
+		expect(await executeAcpBuiltinSlashCommand("/workflow stop attempt-1 --deadline-ms 5", runtime)).toEqual({
+			consumed: true,
+		});
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				"/workflow restart attempt-1:checkpoint-1 --freeze-id flowfreeze:b",
+				runtime,
+			),
+		).toEqual({
+			consumed: true,
+		});
+
+		const families = reconstructWorkflowFamilies(entries);
+		expect(calls).toEqual(["review"]);
+		expect(output.at(-2)).toContain("Workflow checkpoint: attempt-1:checkpoint-1");
+		expect(output.at(-1)).toContain("Workflow restart attempt: attempt-2");
+		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.freezeId, attempt.status])).toEqual([
+			["attempt-1", "flowfreeze:a", "stopped"],
+			["attempt-2", "flowfreeze:b", "completed"],
+		]);
+		expect(families[0]?.checkpoints[0]).toMatchObject({
+			id: "attempt-1:checkpoint-1",
+			completedActivationIds: ["activation-1"],
+			abortedActivationIds: ["activation-2"],
+			frontierNodeIds: ["review"],
+		});
+	});
 });
+
+function createHostFromEntries(entries: CapturedEntry[]): WorkflowRunStoreHost & { entries: CapturedEntry[] } {
+	return {
+		entries,
+		appendCustomEntry: (customType, data) => {
+			entries.push({ type: "custom", customType, data });
+			return `entry-${entries.length}`;
+		},
+		getBranch: () => entries,
+	};
+}
+
+function binding(id: string) {
+	return {
+		id,
+		requestedRoles: { builder: "openai/gpt-4o" },
+		resolvedModels: { builder: "openai/gpt-4o" },
+		tools: ["task"],
+		agents: ["task"],
+		unavailable: [],
+		warnings: [],
+	};
+}
+
+function createFreeze(id: string, nodeIds: string[]): FlowFreeze {
+	return {
+		id,
+		schemaVersion: "omhflow/v1",
+		flowPath: `${id}.omhflow`,
+		resourceDir: id,
+		mainContentHash: `sha256:main-${id}`,
+		resourceHashes: [],
+		resourceSnapshots: [],
+		canonicalGraphHash: `sha256:graph-${id}`,
+		sourceMapping: {
+			workflowBlocks: [{ id: "workflow:0", language: "yaml" }],
+			nodes: Object.fromEntries(nodeIds.map(nodeId => [nodeId, { sourceBlock: "workflow:0" }])),
+		},
+		staticCheckReport: { status: "passed", checks: [{ name: "fixture", status: "passed" }] },
+		portableDefaults: { models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } } },
+		definition: {
+			name: id,
+			version: 1,
+			models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } },
+			nodes: nodeIds.map(nodeId => ({ id: nodeId, type: "script" })),
+			edges:
+				nodeIds.length > 1
+					? nodeIds.slice(0, -1).map((nodeId, index) => ({ from: nodeId, to: nodeIds[index + 1]! }))
+					: [],
+		},
+	};
+}

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
+import type { FlowFreeze } from "../../src/workflow/freeze";
 import { buildWorkflowInspection } from "../../src/workflow/inspection";
+import { type RuntimeBindingSnapshot, reconstructWorkflowFamilies } from "../../src/workflow/lifecycle";
 import type { WorkflowNodeRuntimeHost } from "../../src/workflow/node-runtime";
 import { reconstructWorkflowRuns, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
 import { runWorkflow } from "../../src/workflow/runner";
 
-const openAiModel: Model<Api> = {
+const openAiModel: Model<Api> = buildModel({
 	id: "gpt-4o",
 	name: "GPT-4o",
 	api: "openai-completions",
@@ -17,7 +20,7 @@ const openAiModel: Model<Api> = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 128000,
 	maxTokens: 8192,
-};
+});
 
 const source = `
 name: humanize-like-loop
@@ -208,4 +211,102 @@ describe("workflow end-to-end smoke", () => {
 			},
 		]);
 	});
+
+	it("records immutable lifecycle events for a frozen workflow attempt", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(
+			`
+name: frozen-run-demo
+version: 1
+nodes:
+  build:
+    type: script
+  review:
+    type: script
+edges:
+  - from: build
+    to: review
+`,
+			{ sourcePath: "workflow.yml" },
+		);
+		const freeze = createFreeze(
+			"flowfreeze:e2e",
+			definition.nodes.map(node => node.id),
+		);
+		const binding: RuntimeBindingSnapshot = {
+			id: "binding-e2e",
+			requestedRoles: { build: "script" },
+			resolvedModels: {},
+			tools: ["eval"],
+			agents: [],
+			unavailable: [],
+			warnings: [],
+		};
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => ({ summary: `ran ${input.node.id}` }),
+		};
+
+		await runWorkflow({
+			host,
+			definition,
+			runId: "run-e2e-frozen",
+			startNodeId: "build",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-e2e",
+				attemptId: "attempt-e2e-1",
+				objective: "exercise lifecycle events",
+				freeze,
+				runtimeBindingSnapshot: binding,
+			},
+		});
+
+		const runs = reconstructWorkflowRuns(host.getBranch());
+		const families = reconstructWorkflowFamilies(host.getBranch());
+
+		expect(runs[0]?.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["build", "completed"],
+			["review", "completed"],
+		]);
+		expect(families).toHaveLength(1);
+		expect(families[0]?.id).toBe("family-e2e");
+		expect(families[0]?.freezes.map(recordedFreeze => recordedFreeze.id)).toEqual(["flowfreeze:e2e"]);
+		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.freezeId, attempt.status])).toEqual([
+			["attempt-e2e-1", "flowfreeze:e2e", "completed"],
+		]);
+		expect(families[0]?.attempts[0]?.runtimeBindingSnapshot).toEqual(binding);
+		expect(families[0]?.attempts[0]?.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["build", "completed"],
+			["review", "completed"],
+		]);
+	});
 });
+
+function createFreeze(id: string, nodeIds: string[]): FlowFreeze {
+	return {
+		id,
+		schemaVersion: "omhflow/v1",
+		flowPath: `${id}.omhflow`,
+		resourceDir: id,
+		mainContentHash: "sha256:main",
+		resourceHashes: [],
+		resourceSnapshots: [],
+		canonicalGraphHash: "sha256:graph",
+		sourceMapping: {
+			workflowBlocks: [{ id: "workflow:0", language: "yaml" }],
+			nodes: Object.fromEntries(nodeIds.map(nodeId => [nodeId, { sourceBlock: "workflow:0" }])),
+		},
+		staticCheckReport: {
+			status: "passed",
+			checks: [{ name: "parse", status: "passed" }],
+		},
+		portableDefaults: { models: { roles: {}, defaults: {} } },
+		definition: {
+			name: "frozen-run-demo",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: nodeIds.map(nodeId => ({ id: nodeId, type: "script" })),
+			edges: nodeIds.length > 1 ? [{ from: nodeIds[0]!, to: nodeIds[1]! }] : [],
+		},
+	};
+}

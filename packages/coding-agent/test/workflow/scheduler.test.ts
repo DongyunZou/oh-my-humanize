@@ -296,15 +296,14 @@ describe("workflow activation scheduler", () => {
 		]);
 	});
 
-	it("uses the latest graph revision for future activations after an active-run graph patch", async () => {
+	it("fails active-run graph patch attempts without changing the run graph", async () => {
 		const host = createHost();
 		const definition = parseWorkflowDefinition(mutableWorkflow, { sourcePath: "workflow.yml" });
 		const run = startWorkflowRun(host, definition, { runId: "run-1" });
 
 		const result = await runWorkflowScheduler(run.definition, {
 			startNodeId: "start",
-			getCurrentDefinition: () => run.definition,
-			getCurrentGraphRevisionId: () => run.currentGraphRevisionId,
+			graphRevisionId: run.currentGraphRevisionId,
 			executeNode: async activation => {
 				if (activation.nodeId === "mutate") {
 					applyWorkflowGraphPatchToRun(
@@ -325,11 +324,18 @@ describe("workflow activation scheduler", () => {
 			},
 		});
 
-		expect(result.activations.map(activation => activation.nodeId)).toEqual(["start", "mutate", "finish"]);
+		expect(result.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["start", "completed"],
+			["mutate", "failed"],
+		]);
+		expect(result.activations[1]?.error).toBe(
+			"workflow graph patches cannot be applied to an active run; stop, checkpoint, freeze, and restart the workflow instead",
+		);
 		expect(result.activations.map(activation => activation.graphRevisionId)).toEqual([
 			"run-1:graph-0",
 			"run-1:graph-0",
-			"run-1:graph-1",
 		]);
+		expect(run.currentGraphRevisionId).toBe("run-1:graph-0");
+		expect(run.definition.nodes.map(node => node.id)).toEqual(["start", "mutate"]);
 	});
 });

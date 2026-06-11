@@ -3,7 +3,13 @@ import type { AgentState } from "@oh-my-pi/pi-agent-core";
 import { APP_NAME, isEnoent } from "@oh-my-pi/pi-utils";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/theme/theme";
 import { type SessionEntry, type SessionHeader, SessionManager } from "../../session/session-manager";
-import { buildWorkflowInspection, type WorkflowInspection } from "../../workflow/inspection";
+import {
+	buildWorkflowInspection,
+	buildWorkflowLifecycleInspection,
+	type WorkflowInspection,
+	type WorkflowLifecycleInspection,
+} from "../../workflow/inspection";
+import { reconstructWorkflowFamilies } from "../../workflow/lifecycle";
 import { reconstructWorkflowRuns } from "../../workflow/run-store";
 // Pre-generated template (created by scripts/generate-template.ts at publish time)
 import { TEMPLATE } from "./template.generated";
@@ -99,6 +105,7 @@ interface SessionData {
 	systemPrompt?: string;
 	tools?: { name: string; description: string }[];
 	workflowInspections: WorkflowInspection[];
+	workflowLifecycleInspections: WorkflowLifecycleInspection[];
 }
 
 /** Generate HTML from bundled template with runtime substitutions. */
@@ -133,6 +140,7 @@ export async function exportSessionToHtml(
 		systemPrompt: state?.systemPrompt.join("\n\n"),
 		tools: state?.tools?.map(t => ({ name: t.name, description: t.description })),
 		workflowInspections: buildWorkflowInspections(sm.getEntries()),
+		workflowLifecycleInspections: buildWorkflowLifecycleInspections(sm.getEntries()),
 	};
 
 	const html = await generateHtml(sessionData, opts.themeName);
@@ -159,6 +167,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 		entries: sm.getEntries(),
 		leafId: sm.getLeafId(),
 		workflowInspections: buildWorkflowInspections(sm.getEntries()),
+		workflowLifecycleInspections: buildWorkflowLifecycleInspections(sm.getEntries()),
 	};
 
 	const html = await generateHtml(sessionData, opts.themeName);
@@ -170,4 +179,8 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 
 function buildWorkflowInspections(entries: SessionEntry[]): WorkflowInspection[] {
 	return reconstructWorkflowRuns(entries).map(run => buildWorkflowInspection(run));
+}
+
+function buildWorkflowLifecycleInspections(entries: SessionEntry[]): WorkflowLifecycleInspection[] {
+	return reconstructWorkflowFamilies(entries).map(family => buildWorkflowLifecycleInspection(family));
 }

@@ -303,7 +303,7 @@ edges:
 		]);
 	});
 
-	it("appends graph revisions to runs without mutating earlier graph snapshots", () => {
+	it("rejects applying graph patches directly to active runs", () => {
 		const host = createHost();
 		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
 		const run = startWorkflowRun(host, definition, { runId: "run-1" });
@@ -313,27 +313,24 @@ edges:
 			proposalId: "proposal-1",
 			reason: "request finish branch",
 		});
-		const result = applyWorkflowGraphPatchToRun(host, run, patchOperations(), {
-			actor: "human",
-			proposalId: proposal.id,
-			graphRevisionId: "run-1:graph-1",
-			reason: "approved finish branch",
-		});
 
-		expect(result.revision.id).toBe("run-1:graph-1");
+		expect(() =>
+			applyWorkflowGraphPatchToRun(host, run, patchOperations(), {
+				actor: "human",
+				proposalId: proposal.id,
+				graphRevisionId: "run-1:graph-1",
+				reason: "approved finish branch",
+			}),
+		).toThrow(
+			"workflow graph patches cannot be applied to an active run; stop, checkpoint, freeze, and restart the workflow instead",
+		);
 		const reconstructed = reconstructWorkflowRuns(host.getBranch());
-		expect(reconstructed[0]?.graphRevisions.map(revision => revision.id)).toEqual(["run-1:graph-0", "run-1:graph-1"]);
-		expect(reconstructed[0]?.graphRevisions[0]?.definition.nodes.map(node => node.id)).toEqual(["build", "review"]);
-		expect(reconstructed[0]?.graphRevisions[1]?.definition.nodes.map(node => node.id)).toEqual([
-			"build",
-			"review",
-			"finish",
-		]);
+		expect(run.currentGraphRevisionId).toBe("run-1:graph-0");
+		expect(run.definition.nodes.map(node => node.id)).toEqual(["build", "review"]);
+		expect(reconstructed[0]?.graphRevisions.map(revision => revision.id)).toEqual(["run-1:graph-0"]);
 		expect(reconstructed[0]?.graphPatchProposals.map(entry => [entry.id, entry.actor, entry.reason])).toEqual([
 			["proposal-1", "agent", "request finish branch"],
 		]);
-		expect(
-			reconstructed[0]?.appliedGraphPatches.map(entry => [entry.proposalId, entry.actor, entry.graphRevisionId]),
-		).toEqual([["proposal-1", "human", "run-1:graph-1"]]);
+		expect(reconstructed[0]?.appliedGraphPatches).toEqual([]);
 	});
 });

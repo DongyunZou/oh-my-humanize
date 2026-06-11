@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "../../src/config/settings";
 import type { TaskParams, TaskToolDetails } from "../../src/task";
@@ -38,6 +40,7 @@ function createRequest(): WorkflowAgentTaskRequest {
 describe("workflow task tool runtime adapter", () => {
 	it("runs a workflow agent task through TaskTool and returns the first task result", async () => {
 		let capturedParams: TaskParams | undefined;
+		const outputPath = path.join(os.tmpdir(), "agent-output.md");
 		const taskTool = {
 			execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<TaskToolDetails>> => {
 				capturedParams = params as TaskParams;
@@ -61,7 +64,8 @@ describe("workflow task tool runtime adapter", () => {
 								truncated: false,
 								durationMs: 12,
 								tokens: 0,
-								outputPath: "/tmp/agent-output.md",
+								requests: 1,
+								outputPath,
 							},
 						],
 					},
@@ -88,7 +92,7 @@ describe("workflow task tool runtime adapter", () => {
 			exitCode: 0,
 			output: "agent completed",
 			stderr: "",
-			outputPath: "/tmp/agent-output.md",
+			outputPath,
 		});
 	});
 
@@ -116,6 +120,7 @@ describe("workflow task tool runtime adapter", () => {
 							truncated: false,
 							durationMs: 12,
 							tokens: 0,
+							requests: 1,
 						},
 					],
 				},

@@ -1,0 +1,226 @@
+import { describe, expect, it } from "bun:test";
+import type { FlowFreeze } from "../../src/workflow/freeze";
+import {
+	appendWorkflowAttemptActivationAborted,
+	appendWorkflowAttemptActivationCompleted,
+	appendWorkflowAttemptActivationStarted,
+	approveWorkflowChangeRequest,
+	completeWorkflowAttempt,
+	createWorkflowCheckpoint,
+	proposeWorkflowChangeRequest,
+	reconstructWorkflowFamilies,
+	recordWorkflowFreeze,
+	requestWorkflowAttemptStop,
+	restartWorkflowAttempt,
+	startWorkflowAttempt,
+	startWorkflowFamily,
+	type WorkflowLifecycleStoreHost,
+} from "../../src/workflow/lifecycle";
+
+interface CapturedEntry {
+	type: "custom";
+	customType: string;
+	data?: unknown;
+}
+
+function createHost(): WorkflowLifecycleStoreHost & { entries: CapturedEntry[] } {
+	const entries: CapturedEntry[] = [];
+	return {
+		entries,
+		appendCustomEntry: (customType, data) => {
+			entries.push({ type: "custom", customType, data });
+			return `entry-${entries.length}`;
+		},
+		getBranch: () => entries,
+	};
+}
+
+describe("workflow lifecycle event store", () => {
+	it("reconstructs a family with immutable attempts, checkpoint restart, change approval, and runtime bindings", () => {
+		const host = createHost();
+		const freezeA = createFreeze("flowfreeze:a", ["build", "review"]);
+		const freezeB = createFreeze("flowfreeze:b", ["build", "verify", "review"]);
+
+		startWorkflowFamily(host, {
+			familyId: "family-1",
+			objective: "ship release",
+		});
+		recordWorkflowFreeze(host, freezeA);
+		startWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			freezeId: freezeA.id,
+			startNodeId: "build",
+			runtimeBindingSnapshot: {
+				id: "binding-1",
+				requestedRoles: { builder: "openai/gpt-4o" },
+				resolvedModels: { builder: "openai/gpt-4o" },
+				tools: ["task"],
+				agents: ["task"],
+				unavailable: [],
+				warnings: [],
+			},
+		});
+		appendWorkflowAttemptActivationStarted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			nodeId: "build",
+			parentActivationIds: [],
+		});
+		appendWorkflowAttemptActivationCompleted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			output: { summary: "built", artifacts: ["artifact://workflow/family-1/build.txt"] },
+		});
+		const changeRequest = proposeWorkflowChangeRequest(host, {
+			changeRequestId: "change-1",
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			actor: "agent:reviewer",
+			origin: "internal-agent",
+			reason: "insert deterministic verification before review",
+			operations: [
+				{
+					op: "add_node",
+					node: { id: "verify", type: "script" },
+				},
+			],
+			frontierMapping: { review: "verify" },
+		});
+		approveWorkflowChangeRequest(host, {
+			changeRequestId: changeRequest.id,
+			actor: "human:sihao",
+			reason: "verification is required",
+		});
+		requestWorkflowAttemptStop(host, {
+			attemptId: "attempt-1",
+			deadlineMs: 10,
+			reason: "approved change request change-1",
+		});
+		appendWorkflowAttemptActivationAborted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-2",
+			nodeId: "review",
+			reason: "stop deadline elapsed",
+		});
+		createWorkflowCheckpoint(host, {
+			checkpointId: "checkpoint-1",
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			completedActivationIds: ["activation-1"],
+			abortedActivationIds: ["activation-2"],
+			frontierNodeIds: ["review"],
+			state: { build: { summary: "built" } },
+			sourceMapping: { review: "verify" },
+		});
+		recordWorkflowFreeze(host, freezeB);
+		restartWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-2",
+			checkpointId: "checkpoint-1",
+			freezeId: freezeB.id,
+			startNodeId: "verify",
+			runtimeBindingSnapshot: {
+				id: "binding-2",
+				requestedRoles: { builder: "openai/gpt-4o" },
+				resolvedModels: { builder: "openai/gpt-4o" },
+				tools: ["task", "eval"],
+				agents: ["task"],
+				unavailable: [],
+				warnings: [],
+			},
+		});
+		completeWorkflowAttempt(host, {
+			attemptId: "attempt-2",
+			summary: "release verified",
+		});
+
+		const reconstructed = reconstructWorkflowFamilies(host.getBranch());
+
+		expect(reconstructed).toHaveLength(1);
+		expect(reconstructed[0]?.id).toBe("family-1");
+		expect(reconstructed[0]?.freezes.map(freeze => freeze.id)).toEqual(["flowfreeze:a", "flowfreeze:b"]);
+		expect(reconstructed[0]?.attempts.map(attempt => [attempt.id, attempt.freezeId, attempt.status])).toEqual([
+			["attempt-1", "flowfreeze:a", "stopped"],
+			["attempt-2", "flowfreeze:b", "completed"],
+		]);
+		expect(reconstructed[0]?.attempts.map(attempt => attempt.runtimeBindingSnapshot.id)).toEqual([
+			"binding-1",
+			"binding-2",
+		]);
+		expect(reconstructed[0]?.checkpoints).toEqual([
+			{
+				id: "checkpoint-1",
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				completedActivationIds: ["activation-1"],
+				abortedActivationIds: ["activation-2"],
+				frontierNodeIds: ["review"],
+				state: { build: { summary: "built" } },
+				sourceMapping: { review: "verify" },
+			},
+		]);
+		expect(reconstructed[0]?.changeRequests).toMatchObject([
+			{
+				id: "change-1",
+				status: "approved",
+				actor: "agent:reviewer",
+				approvedBy: "human:sihao",
+				frontierMapping: { review: "verify" },
+			},
+		]);
+		expect(reconstructed[0]?.attempts[0]?.activations.map(activation => [activation.id, activation.status])).toEqual([
+			["activation-1", "completed"],
+			["activation-2", "aborted"],
+		]);
+	});
+
+	it("assigns frozen flows to explicit families when lifecycle histories are interleaved", () => {
+		const host = createHost();
+		const freezeA = createFreeze("flowfreeze:family-a", ["build"]);
+		const freezeB = createFreeze("flowfreeze:family-b", ["review"]);
+
+		startWorkflowFamily(host, { familyId: "family-a" });
+		startWorkflowFamily(host, { familyId: "family-b" });
+		recordWorkflowFreeze(host, freezeA, { familyId: "family-a" });
+		recordWorkflowFreeze(host, freezeB, { familyId: "family-b" });
+
+		const reconstructed = reconstructWorkflowFamilies(host.getBranch());
+
+		expect(reconstructed.map(family => [family.id, family.freezes.map(freeze => freeze.id)])).toEqual([
+			["family-a", ["flowfreeze:family-a"]],
+			["family-b", ["flowfreeze:family-b"]],
+		]);
+	});
+});
+
+function createFreeze(id: string, nodeIds: string[]): FlowFreeze {
+	return {
+		id,
+		schemaVersion: "omhflow/v1",
+		flowPath: `${id}.omhflow`,
+		resourceDir: id,
+		mainContentHash: `sha256:main-${id}`,
+		resourceHashes: [],
+		resourceSnapshots: [],
+		canonicalGraphHash: `sha256:graph-${id}`,
+		sourceMapping: {
+			workflowBlocks: [{ id: "workflow:0", language: "yaml" }],
+			nodes: Object.fromEntries(nodeIds.map(nodeId => [nodeId, { sourceBlock: "workflow:0" }])),
+		},
+		staticCheckReport: {
+			status: "passed",
+			checks: [{ name: "fixture", status: "passed" }],
+		},
+		portableDefaults: {
+			models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } },
+		},
+		definition: {
+			name: id,
+			version: 1,
+			models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } },
+			nodes: nodeIds.map(nodeId => ({ id: nodeId, type: nodeId === "verify" ? "script" : "agent" })),
+			edges: [],
+		},
+	};
+}

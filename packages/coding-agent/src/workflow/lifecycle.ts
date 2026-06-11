@@ -1,0 +1,755 @@
+import type { CustomEntry, SessionEntry } from "../session/session-manager";
+import type { FlowFreeze } from "./freeze";
+import type { WorkflowGraphPatchOperation } from "./patches";
+import type { WorkflowActivationOutput } from "./state";
+
+export const WORKFLOW_LIFECYCLE_EVENT_TYPE = "workflow-lifecycle-event";
+
+export interface WorkflowLifecycleStoreHost {
+	appendCustomEntry(customType: string, data?: unknown): string;
+	getBranch(): WorkflowLifecycleBranchEntry[];
+}
+
+export type WorkflowLifecycleBranchEntry = Pick<CustomEntry, "type" | "customType" | "data"> | SessionEntry;
+
+export type WorkflowAttemptStatus = "running" | "stop_requested" | "stopped" | "completed" | "failed";
+export type WorkflowAttemptActivationStatus = "running" | "completed" | "failed" | "aborted";
+
+export interface RuntimeBindingSnapshot {
+	id: string;
+	requestedRoles: Record<string, string>;
+	resolvedModels: Record<string, string>;
+	tools: string[];
+	agents: string[];
+	unavailable: string[];
+	warnings: string[];
+}
+
+export interface WorkflowRunFamilySnapshot {
+	id: string;
+	objective?: string;
+	freezes: FlowFreeze[];
+	attempts: WorkflowRunAttemptSnapshot[];
+	checkpoints: WorkflowCheckpointSnapshot[];
+	changeRequests: WorkflowChangeRequestRecord[];
+}
+
+export interface WorkflowRunAttemptSnapshot {
+	id: string;
+	familyId: string;
+	freezeId: string;
+	startNodeId: string;
+	status: WorkflowAttemptStatus;
+	runtimeBindingSnapshot: RuntimeBindingSnapshot;
+	checkpointId?: string;
+	stop?: WorkflowStopRecord;
+	activations: WorkflowAttemptActivationRecord[];
+	summary?: string;
+	error?: string;
+}
+
+export interface WorkflowStopRecord {
+	deadlineMs: number;
+	reason?: string;
+}
+
+export interface WorkflowAttemptActivationRecord {
+	id: string;
+	nodeId: string;
+	parentActivationIds: string[];
+	status: WorkflowAttemptActivationStatus;
+	output?: WorkflowActivationOutput;
+	error?: string;
+	reason?: string;
+}
+
+export interface WorkflowCheckpointSnapshot {
+	id: string;
+	familyId: string;
+	attemptId: string;
+	completedActivationIds: string[];
+	abortedActivationIds: string[];
+	frontierNodeIds: string[];
+	state: Record<string, unknown>;
+	sourceMapping: Record<string, string>;
+}
+
+export type WorkflowChangeRequestOrigin =
+	| "internal-agent"
+	| "supervisor"
+	| "human"
+	| "slash-command"
+	| "test"
+	| "external-api";
+
+export interface WorkflowChangeRequestRecord {
+	id: string;
+	familyId: string;
+	attemptId?: string;
+	checkpointId?: string;
+	status: "proposed" | "approved" | "rejected";
+	actor: string;
+	origin: WorkflowChangeRequestOrigin;
+	reason: string;
+	operations: WorkflowGraphPatchOperation[];
+	frontierMapping: Record<string, string>;
+	approvedBy?: string;
+	approvalReason?: string;
+	rejectedBy?: string;
+	rejectionReason?: string;
+}
+
+export interface StartWorkflowFamilyOptions {
+	familyId: string;
+	objective?: string;
+}
+
+export interface RecordWorkflowFreezeOptions {
+	familyId?: string;
+}
+
+export interface StartWorkflowAttemptOptions {
+	familyId: string;
+	attemptId: string;
+	freezeId: string;
+	startNodeId: string;
+	runtimeBindingSnapshot: RuntimeBindingSnapshot;
+}
+
+export interface RestartWorkflowAttemptOptions extends StartWorkflowAttemptOptions {
+	checkpointId: string;
+}
+
+export interface AppendWorkflowAttemptActivationStartedOptions {
+	attemptId: string;
+	activationId: string;
+	nodeId: string;
+	parentActivationIds: string[];
+}
+
+export interface AppendWorkflowAttemptActivationCompletedOptions {
+	attemptId: string;
+	activationId: string;
+	output?: WorkflowActivationOutput;
+}
+
+export interface AppendWorkflowAttemptActivationFailedOptions {
+	attemptId: string;
+	activationId: string;
+	error: string;
+}
+
+export interface AppendWorkflowAttemptActivationAbortedOptions {
+	attemptId: string;
+	activationId: string;
+	nodeId: string;
+	reason: string;
+}
+
+export interface ProposeWorkflowChangeRequestOptions {
+	changeRequestId: string;
+	familyId: string;
+	attemptId?: string;
+	checkpointId?: string;
+	actor: string;
+	origin: WorkflowChangeRequestOrigin;
+	reason: string;
+	operations: WorkflowGraphPatchOperation[];
+	frontierMapping?: Record<string, string>;
+}
+
+export interface ApproveWorkflowChangeRequestOptions {
+	changeRequestId: string;
+	actor: string;
+	reason?: string;
+}
+
+export interface RejectWorkflowChangeRequestOptions {
+	changeRequestId: string;
+	actor: string;
+	reason?: string;
+}
+
+export interface RequestWorkflowAttemptStopOptions {
+	attemptId: string;
+	deadlineMs: number;
+	reason?: string;
+}
+
+export interface CreateWorkflowCheckpointOptions {
+	checkpointId: string;
+	familyId: string;
+	attemptId: string;
+	completedActivationIds: string[];
+	abortedActivationIds: string[];
+	frontierNodeIds: string[];
+	state: Record<string, unknown>;
+	sourceMapping: Record<string, string>;
+}
+
+export interface CompleteWorkflowAttemptOptions {
+	attemptId: string;
+	summary?: string;
+}
+
+export interface FailWorkflowAttemptOptions {
+	attemptId: string;
+	error: string;
+}
+
+type WorkflowLifecycleEvent =
+	| WorkflowFamilyCreatedEvent
+	| WorkflowFreezeRecordedEvent
+	| WorkflowAttemptStartedEvent
+	| WorkflowAttemptRestartedEvent
+	| WorkflowRuntimeBindingSnapshotCreatedEvent
+	| WorkflowActivationStartedEvent
+	| WorkflowActivationCompletedEvent
+	| WorkflowActivationFailedEvent
+	| WorkflowActivationAbortedEvent
+	| WorkflowChangeRequestProposedEvent
+	| WorkflowChangeRequestApprovedEvent
+	| WorkflowChangeRequestRejectedEvent
+	| WorkflowStopRequestedEvent
+	| WorkflowCheckpointCreatedEvent
+	| WorkflowAttemptCompletedEvent
+	| WorkflowAttemptFailedEvent;
+
+interface WorkflowFamilyCreatedEvent {
+	event: "family_created";
+	familyId: string;
+	objective?: string;
+}
+
+interface WorkflowFreezeRecordedEvent {
+	event: "flow_frozen";
+	familyId?: string;
+	freeze: FlowFreeze;
+}
+
+interface WorkflowAttemptStartedEvent {
+	event: "attempt_started";
+	familyId: string;
+	attemptId: string;
+	freezeId: string;
+	startNodeId: string;
+}
+
+interface WorkflowAttemptRestartedEvent {
+	event: "attempt_restarted_from_checkpoint";
+	familyId: string;
+	attemptId: string;
+	checkpointId: string;
+	freezeId: string;
+	startNodeId: string;
+}
+
+interface WorkflowRuntimeBindingSnapshotCreatedEvent {
+	event: "runtime_binding_snapshot_created";
+	attemptId: string;
+	snapshot: RuntimeBindingSnapshot;
+}
+
+interface WorkflowActivationStartedEvent {
+	event: "activation_started";
+	attemptId: string;
+	activationId: string;
+	nodeId: string;
+	parentActivationIds: string[];
+}
+
+interface WorkflowActivationCompletedEvent {
+	event: "activation_completed";
+	attemptId: string;
+	activationId: string;
+	output?: WorkflowActivationOutput;
+}
+
+interface WorkflowActivationFailedEvent {
+	event: "activation_failed";
+	attemptId: string;
+	activationId: string;
+	error: string;
+}
+
+interface WorkflowActivationAbortedEvent {
+	event: "activation_aborted";
+	attemptId: string;
+	activationId: string;
+	nodeId: string;
+	reason: string;
+}
+
+interface WorkflowChangeRequestProposedEvent {
+	event: "change_request_proposed";
+	request: WorkflowChangeRequestRecord;
+}
+
+interface WorkflowChangeRequestApprovedEvent {
+	event: "change_request_approved";
+	changeRequestId: string;
+	actor: string;
+	reason?: string;
+}
+
+interface WorkflowChangeRequestRejectedEvent {
+	event: "change_request_rejected";
+	changeRequestId: string;
+	actor: string;
+	reason?: string;
+}
+
+interface WorkflowStopRequestedEvent {
+	event: "stop_requested";
+	attemptId: string;
+	deadlineMs: number;
+	reason?: string;
+}
+
+interface WorkflowCheckpointCreatedEvent {
+	event: "checkpoint_created";
+	checkpoint: WorkflowCheckpointSnapshot;
+}
+
+interface WorkflowAttemptCompletedEvent {
+	event: "attempt_completed";
+	attemptId: string;
+	summary?: string;
+}
+
+interface WorkflowAttemptFailedEvent {
+	event: "attempt_failed";
+	attemptId: string;
+	error: string;
+}
+
+export function startWorkflowFamily(
+	host: WorkflowLifecycleStoreHost,
+	options: StartWorkflowFamilyOptions,
+): WorkflowRunFamilySnapshot {
+	const event: WorkflowFamilyCreatedEvent = {
+		event: "family_created",
+		familyId: options.familyId,
+	};
+	if (options.objective !== undefined) event.objective = options.objective;
+	appendLifecycleEvent(host, event);
+	return {
+		id: options.familyId,
+		objective: options.objective,
+		freezes: [],
+		attempts: [],
+		checkpoints: [],
+		changeRequests: [],
+	};
+}
+
+export function recordWorkflowFreeze(
+	host: WorkflowLifecycleStoreHost,
+	freeze: FlowFreeze,
+	options: RecordWorkflowFreezeOptions = {},
+): FlowFreeze {
+	const event: WorkflowFreezeRecordedEvent = { event: "flow_frozen", freeze: clone(freeze) };
+	if (options.familyId !== undefined) event.familyId = options.familyId;
+	appendLifecycleEvent(host, event);
+	return freeze;
+}
+
+export function startWorkflowAttempt(
+	host: WorkflowLifecycleStoreHost,
+	options: StartWorkflowAttemptOptions,
+): WorkflowRunAttemptSnapshot {
+	appendLifecycleEvent(host, {
+		event: "attempt_started",
+		familyId: options.familyId,
+		attemptId: options.attemptId,
+		freezeId: options.freezeId,
+		startNodeId: options.startNodeId,
+	});
+	appendRuntimeBindingSnapshot(host, options.attemptId, options.runtimeBindingSnapshot);
+	return {
+		id: options.attemptId,
+		familyId: options.familyId,
+		freezeId: options.freezeId,
+		startNodeId: options.startNodeId,
+		status: "running",
+		runtimeBindingSnapshot: clone(options.runtimeBindingSnapshot),
+		activations: [],
+	};
+}
+
+export function restartWorkflowAttempt(
+	host: WorkflowLifecycleStoreHost,
+	options: RestartWorkflowAttemptOptions,
+): WorkflowRunAttemptSnapshot {
+	appendLifecycleEvent(host, {
+		event: "attempt_restarted_from_checkpoint",
+		familyId: options.familyId,
+		attemptId: options.attemptId,
+		checkpointId: options.checkpointId,
+		freezeId: options.freezeId,
+		startNodeId: options.startNodeId,
+	});
+	appendRuntimeBindingSnapshot(host, options.attemptId, options.runtimeBindingSnapshot);
+	return {
+		id: options.attemptId,
+		familyId: options.familyId,
+		freezeId: options.freezeId,
+		startNodeId: options.startNodeId,
+		checkpointId: options.checkpointId,
+		status: "running",
+		runtimeBindingSnapshot: clone(options.runtimeBindingSnapshot),
+		activations: [],
+	};
+}
+
+export function appendWorkflowAttemptActivationStarted(
+	host: WorkflowLifecycleStoreHost,
+	options: AppendWorkflowAttemptActivationStartedOptions,
+): void {
+	appendLifecycleEvent(host, {
+		event: "activation_started",
+		attemptId: options.attemptId,
+		activationId: options.activationId,
+		nodeId: options.nodeId,
+		parentActivationIds: [...options.parentActivationIds],
+	});
+}
+
+export function appendWorkflowAttemptActivationCompleted(
+	host: WorkflowLifecycleStoreHost,
+	options: AppendWorkflowAttemptActivationCompletedOptions,
+): void {
+	const event: WorkflowActivationCompletedEvent = {
+		event: "activation_completed",
+		attemptId: options.attemptId,
+		activationId: options.activationId,
+	};
+	if (options.output !== undefined) event.output = clone(options.output);
+	appendLifecycleEvent(host, event);
+}
+
+export function appendWorkflowAttemptActivationFailed(
+	host: WorkflowLifecycleStoreHost,
+	options: AppendWorkflowAttemptActivationFailedOptions,
+): void {
+	appendLifecycleEvent(host, {
+		event: "activation_failed",
+		attemptId: options.attemptId,
+		activationId: options.activationId,
+		error: options.error,
+	});
+}
+
+export function appendWorkflowAttemptActivationAborted(
+	host: WorkflowLifecycleStoreHost,
+	options: AppendWorkflowAttemptActivationAbortedOptions,
+): void {
+	appendLifecycleEvent(host, {
+		event: "activation_aborted",
+		attemptId: options.attemptId,
+		activationId: options.activationId,
+		nodeId: options.nodeId,
+		reason: options.reason,
+	});
+}
+
+export function proposeWorkflowChangeRequest(
+	host: WorkflowLifecycleStoreHost,
+	options: ProposeWorkflowChangeRequestOptions,
+): WorkflowChangeRequestRecord {
+	const request: WorkflowChangeRequestRecord = {
+		id: options.changeRequestId,
+		familyId: options.familyId,
+		status: "proposed",
+		actor: options.actor,
+		origin: options.origin,
+		reason: options.reason,
+		operations: clone(options.operations),
+		frontierMapping: clone(options.frontierMapping ?? {}),
+	};
+	if (options.attemptId !== undefined) request.attemptId = options.attemptId;
+	if (options.checkpointId !== undefined) request.checkpointId = options.checkpointId;
+	appendLifecycleEvent(host, { event: "change_request_proposed", request: clone(request) });
+	return request;
+}
+
+export function approveWorkflowChangeRequest(
+	host: WorkflowLifecycleStoreHost,
+	options: ApproveWorkflowChangeRequestOptions,
+): void {
+	const event: WorkflowChangeRequestApprovedEvent = {
+		event: "change_request_approved",
+		changeRequestId: options.changeRequestId,
+		actor: options.actor,
+	};
+	if (options.reason !== undefined) event.reason = options.reason;
+	appendLifecycleEvent(host, event);
+}
+
+export function rejectWorkflowChangeRequest(
+	host: WorkflowLifecycleStoreHost,
+	options: RejectWorkflowChangeRequestOptions,
+): void {
+	const event: WorkflowChangeRequestRejectedEvent = {
+		event: "change_request_rejected",
+		changeRequestId: options.changeRequestId,
+		actor: options.actor,
+	};
+	if (options.reason !== undefined) event.reason = options.reason;
+	appendLifecycleEvent(host, event);
+}
+
+export function requestWorkflowAttemptStop(
+	host: WorkflowLifecycleStoreHost,
+	options: RequestWorkflowAttemptStopOptions,
+): void {
+	const event: WorkflowStopRequestedEvent = {
+		event: "stop_requested",
+		attemptId: options.attemptId,
+		deadlineMs: options.deadlineMs,
+	};
+	if (options.reason !== undefined) event.reason = options.reason;
+	appendLifecycleEvent(host, event);
+}
+
+export function createWorkflowCheckpoint(
+	host: WorkflowLifecycleStoreHost,
+	options: CreateWorkflowCheckpointOptions,
+): WorkflowCheckpointSnapshot {
+	const checkpoint: WorkflowCheckpointSnapshot = {
+		id: options.checkpointId,
+		familyId: options.familyId,
+		attemptId: options.attemptId,
+		completedActivationIds: [...options.completedActivationIds],
+		abortedActivationIds: [...options.abortedActivationIds],
+		frontierNodeIds: [...options.frontierNodeIds],
+		state: clone(options.state),
+		sourceMapping: clone(options.sourceMapping),
+	};
+	appendLifecycleEvent(host, { event: "checkpoint_created", checkpoint: clone(checkpoint) });
+	return checkpoint;
+}
+
+export function completeWorkflowAttempt(
+	host: WorkflowLifecycleStoreHost,
+	options: CompleteWorkflowAttemptOptions,
+): void {
+	const event: WorkflowAttemptCompletedEvent = {
+		event: "attempt_completed",
+		attemptId: options.attemptId,
+	};
+	if (options.summary !== undefined) event.summary = options.summary;
+	appendLifecycleEvent(host, event);
+}
+
+export function failWorkflowAttempt(host: WorkflowLifecycleStoreHost, options: FailWorkflowAttemptOptions): void {
+	appendLifecycleEvent(host, {
+		event: "attempt_failed",
+		attemptId: options.attemptId,
+		error: options.error,
+	});
+}
+
+export function reconstructWorkflowFamilies(entries: WorkflowLifecycleBranchEntry[]): WorkflowRunFamilySnapshot[] {
+	const families = new Map<string, WorkflowRunFamilySnapshot>();
+	const attempts = new Map<string, WorkflowRunAttemptSnapshot>();
+	const changeRequests = new Map<string, WorkflowChangeRequestRecord>();
+	let currentFamilyId: string | undefined;
+
+	for (const entry of entries) {
+		const event = lifecycleEventFromEntry(entry);
+		if (!event) continue;
+		if (event.event === "family_created") {
+			const family: WorkflowRunFamilySnapshot = {
+				id: event.familyId,
+				objective: event.objective,
+				freezes: [],
+				attempts: [],
+				checkpoints: [],
+				changeRequests: [],
+			};
+			families.set(event.familyId, family);
+			currentFamilyId = event.familyId;
+			continue;
+		}
+		if (event.event === "flow_frozen") {
+			const familyId = event.familyId ?? currentFamilyId;
+			const family = familyId ? families.get(familyId) : undefined;
+			if (family) family.freezes.push(clone(event.freeze));
+			continue;
+		}
+		if (event.event === "attempt_started" || event.event === "attempt_restarted_from_checkpoint") {
+			const family = families.get(event.familyId);
+			if (!family) continue;
+			const attempt: WorkflowRunAttemptSnapshot = {
+				id: event.attemptId,
+				familyId: event.familyId,
+				freezeId: event.freezeId,
+				startNodeId: event.startNodeId,
+				status: "running",
+				runtimeBindingSnapshot: emptyRuntimeBindingSnapshot(event.attemptId),
+				activations: [],
+			};
+			if (event.event === "attempt_restarted_from_checkpoint") {
+				attempt.checkpointId = event.checkpointId;
+			}
+			attempts.set(event.attemptId, attempt);
+			family.attempts.push(attempt);
+			currentFamilyId = event.familyId;
+			continue;
+		}
+		if (event.event === "runtime_binding_snapshot_created") {
+			const attempt = attempts.get(event.attemptId);
+			if (attempt) attempt.runtimeBindingSnapshot = clone(event.snapshot);
+			continue;
+		}
+		if (event.event === "activation_started") {
+			const attempt = attempts.get(event.attemptId);
+			if (!attempt) continue;
+			attempt.activations.push({
+				id: event.activationId,
+				nodeId: event.nodeId,
+				parentActivationIds: [...event.parentActivationIds],
+				status: "running",
+			});
+			continue;
+		}
+		if (event.event === "activation_completed") {
+			const activation = findActivation(attempts, event.attemptId, event.activationId);
+			if (!activation) continue;
+			activation.status = "completed";
+			if (event.output !== undefined) activation.output = clone(event.output);
+			delete activation.error;
+			continue;
+		}
+		if (event.event === "activation_failed") {
+			const activation = findActivation(attempts, event.attemptId, event.activationId);
+			if (!activation) continue;
+			activation.status = "failed";
+			activation.error = event.error;
+			continue;
+		}
+		if (event.event === "activation_aborted") {
+			const attempt = attempts.get(event.attemptId);
+			if (!attempt) continue;
+			const existing = attempt.activations.find(activation => activation.id === event.activationId);
+			const activation =
+				existing ??
+				({
+					id: event.activationId,
+					nodeId: event.nodeId,
+					parentActivationIds: [],
+					status: "aborted",
+				} satisfies WorkflowAttemptActivationRecord);
+			activation.status = "aborted";
+			activation.reason = event.reason;
+			if (!existing) attempt.activations.push(activation);
+			continue;
+		}
+		if (event.event === "change_request_proposed") {
+			const family = families.get(event.request.familyId);
+			if (!family) continue;
+			const request = clone(event.request);
+			changeRequests.set(request.id, request);
+			family.changeRequests.push(request);
+			currentFamilyId = event.request.familyId;
+			continue;
+		}
+		if (event.event === "change_request_approved" || event.event === "change_request_rejected") {
+			const request = changeRequests.get(event.changeRequestId);
+			if (!request) continue;
+			if (event.event === "change_request_approved") {
+				request.status = "approved";
+				request.approvedBy = event.actor;
+				if (event.reason !== undefined) request.approvalReason = event.reason;
+			} else {
+				request.status = "rejected";
+				request.rejectedBy = event.actor;
+				if (event.reason !== undefined) request.rejectionReason = event.reason;
+			}
+			continue;
+		}
+		if (event.event === "stop_requested") {
+			const attempt = attempts.get(event.attemptId);
+			if (!attempt) continue;
+			attempt.status = "stop_requested";
+			attempt.stop = { deadlineMs: event.deadlineMs };
+			if (event.reason !== undefined) attempt.stop.reason = event.reason;
+			continue;
+		}
+		if (event.event === "checkpoint_created") {
+			const family = families.get(event.checkpoint.familyId);
+			if (!family) continue;
+			family.checkpoints.push(clone(event.checkpoint));
+			const attempt = attempts.get(event.checkpoint.attemptId);
+			if (attempt && attempt.status === "stop_requested") attempt.status = "stopped";
+			currentFamilyId = event.checkpoint.familyId;
+			continue;
+		}
+		if (event.event === "attempt_completed") {
+			const attempt = attempts.get(event.attemptId);
+			if (!attempt) continue;
+			attempt.status = "completed";
+			if (event.summary !== undefined) attempt.summary = event.summary;
+			continue;
+		}
+		if (event.event === "attempt_failed") {
+			const attempt = attempts.get(event.attemptId);
+			if (!attempt) continue;
+			attempt.status = "failed";
+			attempt.error = event.error;
+		}
+	}
+	return [...families.values()];
+}
+
+function appendRuntimeBindingSnapshot(
+	host: WorkflowLifecycleStoreHost,
+	attemptId: string,
+	snapshot: RuntimeBindingSnapshot,
+): void {
+	appendLifecycleEvent(host, {
+		event: "runtime_binding_snapshot_created",
+		attemptId,
+		snapshot: clone(snapshot),
+	});
+}
+
+function appendLifecycleEvent(host: WorkflowLifecycleStoreHost, event: WorkflowLifecycleEvent): void {
+	host.appendCustomEntry(WORKFLOW_LIFECYCLE_EVENT_TYPE, event);
+}
+
+function lifecycleEventFromEntry(entry: unknown): WorkflowLifecycleEvent | undefined {
+	if (!isRecord(entry)) return undefined;
+	if (entry.type !== "custom" || entry.customType !== WORKFLOW_LIFECYCLE_EVENT_TYPE) return undefined;
+	if (!isRecord(entry.data) || typeof entry.data.event !== "string") return undefined;
+	return entry.data as unknown as WorkflowLifecycleEvent;
+}
+
+function findActivation(
+	attempts: Map<string, WorkflowRunAttemptSnapshot>,
+	attemptId: string,
+	activationId: string,
+): WorkflowAttemptActivationRecord | undefined {
+	return attempts.get(attemptId)?.activations.find(activation => activation.id === activationId);
+}
+
+function emptyRuntimeBindingSnapshot(attemptId: string): RuntimeBindingSnapshot {
+	return {
+		id: `${attemptId}:binding`,
+		requestedRoles: {},
+		resolvedModels: {},
+		tools: [],
+		agents: [],
+		unavailable: [],
+		warnings: [],
+	};
+}
+
+function clone<T>(value: T): T {
+	return structuredClone(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}

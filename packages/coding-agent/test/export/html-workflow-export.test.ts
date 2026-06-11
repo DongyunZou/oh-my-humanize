@@ -7,7 +7,14 @@ import { exportSessionToHtml } from "../../src/export/html";
 import { TEMPLATE } from "../../src/export/html/template.generated";
 import { SessionManager } from "../../src/session/session-manager";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
-import type { WorkflowInspection } from "../../src/workflow/inspection";
+import type { FlowFreeze } from "../../src/workflow/freeze";
+import type { WorkflowInspection, WorkflowLifecycleInspection } from "../../src/workflow/inspection";
+import {
+	completeWorkflowAttempt,
+	recordWorkflowFreeze,
+	startWorkflowAttempt,
+	startWorkflowFamily,
+} from "../../src/workflow/lifecycle";
 import {
 	appendWorkflowActivationCompleted,
 	appendWorkflowActivationStarted,
@@ -31,6 +38,7 @@ edges: []
 
 interface ExportedSessionData {
 	workflowInspections?: WorkflowInspection[];
+	workflowLifecycleInspections?: WorkflowLifecycleInspection[];
 }
 
 describe("HTML export workflow inspection support", () => {
@@ -126,6 +134,59 @@ describe("HTML export workflow inspection support", () => {
 		}
 	});
 
+	it("exports workflow lifecycle inspection data reconstructed from session events", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-html-workflow-export-"));
+		const sm = SessionManager.create(dir, dir);
+		const outputPath = path.join(dir, "session.html");
+		try {
+			startWorkflowFamily(sm, { familyId: "family-export", objective: "ship export" });
+			const freeze = createFreeze("flowfreeze:export");
+			recordWorkflowFreeze(sm, freeze, { familyId: "family-export" });
+			startWorkflowAttempt(sm, {
+				familyId: "family-export",
+				attemptId: "attempt-export-1",
+				freezeId: freeze.id,
+				startNodeId: "build",
+				runtimeBindingSnapshot: {
+					id: "binding-export",
+					requestedRoles: { builder: "openai/gpt-4o" },
+					resolvedModels: { builder: "openai/gpt-4o" },
+					tools: ["task"],
+					agents: ["task"],
+					unavailable: [],
+					warnings: [],
+				},
+			});
+			completeWorkflowAttempt(sm, {
+				attemptId: "attempt-export-1",
+				summary: "exported lifecycle",
+			});
+
+			await exportSessionToHtml(sm, undefined, { outputPath });
+			const exported = decodeSessionData(await Bun.file(outputPath).text());
+
+			expect(exported.workflowLifecycleInspections).toMatchObject([
+				{
+					familyId: "family-export",
+					objective: "ship export",
+					freezeIds: ["flowfreeze:export"],
+					attempts: [
+						{
+							id: "attempt-export-1",
+							freezeId: "flowfreeze:export",
+							status: "completed",
+							summary: "exported lifecycle",
+							runtimeBindingSnapshot: { id: "binding-export" },
+						},
+					],
+				},
+			]);
+		} finally {
+			await sm.close();
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("includes a workflow overview renderer in the generated template", () => {
 		expect(TEMPLATE).toContain("renderWorkflowOverview");
 		expect(TEMPLATE).toContain("workflow-overview");
@@ -137,4 +198,30 @@ function decodeSessionData(html: string): ExportedSessionData {
 	const match = html.match(/<script id="session-data" type="application\/json">([^<]+)<\/script>/);
 	if (!match) throw new Error("session data script not found");
 	return JSON.parse(Buffer.from(match[1], "base64").toString("utf8")) as ExportedSessionData;
+}
+
+function createFreeze(id: string): FlowFreeze {
+	return {
+		id,
+		schemaVersion: "omhflow/v1",
+		flowPath: `${id}.omhflow`,
+		resourceDir: id,
+		mainContentHash: `sha256:main-${id}`,
+		resourceHashes: [],
+		resourceSnapshots: [],
+		canonicalGraphHash: `sha256:graph-${id}`,
+		sourceMapping: {
+			workflowBlocks: [{ id: "workflow:0", language: "yaml" }],
+			nodes: { build: { sourceBlock: "workflow:0" } },
+		},
+		staticCheckReport: { status: "passed", checks: [{ name: "fixture", status: "passed" }] },
+		portableDefaults: { models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } } },
+		definition: {
+			name: id,
+			version: 1,
+			models: { roles: { builder: "openai/gpt-4o" }, defaults: { agent: "builder" } },
+			nodes: [{ id: "build", type: "agent" }],
+			edges: [],
+		},
+	};
 }

@@ -12,7 +12,15 @@
         bytes[i] = binary.charCodeAt(i);
       }
       const data = JSON.parse(new TextDecoder('utf-8').decode(bytes));
-      const { header, entries, leafId: defaultLeafId, systemPrompt, tools, workflowInspections = [] } = data;
+      const {
+        header,
+        entries,
+        leafId: defaultLeafId,
+        systemPrompt,
+        tools,
+        workflowInspections = [],
+        workflowLifecycleInspections = []
+      } = data;
 
       // ============================================================
       // URL PARAMETER HANDLING
@@ -1894,9 +1902,11 @@
       const globalStats = computeStats(entries);
 
       function renderWorkflowOverview() {
-        if (!Array.isArray(workflowInspections) || workflowInspections.length === 0) return '';
+        const hasRuns = Array.isArray(workflowInspections) && workflowInspections.length > 0;
+        const hasFamilies = Array.isArray(workflowLifecycleInspections) && workflowLifecycleInspections.length > 0;
+        if (!hasRuns && !hasFamilies) return '';
 
-        const runsHtml = workflowInspections.map(run => {
+        const runsHtml = hasRuns ? workflowInspections.map(run => {
           const activations = Array.isArray(run.activations) ? run.activations : [];
           const graphRevisions = Array.isArray(run.graphRevisions) ? run.graphRevisions : [];
           const modelAssignments = Array.isArray(run.modelAssignments) ? run.modelAssignments : [];
@@ -1930,11 +1940,41 @@
             </div>
             ${latestSummary ? `<div class="workflow-summary">${escapeHtml(truncate(latestSummary, 160))}</div>` : ''}
           </div>`;
-        }).join('');
+        }).join('') : '';
+
+        const familiesHtml = hasFamilies ? workflowLifecycleInspections.map(family => {
+          const attempts = Array.isArray(family.attempts) ? family.attempts : [];
+          const checkpoints = Array.isArray(family.checkpoints) ? family.checkpoints : [];
+          const changeRequests = Array.isArray(family.changeRequests) ? family.changeRequests : [];
+          const freezeIds = Array.isArray(family.freezeIds) ? family.freezeIds : [];
+          const attemptStatusCounts = attempts.reduce((counts, attempt) => {
+            const status = attempt && attempt.status ? String(attempt.status) : 'unknown';
+            counts[status] = (counts[status] || 0) + 1;
+            return counts;
+          }, {});
+          const attemptText = Object.keys(attemptStatusCounts).sort().map(status => `${status}:${attemptStatusCounts[status]}`).join(' ');
+          const latestAttempt = attempts[attempts.length - 1];
+          const latestBinding = latestAttempt && latestAttempt.runtimeBindingSnapshot
+            ? String(latestAttempt.runtimeBindingSnapshot.id || 'unknown')
+            : 'none';
+
+          return `<div class="workflow-run">
+            <div class="workflow-run-title">${escapeHtml(String(family.familyId || 'unknown'))}</div>
+            <div class="workflow-grid">
+              <div><span class="workflow-label">Freezes</span><span>${freezeIds.length ? escapeHtml(freezeIds.join(', ')) : 'none'}</span></div>
+              <div><span class="workflow-label">Attempts</span><span>${attempts.length}${attemptText ? ' ' + escapeHtml(attemptText) : ''}</span></div>
+              <div><span class="workflow-label">Checkpoints</span><span>${checkpoints.length}</span></div>
+              <div><span class="workflow-label">Changes</span><span>${changeRequests.length}</span></div>
+              <div><span class="workflow-label">Binding</span><span>${escapeHtml(latestBinding)}</span></div>
+            </div>
+            ${family.objective ? `<div class="workflow-summary">${escapeHtml(truncate(String(family.objective), 160))}</div>` : ''}
+          </div>`;
+        }).join('') : '';
 
         return `<div class="workflow-overview">
-          <div class="workflow-overview-header">Workflow Runs</div>
-          ${runsHtml}
+          <div class="workflow-overview-header">Workflow Audit</div>
+          ${runsHtml ? `<div class="workflow-run-title">Runs</div>${runsHtml}` : ''}
+          ${familiesHtml ? `<div class="workflow-run-title">Families</div>${familiesHtml}` : ''}
         </div>`;
       }
 

@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { WorkflowNode, WorkflowOutputPromptSource, WorkflowPromptSource } from "./definition";
+import type { FlowFreezeResourceSnapshot } from "./freeze";
 import type { WorkflowActivation } from "./scheduler";
 import { readWorkflowState } from "./state";
 
@@ -11,6 +12,7 @@ export interface WorkflowPromptResolutionContext {
 	parentActivationIds: string[];
 	packageRoot?: string;
 	maxPromptBytes?: number;
+	frozenResources?: FlowFreezeResourceSnapshot[];
 }
 
 export interface WorkflowResolvedPrompt {
@@ -142,10 +144,8 @@ async function readPackagePromptFile(
 			`workflow prompt source for node "${node.id}" requires a workflow package root`,
 		);
 	}
-	if (!promptPath.startsWith("./")) {
-		throw new WorkflowPromptSourceError(
-			`workflow prompt file for node "${node.id}" must be package-relative: ${promptPath}`,
-		);
+	if (path.isAbsolute(promptPath)) {
+		throw new WorkflowPromptSourceError(`workflow prompt file for node "${node.id}" escapes the package root`);
 	}
 	const root = path.resolve(context.packageRoot);
 	const resolved = path.resolve(root, promptPath);
@@ -153,12 +153,28 @@ async function readPackagePromptFile(
 	if (relative.startsWith("..") || path.isAbsolute(relative)) {
 		throw new WorkflowPromptSourceError(`workflow prompt file for node "${node.id}" escapes the package root`);
 	}
+	const snapshot = findFrozenResourceSnapshot(context.frozenResources, relative);
+	if (snapshot) return snapshot.text;
+	if (context.frozenResources) {
+		throw new WorkflowPromptSourceError(
+			`workflow prompt file for node "${node.id}" was not captured in the workflow freeze: ${promptPath}`,
+		);
+	}
 	try {
 		return await Bun.file(resolved).text();
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
 		throw new WorkflowPromptSourceError(`workflow prompt file for node "${node.id}" is not readable: ${reason}`);
 	}
+}
+
+function findFrozenResourceSnapshot(
+	snapshots: FlowFreezeResourceSnapshot[] | undefined,
+	relativePath: string,
+): FlowFreezeResourceSnapshot | undefined {
+	if (!snapshots) return undefined;
+	const normalized = relativePath.split(path.sep).join("/");
+	return snapshots.find(snapshot => snapshot.path === normalized);
 }
 
 function resolvedPrompt(

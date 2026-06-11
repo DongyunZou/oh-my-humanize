@@ -3,6 +3,19 @@ import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { CanonicalModelRegistry, ModelMatchPreferences } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
 import type { WorkflowDefinition, WorkflowNode } from "./definition";
+import type { FlowFreeze, FlowFreezeResourceSnapshot } from "./freeze";
+import {
+	appendWorkflowAttemptActivationCompleted,
+	appendWorkflowAttemptActivationFailed,
+	appendWorkflowAttemptActivationStarted,
+	completeWorkflowAttempt,
+	failWorkflowAttempt,
+	type RuntimeBindingSnapshot,
+	recordWorkflowFreeze,
+	restartWorkflowAttempt,
+	startWorkflowAttempt,
+	startWorkflowFamily,
+} from "./lifecycle";
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "./model-resolution";
 import { executeWorkflowNode, type WorkflowNodeRuntimeHost } from "./node-runtime";
 import {
@@ -46,14 +59,28 @@ export interface WorkflowRunnerOptions {
 	modelResolution?: WorkflowRunnerModelResolutionOptions;
 	maxActivations?: number;
 	maxNodeActivations?: number;
+	initialState?: Record<string, unknown>;
 	signal?: AbortSignal;
 	packageRoot?: string;
 	maxPromptBytes?: number;
+	frozenResources?: FlowFreezeResourceSnapshot[];
+	lifecycle?: WorkflowRunnerLifecycleOptions;
 }
 
 export interface WorkflowRunnerResult {
 	run: WorkflowRunSnapshot;
 	scheduler: WorkflowSchedulerResult;
+}
+
+export interface WorkflowRunnerLifecycleOptions {
+	familyId: string;
+	attemptId: string;
+	objective?: string;
+	freeze: FlowFreeze;
+	runtimeBindingSnapshot: RuntimeBindingSnapshot;
+	checkpointId?: string;
+	recordFamily?: boolean;
+	recordFreeze?: boolean;
 }
 
 export class WorkflowRunnerError extends Error {
@@ -64,6 +91,7 @@ export class WorkflowRunnerError extends Error {
 }
 
 export async function runWorkflow(options: WorkflowRunnerOptions): Promise<WorkflowRunnerResult> {
+	startLifecycleAttempt(options);
 	const run = startWorkflowRun(options.host, options.definition, {
 		runId: options.runId,
 		graphRevisionId: options.graphRevisionId,
@@ -72,13 +100,60 @@ export async function runWorkflow(options: WorkflowRunnerOptions): Promise<Workf
 		startNodeId: options.startNodeId,
 		maxActivations: options.maxActivations,
 		maxNodeActivations: options.maxNodeActivations,
+		initialState: options.initialState,
 		signal: options.signal,
-		getCurrentDefinition: () => run.definition,
-		getCurrentGraphRevisionId: () => run.currentGraphRevisionId,
+		graphRevisionId: run.currentGraphRevisionId,
 		executeNode: async (activation, node, context) =>
 			executeAndPersistActivation(options, run, activation, node, context),
 	});
+	finishLifecycleAttempt(options, scheduler);
 	return { run, scheduler };
+}
+
+function startLifecycleAttempt(options: WorkflowRunnerOptions): void {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	if (lifecycle.recordFamily !== false) {
+		startWorkflowFamily(options.host, {
+			familyId: lifecycle.familyId,
+			objective: lifecycle.objective,
+		});
+	}
+	if (lifecycle.recordFreeze !== false) {
+		recordWorkflowFreeze(options.host, lifecycle.freeze, { familyId: lifecycle.familyId });
+	}
+	const attemptOptions = {
+		familyId: lifecycle.familyId,
+		attemptId: lifecycle.attemptId,
+		freezeId: lifecycle.freeze.id,
+		startNodeId: options.startNodeId,
+		runtimeBindingSnapshot: lifecycle.runtimeBindingSnapshot,
+	};
+	if (lifecycle.checkpointId !== undefined) {
+		restartWorkflowAttempt(options.host, {
+			...attemptOptions,
+			checkpointId: lifecycle.checkpointId,
+		});
+		return;
+	}
+	startWorkflowAttempt(options.host, attemptOptions);
+}
+
+function finishLifecycleAttempt(options: WorkflowRunnerOptions, scheduler: WorkflowSchedulerResult): void {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	const failed = scheduler.activations.find(activation => activation.status === "failed");
+	if (failed) {
+		failWorkflowAttempt(options.host, {
+			attemptId: lifecycle.attemptId,
+			error: failed.error ?? `workflow activation ${failed.id} failed`,
+		});
+		return;
+	}
+	completeWorkflowAttempt(options.host, {
+		attemptId: lifecycle.attemptId,
+		summary: scheduler.limitReached ? "workflow stopped at activation limit" : "workflow completed",
+	});
 }
 
 async function executeAndPersistActivation(
@@ -99,6 +174,7 @@ async function executeAndPersistActivation(
 			parentActivationIds: activation.parentActivationIds,
 			input,
 		});
+		appendLifecycleActivationStarted(options, activation, node);
 		started = true;
 		const promptedNode = resolvedPrompt ? { ...node, prompt: resolvedPrompt.value } : node;
 		const nodeForExecution = await resolveScriptForExecution(options, promptedNode);
@@ -125,6 +201,7 @@ async function executeAndPersistActivation(
 			output,
 			modelAudit,
 		});
+		appendLifecycleActivationCompleted(options, activation, output);
 		return output;
 	} catch (error) {
 		if (!started) {
@@ -134,13 +211,59 @@ async function executeAndPersistActivation(
 				graphRevisionId: activation.graphRevisionId,
 				parentActivationIds: activation.parentActivationIds,
 			});
+			appendLifecycleActivationStarted(options, activation, node);
 		}
+		const message = error instanceof Error ? error.message : String(error);
 		appendWorkflowActivationFailed(options.host, run.id, {
 			activationId: activation.id,
-			error: error instanceof Error ? error.message : String(error),
+			error: message,
 		});
+		appendLifecycleActivationFailed(options, activation, message);
 		throw error;
 	}
+}
+
+function appendLifecycleActivationStarted(
+	options: WorkflowRunnerOptions,
+	activation: WorkflowActivation,
+	node: WorkflowNode,
+): void {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	appendWorkflowAttemptActivationStarted(options.host, {
+		attemptId: lifecycle.attemptId,
+		activationId: activation.id,
+		nodeId: node.id,
+		parentActivationIds: activation.parentActivationIds,
+	});
+}
+
+function appendLifecycleActivationCompleted(
+	options: WorkflowRunnerOptions,
+	activation: WorkflowActivation,
+	output: WorkflowActivationOutput,
+): void {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	appendWorkflowAttemptActivationCompleted(options.host, {
+		attemptId: lifecycle.attemptId,
+		activationId: activation.id,
+		output,
+	});
+}
+
+function appendLifecycleActivationFailed(
+	options: WorkflowRunnerOptions,
+	activation: WorkflowActivation,
+	error: string,
+): void {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	appendWorkflowAttemptActivationFailed(options.host, {
+		attemptId: lifecycle.attemptId,
+		activationId: activation.id,
+		error,
+	});
 }
 
 function modelOverrideFromAudit(modelAudit: WorkflowModelResolutionAudit | undefined): string | undefined {
@@ -164,6 +287,7 @@ async function resolvePromptForActivation(
 		parentActivationIds: activation.parentActivationIds,
 		packageRoot: options.packageRoot,
 		maxPromptBytes: options.maxPromptBytes,
+		frozenResources: workflowFrozenResources(options),
 	});
 }
 
@@ -208,6 +332,21 @@ async function resolveScriptForExecution(options: WorkflowRunnerOptions, node: W
 	if (relative.startsWith("..") || path.isAbsolute(relative)) {
 		throw new WorkflowRunnerError(`workflow script file for node "${node.id}" escapes the package root`);
 	}
+	const snapshot = findFrozenResourceSnapshot(workflowFrozenResources(options), relative);
+	if (snapshot) {
+		return {
+			...node,
+			script: {
+				...node.script,
+				code: snapshot.text,
+			},
+		};
+	}
+	if (workflowFrozenResources(options)) {
+		throw new WorkflowRunnerError(
+			`workflow script file for node "${node.id}" was not captured in the workflow freeze: ${node.script.file}`,
+		);
+	}
 	try {
 		const code = await Bun.file(resolved).text();
 		return {
@@ -229,4 +368,17 @@ function nodeRequiresModel(node: WorkflowNode): boolean {
 
 function nodeConsumesPrompt(node: WorkflowNode): boolean {
 	return node.type === "agent" || node.type === "review" || node.type === "human";
+}
+
+function workflowFrozenResources(options: WorkflowRunnerOptions): FlowFreezeResourceSnapshot[] | undefined {
+	return options.frozenResources ?? options.lifecycle?.freeze.resourceSnapshots;
+}
+
+function findFrozenResourceSnapshot(
+	snapshots: FlowFreezeResourceSnapshot[] | undefined,
+	relativePath: string,
+): FlowFreezeResourceSnapshot | undefined {
+	if (!snapshots) return undefined;
+	const normalized = relativePath.split(path.sep).join("/");
+	return snapshots.find(snapshot => snapshot.path === normalized);
 }

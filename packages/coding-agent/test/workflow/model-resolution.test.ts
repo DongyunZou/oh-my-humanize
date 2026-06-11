@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { parseWorkflowDefinition } from "../../src/workflow/definition";
 import { resolveWorkflowNodeModel } from "../../src/workflow/model-resolution";
 
@@ -10,8 +11,7 @@ const anthropicModel = createModel({
 	reasoning: true,
 	thinking: {
 		mode: "budget",
-		minLevel: Effort.Minimal,
-		maxLevel: Effort.High,
+		efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
 	},
 });
 
@@ -31,7 +31,7 @@ function createModel(options: {
 	reasoning: boolean;
 	thinking?: Model<Api>["thinking"];
 }): Model<Api> {
-	return {
+	return buildModel({
 		id: options.id,
 		name: options.name,
 		api: "openai-completions",
@@ -43,7 +43,7 @@ function createModel(options: {
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 128000,
 		maxTokens: 8192,
-	};
+	});
 }
 
 function workflow(source: string) {
