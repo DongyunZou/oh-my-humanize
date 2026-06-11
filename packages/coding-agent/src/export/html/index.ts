@@ -9,7 +9,7 @@ import {
 	type WorkflowInspection,
 	type WorkflowLifecycleInspection,
 } from "../../workflow/inspection";
-import { reconstructWorkflowFamilies } from "../../workflow/lifecycle";
+import { reconstructWorkflowFamilies, WORKFLOW_LIFECYCLE_EVENT_TYPE } from "../../workflow/lifecycle";
 import { reconstructWorkflowRuns } from "../../workflow/run-store";
 // Pre-generated template (created by scripts/generate-template.ts at publish time)
 import { TEMPLATE } from "./template.generated";
@@ -135,7 +135,7 @@ export async function exportSessionToHtml(
 
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
-		entries: sm.getEntries(),
+		entries: redactSessionEntriesForHtmlExport(sm.getEntries()),
 		leafId: sm.getLeafId(),
 		systemPrompt: state?.systemPrompt.join("\n\n"),
 		tools: state?.tools?.map(t => ({ name: t.name, description: t.description })),
@@ -164,7 +164,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
-		entries: sm.getEntries(),
+		entries: redactSessionEntriesForHtmlExport(sm.getEntries()),
 		leafId: sm.getLeafId(),
 		workflowInspections: buildWorkflowInspections(sm.getEntries()),
 		workflowLifecycleInspections: buildWorkflowLifecycleInspections(sm.getEntries()),
@@ -183,4 +183,28 @@ function buildWorkflowInspections(entries: SessionEntry[]): WorkflowInspection[]
 
 function buildWorkflowLifecycleInspections(entries: SessionEntry[]): WorkflowLifecycleInspection[] {
 	return reconstructWorkflowFamilies(entries).map(family => buildWorkflowLifecycleInspection(family));
+}
+
+function redactSessionEntriesForHtmlExport(entries: SessionEntry[]): SessionEntry[] {
+	return entries.map(entry => redactWorkflowFreezeSnapshots(entry));
+}
+
+function redactWorkflowFreezeSnapshots(entry: SessionEntry): SessionEntry {
+	const cloned = structuredClone(entry);
+	if (!isRecord(cloned) || cloned.type !== "custom" || cloned.customType !== WORKFLOW_LIFECYCLE_EVENT_TYPE) {
+		return cloned;
+	}
+	const data = cloned.data;
+	if (!isRecord(data) || data.event !== "flow_frozen" || !isRecord(data.freeze)) return cloned;
+	const snapshots = data.freeze.resourceSnapshots;
+	if (!Array.isArray(snapshots)) return cloned;
+	data.freeze.resourceSnapshots = snapshots.map(snapshot => {
+		if (!isRecord(snapshot)) return snapshot;
+		return { ...snapshot, text: "[redacted from HTML export]" };
+	});
+	return cloned;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }

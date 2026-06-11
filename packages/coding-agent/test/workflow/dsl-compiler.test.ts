@@ -84,4 +84,67 @@ sequence:
 		expect(freeze.canonicalGraphHash).toStartWith("sha256:");
 		expect(freeze.sourceMapping.nodes.evaluate).toMatchObject({ sourceBlock: "workflow:0" });
 	});
+
+	it("rejects module cycles before graph compilation", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "cyclic"), { recursive: true });
+		const flowPath = path.join(dir, "cyclic.omhflow");
+		await Bun.write(
+			flowPath,
+			flowSource(`
+modules:
+  loop:
+    use: loop
+use: loop
+`),
+		);
+
+		await expect(loadWorkflowArtifact(flowPath)).rejects.toThrow('modules.loop.use creates a module cycle at "loop"');
+	});
+
+	it("rejects artifacts with multiple workflow blocks", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "multi"), { recursive: true });
+		const flowPath = path.join(dir, "multi.omhflow");
+		await Bun.write(
+			flowPath,
+			`${flowSource(`
+nodes:
+  build:
+    type: script
+edges: []
+`)}
+
+\`\`\`yaml workflow
+nodes:
+  review:
+    type: review
+edges: []
+\`\`\`
+`,
+		);
+
+		await expect(loadWorkflowArtifact(flowPath)).rejects.toThrow(
+			".omhflow must contain exactly one fenced workflow block",
+		);
+	});
 });
+
+function flowSource(workflowBlock: string): string {
+	return `---
+name: test-flow
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Test Flow
+
+\`\`\`yaml workflow
+${workflowBlock.trim()}
+\`\`\`
+`;
+}

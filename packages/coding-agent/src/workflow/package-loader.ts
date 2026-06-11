@@ -85,6 +85,9 @@ export async function loadWorkflowArtifact(inputPath: string): Promise<WorkflowA
 	if (workflowBlocks.length === 0) {
 		throw new WorkflowPackageError(`${flowPath}: .omhflow must contain at least one fenced workflow block`);
 	}
+	if (workflowBlocks.length > 1) {
+		throw new WorkflowPackageError(`${flowPath}: .omhflow must contain exactly one fenced workflow block`);
+	}
 	const definition = parseWorkflowDefinition(
 		JSON.stringify(definitionInput(metadata, workflowBlocks[0]!.value, flowPath)),
 		{

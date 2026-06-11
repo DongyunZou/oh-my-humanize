@@ -218,7 +218,7 @@ sequence:
 			["tryFusion", "evaluate"],
 		]);
 		expect(inspection.attempts.map(attempt => [attempt.id, attempt.status, attempt.checkpointId])).toEqual([
-			["attempt-search", "stopped", undefined],
+			["attempt-search", "completed", undefined],
 			["attempt-integrate", "completed", "checkpoint-search"],
 		]);
 		expect(inspection.attempts[0]?.activations.map(activation => [activation.nodeId, activation.summary])).toEqual([
@@ -273,6 +273,7 @@ sequence:
       type: review
       gates:
         - continue
+        - finish
 `,
 				),
 			),
@@ -423,8 +424,8 @@ sequence:
 		]);
 		expect(inspection.freezeIds).toEqual([earlyFreeze.id, middleFreeze.id, lateFreeze.id]);
 		expect(inspection.attempts.map(attempt => [attempt.id, attempt.status, attempt.checkpointId])).toEqual([
-			["attempt-early", "stopped", undefined],
-			["attempt-middle", "stopped", "checkpoint-early"],
+			["attempt-early", "completed", undefined],
+			["attempt-middle", "completed", "checkpoint-early"],
 			["attempt-late", "completed", "checkpoint-middle"],
 		]);
 		expect(inspection.checkpoints.map(checkpoint => [checkpoint.id, checkpoint.sourceMapping])).toEqual([

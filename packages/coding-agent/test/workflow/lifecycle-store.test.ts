@@ -192,6 +192,23 @@ describe("workflow lifecycle event store", () => {
 			["family-b", ["flowfreeze:family-b"]],
 		]);
 	});
+
+	it("merges duplicate family creation events without dropping earlier history", () => {
+		const host = createHost();
+		const freezeA = createFreeze("flowfreeze:first", ["build"]);
+		const freezeB = createFreeze("flowfreeze:second", ["review"]);
+
+		startWorkflowFamily(host, { familyId: "family-1", objective: "first objective" });
+		recordWorkflowFreeze(host, freezeA, { familyId: "family-1" });
+		startWorkflowFamily(host, { familyId: "family-1", objective: "second objective" });
+		recordWorkflowFreeze(host, freezeB, { familyId: "family-1" });
+
+		const reconstructed = reconstructWorkflowFamilies(host.getBranch());
+
+		expect(reconstructed).toHaveLength(1);
+		expect(reconstructed[0]?.objective).toBe("first objective");
+		expect(reconstructed[0]?.freezes.map(freeze => freeze.id)).toEqual(["flowfreeze:first", "flowfreeze:second"]);
+	});
 });
 
 function createFreeze(id: string, nodeIds: string[]): FlowFreeze {

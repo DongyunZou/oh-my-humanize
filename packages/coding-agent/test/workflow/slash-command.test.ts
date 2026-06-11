@@ -16,6 +16,7 @@ import {
 	appendWorkflowAttemptActivationCompleted,
 	appendWorkflowAttemptActivationStarted,
 	approveWorkflowChangeRequest,
+	completeWorkflowAttempt,
 	createWorkflowCheckpoint,
 	proposeWorkflowChangeRequest,
 	reconstructWorkflowFamilies,
@@ -524,7 +525,7 @@ edges: []
 	it("stops a running lifecycle attempt, checkpoints it, and restarts from a freeze", async () => {
 		const entries: CapturedEntry[] = [];
 		const freezeA = createFreeze("flowfreeze:a", ["build", "review"]);
-		const freezeB = createFreeze("flowfreeze:b", ["review"]);
+		const freezeB = createFreeze("flowfreeze:b", ["verify"]);
 		const host = createHostFromEntries(entries);
 		startWorkflowFamily(host, { familyId: "family-1" });
 		recordWorkflowFreeze(host, freezeA, { familyId: "family-1" });
@@ -544,7 +545,7 @@ edges: []
 		appendWorkflowAttemptActivationCompleted(host, {
 			attemptId: "attempt-1",
 			activationId: "activation-1",
-			output: { summary: "built" },
+			output: { summary: "built", statePatch: [{ op: "set", path: "/build/status", value: "built" }] },
 		});
 		appendWorkflowAttemptActivationStarted(host, {
 			attemptId: "attempt-1",
@@ -559,8 +560,8 @@ edges: []
 			actor: "agent:reviewer",
 			origin: "internal-agent",
 			reason: "switch to reviewed freeze",
-			operations: [{ op: "add_node", node: { id: "review", type: "script" } }],
-			frontierMapping: { review: "review" },
+			operations: [{ op: "add_node", node: { id: "verify", type: "script" } }],
+			frontierMapping: { review: "verify" },
 		});
 		approveWorkflowChangeRequest(host, {
 			changeRequestId: "change-1",
@@ -589,7 +590,7 @@ edges: []
 		});
 
 		const families = reconstructWorkflowFamilies(entries);
-		expect(calls).toEqual(["review"]);
+		expect(calls).toEqual(["verify"]);
 		expect(output.at(-2)).toContain("Workflow checkpoint: attempt-1:checkpoint-1");
 		expect(output.at(-1)).toContain("Workflow restart attempt: attempt-2");
 		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.freezeId, attempt.status])).toEqual([
@@ -601,6 +602,8 @@ edges: []
 			completedActivationIds: ["activation-1"],
 			abortedActivationIds: ["activation-2"],
 			frontierNodeIds: ["review"],
+			state: { build: { status: "built" } },
+			sourceMapping: { review: "verify" },
 		});
 		expect(families[0]?.changeRequests).toMatchObject([
 			{
@@ -608,9 +611,37 @@ edges: []
 				status: "approved",
 				actor: "agent:reviewer",
 				approvedBy: "human:sihao",
-				frontierMapping: { review: "review" },
+				frontierMapping: { review: "verify" },
 			},
 		]);
+	});
+
+	it("does not stop terminal lifecycle attempts", async () => {
+		const entries: CapturedEntry[] = [];
+		const freeze = createFreeze("flowfreeze:a", ["build"]);
+		const host = createHostFromEntries(entries);
+		startWorkflowFamily(host, { familyId: "family-1" });
+		recordWorkflowFreeze(host, freeze, { familyId: "family-1" });
+		startWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			freezeId: freeze.id,
+			startNodeId: "build",
+			runtimeBindingSnapshot: binding("binding-1"),
+		});
+		completeWorkflowAttempt(host, {
+			attemptId: "attempt-1",
+			summary: "already complete",
+		});
+		const { output, runtime } = createRuntime(entries);
+
+		expect(await executeAcpBuiltinSlashCommand("/workflow stop attempt-1 --deadline-ms 5", runtime)).toEqual({
+			consumed: true,
+		});
+
+		expect(output[0]).toBe("Workflow attempt is not running: attempt-1 (completed)");
+		expect(reconstructWorkflowFamilies(entries)[0]?.attempts[0]?.status).toBe("completed");
+		expect(reconstructWorkflowFamilies(entries)[0]?.checkpoints).toEqual([]);
 	});
 
 	it("rejects restart when checkpoint frontier cannot be mapped into the selected freeze", async () => {

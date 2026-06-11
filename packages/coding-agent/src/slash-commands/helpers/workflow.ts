@@ -24,12 +24,14 @@ import {
 	startWorkflowFamily,
 	type WorkflowChangeRequestOrigin,
 	type WorkflowCheckpointSnapshot,
+	type WorkflowRunAttemptSnapshot,
 	type WorkflowRunFamilySnapshot,
 } from "../../workflow/lifecycle";
 import { loadWorkflowArtifact, loadWorkflowPackage } from "../../workflow/package-loader";
 import type { WorkflowGraphPatchOperation } from "../../workflow/patches";
 import { reconstructWorkflowRuns } from "../../workflow/run-store";
 import { runWorkflow, type WorkflowRunnerModelResolutionOptions } from "../../workflow/runner";
+import { applyWorkflowStatePatch } from "../../workflow/state";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
 import { commandConsumed, parseSubcommand, usage } from "./parse";
 
@@ -245,6 +247,9 @@ async function handleStopCommand(rest: string, runtime: SlashCommandRuntime): Pr
 	const family = families.find(candidate => candidate.attempts.some(attempt => attempt.id === parsed.attemptId));
 	const attempt = family?.attempts.find(candidate => candidate.id === parsed.attemptId);
 	if (!family || !attempt) return usage(`Workflow attempt not found: ${parsed.attemptId}`, runtime);
+	if (attempt.status !== "running") {
+		return usage(`Workflow attempt is not running: ${attempt.id} (${attempt.status})`, runtime);
+	}
 	const checkpointId = `${attempt.id}:checkpoint-${family.checkpoints.length + 1}`;
 	const runningActivations = attempt.activations.filter(activation => activation.status === "running");
 	requestWorkflowAttemptStop(runtime.sessionManager, {
@@ -272,8 +277,8 @@ async function handleStopCommand(rest: string, runtime: SlashCommandRuntime): Pr
 		completedActivationIds,
 		abortedActivationIds,
 		frontierNodeIds,
-		state: {},
-		sourceMapping: Object.fromEntries(frontierNodeIds.map(nodeId => [nodeId, nodeId])),
+		state: deriveLifecycleAttemptState(attempt),
+		sourceMapping: checkpointSourceMapping(family, attempt.id, frontierNodeIds),
 	});
 	await runtime.output(formatWorkflowCheckpoint(checkpoint));
 	return commandConsumed();
@@ -637,6 +642,34 @@ function resolveRestartStartNode(
 		if (nodeIds.has(mapped)) return mapped;
 	}
 	return undefined;
+}
+
+function deriveLifecycleAttemptState(attempt: WorkflowRunAttemptSnapshot): Record<string, unknown> {
+	const state: Record<string, unknown> = {};
+	for (const activation of attempt.activations) {
+		if (activation.status !== "completed" || !activation.output?.statePatch) continue;
+		applyWorkflowStatePatch(state, activation.output.statePatch);
+	}
+	return state;
+}
+
+function checkpointSourceMapping(
+	family: WorkflowRunFamilySnapshot,
+	attemptId: string,
+	frontierNodeIds: string[],
+): Record<string, string> {
+	const approvedMappings = family.changeRequests
+		.filter(
+			request =>
+				request.status === "approved" && (request.attemptId === undefined || request.attemptId === attemptId),
+		)
+		.map(request => request.frontierMapping);
+	return Object.fromEntries(
+		frontierNodeIds.map(nodeId => [
+			nodeId,
+			approvedMappings.find(mapping => mapping[nodeId] !== undefined)?.[nodeId] ?? nodeId,
+		]),
+	);
 }
 
 function formatWorkflowCheckpoint(checkpoint: WorkflowCheckpointSnapshot): string {

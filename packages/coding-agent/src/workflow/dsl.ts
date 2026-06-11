@@ -40,6 +40,7 @@ export function compileWorkflowDslBlock(block: Record<string, unknown>): Workflo
 
 class WorkflowDslCompiler {
 	#nodes = new Map<string, Record<string, unknown>>();
+	#moduleStack = new Set<string>();
 	readonly edges: Record<string, unknown>[] = [];
 	readonly modules: Record<string, unknown>;
 
@@ -62,7 +63,15 @@ class WorkflowDslCompiler {
 			const moduleName = expectString(step.use, `${path}.use`);
 			const module = this.modules[moduleName];
 			if (module === undefined) throw new WorkflowDslError(`${path}.use references unknown module "${moduleName}"`);
-			return this.compileStep(module, `modules.${moduleName}`);
+			if (this.#moduleStack.has(moduleName)) {
+				throw new WorkflowDslError(`${path}.use creates a module cycle at "${moduleName}"`);
+			}
+			this.#moduleStack.add(moduleName);
+			try {
+				return this.compileStep(module, `modules.${moduleName}`);
+			} finally {
+				this.#moduleStack.delete(moduleName);
+			}
 		}
 		if (step.sequence !== undefined) {
 			return this.compileSequence(expectArray(step.sequence, `${path}.sequence`), `${path}.sequence`);

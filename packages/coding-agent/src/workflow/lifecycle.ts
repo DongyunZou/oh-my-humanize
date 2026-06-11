@@ -560,6 +560,12 @@ export function reconstructWorkflowFamilies(entries: WorkflowLifecycleBranchEntr
 		const event = lifecycleEventFromEntry(entry);
 		if (!event) continue;
 		if (event.event === "family_created") {
+			const existing = families.get(event.familyId);
+			if (existing) {
+				if (existing.objective === undefined && event.objective !== undefined) existing.objective = event.objective;
+				currentFamilyId = event.familyId;
+				continue;
+			}
 			const family: WorkflowRunFamilySnapshot = {
 				id: event.familyId,
 				objective: event.objective,
@@ -672,6 +678,7 @@ export function reconstructWorkflowFamilies(entries: WorkflowLifecycleBranchEntr
 		if (event.event === "stop_requested") {
 			const attempt = attempts.get(event.attemptId);
 			if (!attempt) continue;
+			if (attempt.status === "completed" || attempt.status === "failed" || attempt.status === "stopped") continue;
 			attempt.status = "stop_requested";
 			attempt.stop = { deadlineMs: event.deadlineMs };
 			if (event.reason !== undefined) attempt.stop.reason = event.reason;

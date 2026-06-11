@@ -37,6 +37,7 @@ edges: []
 `;
 
 interface ExportedSessionData {
+	entries?: unknown[];
 	workflowInspections?: WorkflowInspection[];
 	workflowLifecycleInspections?: WorkflowLifecycleInspection[];
 }
@@ -187,6 +188,29 @@ describe("HTML export workflow inspection support", () => {
 		}
 	});
 
+	it("redacts frozen resource text from raw HTML session entries", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-html-workflow-export-"));
+		const sm = SessionManager.create(dir, dir);
+		const outputPath = path.join(dir, "session.html");
+		try {
+			startWorkflowFamily(sm, { familyId: "family-export" });
+			recordWorkflowFreeze(sm, createFreeze("flowfreeze:export-secret", "SECRET_PROMPT_TEXT"), {
+				familyId: "family-export",
+			});
+
+			await exportSessionToHtml(sm, undefined, { outputPath });
+			const html = await Bun.file(outputPath).text();
+			const exported = decodeSessionData(html);
+
+			expect(html).not.toContain("SECRET_PROMPT_TEXT");
+			expect(JSON.stringify(exported.entries)).not.toContain("SECRET_PROMPT_TEXT");
+			expect(JSON.stringify(exported.entries)).toContain("[redacted from HTML export]");
+		} finally {
+			await sm.close();
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("includes a workflow overview renderer in the generated template", () => {
 		expect(TEMPLATE).toContain("renderWorkflowOverview");
 		expect(TEMPLATE).toContain("workflow-overview");
@@ -200,7 +224,7 @@ function decodeSessionData(html: string): ExportedSessionData {
 	return JSON.parse(Buffer.from(match[1], "base64").toString("utf8")) as ExportedSessionData;
 }
 
-function createFreeze(id: string): FlowFreeze {
+function createFreeze(id: string, resourceText?: string): FlowFreeze {
 	return {
 		id,
 		schemaVersion: "omhflow/v1",
@@ -208,7 +232,17 @@ function createFreeze(id: string): FlowFreeze {
 		resourceDir: id,
 		mainContentHash: `sha256:main-${id}`,
 		resourceHashes: [],
-		resourceSnapshots: [],
+		resourceSnapshots:
+			resourceText === undefined
+				? []
+				: [
+						{
+							path: "prompts/build.md",
+							hash: `sha256:resource-${id}`,
+							text: resourceText,
+							byteLength: resourceText.length,
+						},
+					],
 		canonicalGraphHash: `sha256:graph-${id}`,
 		sourceMapping: {
 			workflowBlocks: [{ id: "workflow:0", language: "yaml" }],
