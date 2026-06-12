@@ -150,6 +150,69 @@ edges:
 		expect(definition.edges[0]?.condition?.source).toBe("state.score >= 0.8 && exists(outputs.review.verdict)");
 	});
 
+	it("rejects conditions that reference unknown output nodes", () => {
+		const source = `
+name: invalid-output-reference
+version: 1
+nodes:
+  build:
+    type: agent
+  review:
+    type: review
+edges:
+  - from: review
+    to: build
+    when: outputs.missing.verdict == "retry"
+`;
+
+		expect(() => parseWorkflowDefinition(source, { sourcePath: "condition.yml" })).toThrow(
+			'condition.yml: edges.0.when references unknown output node "missing"',
+		);
+	});
+
+	it("rejects conditions outside the state and outputs roots", () => {
+		const source = `
+name: invalid-condition-root
+version: 1
+nodes:
+  build:
+    type: agent
+  review:
+    type: review
+edges:
+  - from: build
+    to: review
+    when: context.verdict == "retry"
+`;
+
+		expect(() => parseWorkflowDefinition(source, { sourcePath: "condition.yml" })).toThrow(
+			"condition.yml: edges.0.when must reference state.* or outputs.*",
+		);
+	});
+
+	it("rejects review verdict conditions that reference undeclared gates", () => {
+		const source = `
+name: invalid-review-gate
+version: 1
+nodes:
+  fix:
+    type: agent
+  review:
+    type: review
+    gates:
+      - retry
+      - complete
+edges:
+  - from: review
+    to: fix
+    when: outputs.review.verdict == "needs-work"
+`;
+
+		expect(() => parseWorkflowDefinition(source, { sourcePath: "condition.yml" })).toThrow(
+			'condition.yml: edges.0.when references undeclared verdict "needs-work" for review node "review"',
+		);
+	});
+
 	it("preserves node state read and write scopes", () => {
 		const source = `
 name: scoped-state

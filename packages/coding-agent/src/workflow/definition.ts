@@ -1,5 +1,5 @@
 import { YAML } from "bun";
-import { parseWorkflowCondition, WorkflowConditionError } from "./condition";
+import { collectWorkflowConditionReferences, parseWorkflowCondition, WorkflowConditionError } from "./condition";
 
 export type WorkflowNodeType = "agent" | "script" | "human" | "review";
 export type WorkflowModelUnavailablePolicy = "fallback-to-parent" | "fail";
@@ -149,6 +149,7 @@ export function parseWorkflowDefinition(
 	const capabilities = parseCapabilityContract(root.capabilities, "capabilities", options.sourcePath);
 	const migrations = parseMigrationRules(root.migrations, "migrations", options.sourcePath);
 	validateEdgeReferences(nodes, edges, options.sourcePath);
+	validateConditionReferences(nodes, edges, options.sourcePath);
 	validateWaitForReferences(nodes, options.sourcePath);
 	validatePromptSourceReferences(nodes, options.sourcePath);
 	validateMigrationTargets(nodes, migrations, options.sourcePath);
@@ -325,6 +326,41 @@ function validateEdgeReferences(nodes: WorkflowNode[], edges: WorkflowEdge[], so
 		}
 		if (!nodeIds.has(edge.to)) {
 			throw new WorkflowDefinitionError(`edge references unknown target node "${edge.to}"`, sourcePath);
+		}
+	}
+}
+
+function validateConditionReferences(nodes: WorkflowNode[], edges: WorkflowEdge[], sourcePath?: string): void {
+	const nodesById = new Map(nodes.map(node => [node.id, node]));
+	for (const [index, edge] of edges.entries()) {
+		if (edge.condition === undefined) continue;
+		for (const reference of collectWorkflowConditionReferences(edge.condition.source)) {
+			const [root, outputNodeId, field] = reference.path;
+			const path = `edges.${index}.when`;
+			if (root !== "state" && root !== "outputs") {
+				throw new WorkflowDefinitionError(`${path} must reference state.* or outputs.*`, sourcePath);
+			}
+			if (root !== "outputs") continue;
+			if (outputNodeId === undefined) {
+				throw new WorkflowDefinitionError(`${path} must reference outputs.<nodeId>.*`, sourcePath);
+			}
+			const outputNode = nodesById.get(outputNodeId);
+			if (!outputNode) {
+				throw new WorkflowDefinitionError(`${path} references unknown output node "${outputNodeId}"`, sourcePath);
+			}
+			if (
+				outputNode.type === "review" &&
+				field === "verdict" &&
+				reference.kind === "comparison" &&
+				typeof reference.right === "string" &&
+				outputNode.gates !== undefined &&
+				!outputNode.gates.includes(reference.right)
+			) {
+				throw new WorkflowDefinitionError(
+					`${path} references undeclared verdict "${reference.right}" for review node "${outputNodeId}"`,
+					sourcePath,
+				);
+			}
 		}
 	}
 }

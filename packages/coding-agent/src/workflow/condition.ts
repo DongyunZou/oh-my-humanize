@@ -40,6 +40,13 @@ export interface WorkflowConditionContext {
 	outputs?: Record<string, unknown>;
 }
 
+export interface WorkflowConditionReference {
+	path: string[];
+	kind: "comparison" | "exists";
+	operator?: WorkflowConditionOperator;
+	right?: WorkflowConditionLiteral;
+}
+
 export class WorkflowConditionError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -62,6 +69,39 @@ export function evaluateWorkflowCondition(
 ): boolean {
 	const expression = typeof condition === "string" ? parseWorkflowCondition(condition) : condition;
 	return evaluateAst(expression.ast, context);
+}
+
+export function collectWorkflowConditionReferences(
+	condition: string | WorkflowConditionExpression,
+): WorkflowConditionReference[] {
+	const expression = typeof condition === "string" ? parseWorkflowCondition(condition) : condition;
+	const references: WorkflowConditionReference[] = [];
+	collectAstReferences(expression.ast, references);
+	return references;
+}
+
+function collectAstReferences(ast: WorkflowConditionAst, references: WorkflowConditionReference[]): void {
+	switch (ast.kind) {
+		case "comparison":
+			references.push({
+				path: ast.leftPath,
+				kind: "comparison",
+				operator: ast.operator,
+				right: ast.right,
+			});
+			break;
+		case "exists":
+			references.push({ path: ast.path, kind: "exists" });
+			break;
+		case "and":
+		case "or":
+			collectAstReferences(ast.left, references);
+			collectAstReferences(ast.right, references);
+			break;
+		case "not":
+			collectAstReferences(ast.expression, references);
+			break;
+	}
 }
 
 function evaluateAst(ast: WorkflowConditionAst, context: WorkflowConditionContext): boolean {
