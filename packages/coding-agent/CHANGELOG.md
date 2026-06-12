@@ -6,6 +6,11 @@
 
 - Added immutable workflow lifecycle support for `.omhflow` artifacts: strict freeze manifests, runtime binding snapshots, family/attempt/checkpoint/change-request events, lifecycle-aware `/workflow` commands, and HTML export audit data.
 - Added structured `.omhflow` DSL modules, sequences, parallel joins, workflow manager listing/rejection commands, deterministic workflow benchmark coverage, and stricter checkpoint frontier validation for lifecycle restarts.
+
+### Fixed
+
+- Fixed workflow graph patch proposals to reject edge conditions that reference missing output nodes or undeclared review verdict gates before a mutable flow can be refrozen.
+
 ## [15.12.3] - 2026-06-12
 
 ### Fixed

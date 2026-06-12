@@ -213,6 +213,53 @@ describe("workflow graph patch API", () => {
 		expect(() =>
 			applyWorkflowGraphPatch(
 				definition,
+				[
+					{
+						op: "add_edge",
+						edge: {
+							from: "review",
+							to: "build",
+							condition: { source: 'outputs.missing.verdict == "retry"' },
+						},
+					},
+				],
+				{ actor: "supervisor" },
+			),
+		).toThrow('workflow graph patch condition references unknown output node "missing"');
+		expect(() =>
+			applyWorkflowGraphPatch(
+				parseWorkflowDefinition(
+					`
+name: review-gates
+version: 1
+nodes:
+  fix:
+    type: agent
+  review:
+    type: review
+    gates:
+      - retry
+      - complete
+edges:
+  - from: fix
+    to: review
+`,
+					{ sourcePath: "workflow.yml" },
+				),
+				[
+					{
+						op: "replace_edge_condition",
+						from: "fix",
+						to: "review",
+						condition: 'outputs.review.verdict == "needs-work"',
+					},
+				],
+				{ actor: "supervisor" },
+			),
+		).toThrow('workflow graph patch condition references undeclared verdict "needs-work" for review node "review"');
+		expect(() =>
+			applyWorkflowGraphPatch(
+				definition,
 				[{ op: "replace_node_model", nodeId: "missing", model: { selector: "provider/model:high" } }],
 				{ actor: "supervisor" },
 			),

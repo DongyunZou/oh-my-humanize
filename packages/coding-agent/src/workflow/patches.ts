@@ -1,4 +1,4 @@
-import { parseWorkflowCondition, WorkflowConditionError } from "./condition";
+import { diagnoseWorkflowConditionReferences, parseWorkflowCondition, WorkflowConditionError } from "./condition";
 import type {
 	WorkflowDefinition,
 	WorkflowEdge,
@@ -313,7 +313,7 @@ function addEdge(definition: WorkflowDefinition, edge: WorkflowEdge, preview: Wo
 		);
 	}
 	validateEdgeReferences(definition, edge);
-	validateEdgeCondition(edge.condition?.source);
+	validateEdgeCondition(edge.condition?.source, definition);
 	definition.edges.push(cloneEdge(edge));
 	preview.addedEdges.push(edgeReference(edge));
 }
@@ -341,7 +341,7 @@ function replaceEdgeCondition(
 			`workflow graph patch references unknown edge "${operation.from}" -> "${operation.to}"`,
 		);
 	}
-	validateEdgeCondition(operation.condition);
+	validateEdgeCondition(operation.condition, definition);
 	if (operation.condition === undefined) {
 		delete edge.condition;
 	} else {
@@ -446,7 +446,7 @@ function validateDefinitionGraph(definition: WorkflowDefinition): void {
 	validatePromptSourceReferences(definition, nodeIds);
 	for (const edge of definition.edges) {
 		validateEdgeReferences(definition, edge);
-		validateEdgeCondition(edge.condition?.source);
+		validateEdgeCondition(edge.condition?.source, definition);
 	}
 }
 
@@ -490,15 +490,19 @@ function validateEdgeReferences(definition: WorkflowDefinition, edge: WorkflowEd
 	}
 }
 
-function validateEdgeCondition(source: string | undefined): void {
+function validateEdgeCondition(source: string | undefined, definition: WorkflowDefinition): void {
 	if (source === undefined) return;
+	const trimmed = source.trim();
 	try {
-		parseWorkflowCondition(source.trim());
+		parseWorkflowCondition(trimmed);
 	} catch (error) {
 		if (error instanceof WorkflowConditionError) {
 			throw new WorkflowGraphPatchError(`workflow graph patch condition is invalid: ${error.message}`);
 		}
 		throw error;
+	}
+	for (const diagnostic of diagnoseWorkflowConditionReferences(trimmed, definition.nodes)) {
+		throw new WorkflowGraphPatchError(`workflow graph patch condition ${diagnostic}`);
 	}
 }
 

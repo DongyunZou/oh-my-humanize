@@ -47,6 +47,12 @@ export interface WorkflowConditionReference {
 	right?: WorkflowConditionLiteral;
 }
 
+export interface WorkflowConditionReferenceNode {
+	id: string;
+	type: string;
+	gates?: readonly string[];
+}
+
 export class WorkflowConditionError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -78,6 +84,42 @@ export function collectWorkflowConditionReferences(
 	const references: WorkflowConditionReference[] = [];
 	collectAstReferences(expression.ast, references);
 	return references;
+}
+
+export function diagnoseWorkflowConditionReferences(
+	condition: string | WorkflowConditionExpression,
+	nodes: readonly WorkflowConditionReferenceNode[],
+): string[] {
+	const nodesById = new Map(nodes.map(node => [node.id, node]));
+	const diagnostics: string[] = [];
+	for (const reference of collectWorkflowConditionReferences(condition)) {
+		const [root, outputNodeId, field] = reference.path;
+		if (root !== "state" && root !== "outputs") {
+			diagnostics.push("must reference state.* or outputs.*");
+			continue;
+		}
+		if (root !== "outputs") continue;
+		if (outputNodeId === undefined) {
+			diagnostics.push("must reference outputs.<nodeId>.*");
+			continue;
+		}
+		const outputNode = nodesById.get(outputNodeId);
+		if (!outputNode) {
+			diagnostics.push(`references unknown output node "${outputNodeId}"`);
+			continue;
+		}
+		if (
+			outputNode.type === "review" &&
+			field === "verdict" &&
+			reference.kind === "comparison" &&
+			typeof reference.right === "string" &&
+			outputNode.gates !== undefined &&
+			!outputNode.gates.includes(reference.right)
+		) {
+			diagnostics.push(`references undeclared verdict "${reference.right}" for review node "${outputNodeId}"`);
+		}
+	}
+	return diagnostics;
 }
 
 function collectAstReferences(ast: WorkflowConditionAst, references: WorkflowConditionReference[]): void {
