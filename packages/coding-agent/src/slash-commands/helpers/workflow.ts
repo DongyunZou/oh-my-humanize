@@ -48,7 +48,7 @@ import {
 } from "../../workflow/lifecycle";
 import { resolveWorkflowNodeModel } from "../../workflow/model-resolution";
 import type { WorkflowNodeRuntimeHost } from "../../workflow/node-runtime";
-import { loadWorkflowArtifact, loadWorkflowPackage } from "../../workflow/package-loader";
+import { loadWorkflowArtifact, loadWorkflowPackage, type WorkflowArtifact } from "../../workflow/package-loader";
 import { applyWorkflowGraphPatch, type WorkflowGraphPatchOperation } from "../../workflow/patches";
 import { reconstructWorkflowRuns } from "../../workflow/run-store";
 import {
@@ -110,6 +110,11 @@ interface WorkflowApplyChangeArgs {
 	freezeId?: string;
 	draftId?: string;
 	draftPath?: string;
+}
+
+interface WorkflowDraftFreezeApplication {
+	changeRequestId: string;
+	actor: string;
 }
 
 interface WorkflowListArgs {
@@ -374,14 +379,68 @@ async function handleFreezeCommand(rest: string, runtime: SlashCommandRuntime): 
 	const artifact = await loadWorkflowArtifact(resolveWorkflowPath(parsed.workflowPath, runtime.cwd));
 	const freeze = await freezeWorkflowArtifact(artifact);
 	const familyId = parsed.familyId ?? `${freeze.id}:family`;
+	const existingFamily = reconstructWorkflowFamilies(runtime.sessionManager.getBranch()).find(
+		candidate => candidate.id === familyId,
+	);
+	const draftApplication = workflowDraftFreezeApplication(existingFamily, artifact, freeze);
+	if (draftApplication !== undefined && "error" in draftApplication) return usage(draftApplication.error, runtime);
 	startWorkflowFamily(runtime.sessionManager, { familyId });
 	recordWorkflowFreeze(runtime.sessionManager, freeze, { familyId });
-	await runtime.output(`Workflow freeze: ${freeze.id}\nFamily: ${familyId}`);
+	if (draftApplication !== undefined) {
+		recordWorkflowChangeRequestApplied(runtime.sessionManager, {
+			changeRequestId: draftApplication.changeRequestId,
+			actor: draftApplication.actor,
+			target: "freeze",
+			freezeId: freeze.id,
+		});
+	}
+	const lines = [`Workflow freeze: ${freeze.id}`, `Family: ${familyId}`];
+	if (draftApplication !== undefined) {
+		lines.push(`Workflow change request applied: ${draftApplication.changeRequestId} -> freeze ${freeze.id}`);
+	}
+	await runtime.output(lines.join("\n"));
 	const family = reconstructWorkflowFamilies(runtime.sessionManager.getBranch()).find(
 		candidate => candidate.id === familyId,
 	);
 	if (family) await emitWorkflowGraphViews([buildWorkflowGraphView(family)], runtime);
 	return commandConsumed();
+}
+
+function workflowDraftFreezeApplication(
+	family: WorkflowRunFamilySnapshot | undefined,
+	artifact: WorkflowArtifact,
+	freeze: FlowFreeze,
+): WorkflowDraftFreezeApplication | { error: string } | undefined {
+	if (family === undefined) return undefined;
+	const changeRequestId = workflowDraftChangeRequestId(artifact.source);
+	if (changeRequestId === undefined) return undefined;
+	const request = family.changeRequests.find(candidate => candidate.id === changeRequestId);
+	if (request === undefined) return undefined;
+	const draftId = path.basename(artifact.flowPath);
+	const draftApplication = request.applications.find(
+		application => application.target === "draft" && application.draftId === draftId,
+	);
+	if (draftApplication === undefined) return undefined;
+	if (request.status !== "approved") {
+		return { error: `Workflow change request is not approved: ${request.id} (${request.status})` };
+	}
+	if (
+		request.applications.some(application => application.target === "freeze" && application.freezeId === freeze.id)
+	) {
+		return undefined;
+	}
+	const freezeError = workflowChangeFreezeApplicationError(request, freeze);
+	if (freezeError !== undefined) return { error: freezeError };
+	return {
+		changeRequestId: request.id,
+		actor: draftApplication.actor,
+	};
+}
+
+function workflowDraftChangeRequestId(source: string): string | undefined {
+	const match = /^Generated from workflow change request (.+)\.$/m.exec(source);
+	const id = match?.[1]?.trim();
+	return id ? id : undefined;
 }
 
 async function handleRequestChangeCommand(rest: string, runtime: SlashCommandRuntime): Promise<SlashCommandResult> {
@@ -486,14 +545,16 @@ async function handleApplyChangeCommand(rest: string, runtime: SlashCommandRunti
 	}
 	const target = parsed.freezeId !== undefined ? "freeze" : "draft";
 	const draftId = parsed.draftId ?? generatedDraftId;
-	recordWorkflowChangeRequestApplied(runtime.sessionManager, {
-		changeRequestId: request.id,
-		actor: parsed.actor ?? "human",
-		target,
-		...(parsed.freezeId !== undefined ? { freezeId: parsed.freezeId } : {}),
-		...(draftId !== undefined ? { draftId } : {}),
-		...(parsed.reason !== undefined ? { reason: parsed.reason } : {}),
-	});
+	if (!workflowChangeRequestAlreadyApplied(request, target, parsed.freezeId, draftId)) {
+		recordWorkflowChangeRequestApplied(runtime.sessionManager, {
+			changeRequestId: request.id,
+			actor: parsed.actor ?? "human",
+			target,
+			...(parsed.freezeId !== undefined ? { freezeId: parsed.freezeId } : {}),
+			...(draftId !== undefined ? { draftId } : {}),
+			...(parsed.reason !== undefined ? { reason: parsed.reason } : {}),
+		});
+	}
 	const targetId = parsed.freezeId ?? draftId;
 	const updatedFamily = findWorkflowFamilyByChangeRequest(
 		reconstructWorkflowFamilies(runtime.sessionManager.getBranch()),
@@ -502,6 +563,20 @@ async function handleApplyChangeCommand(rest: string, runtime: SlashCommandRunti
 	await runtime.output(`Workflow change request applied: ${request.id} -> ${target} ${targetId}`);
 	if (updatedFamily) await emitWorkflowGraphViews([buildWorkflowGraphView(updatedFamily)], runtime);
 	return commandConsumed();
+}
+
+function workflowChangeRequestAlreadyApplied(
+	request: WorkflowChangeRequestRecord,
+	target: "draft" | "freeze",
+	freezeId: string | undefined,
+	draftId: string | undefined,
+): boolean {
+	return request.applications.some(application => {
+		if (target === "freeze") {
+			return application.target === "freeze" && application.freezeId === freezeId;
+		}
+		return application.target === "draft" && application.draftId === draftId;
+	});
 }
 
 async function handleStopCommand(rest: string, runtime: SlashCommandRuntime): Promise<SlashCommandResult> {

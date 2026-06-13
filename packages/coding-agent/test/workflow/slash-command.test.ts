@@ -930,7 +930,7 @@ edges: []
 			abortedActivationIds: [],
 			frontierNodeIds: ["build"],
 			state: {},
-			sourceMapping: { build: "verify" },
+			sourceMapping: { build: "build" },
 		});
 		expect(
 			await executeAcpBuiltinSlashCommand(
@@ -1070,7 +1070,14 @@ edges: []
 			}),
 		);
 		const entries: CapturedEntry[] = [];
-		const { output, runtime } = createRuntime(entries);
+		const restartedNodes: string[] = [];
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => {
+				restartedNodes.push(input.node.id);
+				return { summary: `${input.node.id} ran` };
+			},
+		};
+		const { output, runtime } = createRuntime(entries, runtimeHost);
 
 		expect(
 			await executeAcpBuiltinSlashCommand(
@@ -1101,7 +1108,7 @@ edges: []
 			abortedActivationIds: [],
 			frontierNodeIds: ["build"],
 			state: {},
-			sourceMapping: { build: "verify" },
+			sourceMapping: { build: "build" },
 		});
 		expect(
 			await executeAcpBuiltinSlashCommand(
@@ -1129,6 +1136,14 @@ edges: []
 		expect(
 			await executeAcpBuiltinSlashCommand(`/workflow freeze ${draftPath} --family-id family-draft`, runtime),
 		).toEqual({ consumed: true });
+		const draftFreezeId = reconstructWorkflowFamilies(entries)[0]?.freezes.at(-1)?.id;
+		expect(draftFreezeId).toBeDefined();
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow restart attempt-1:checkpoint-1 --freeze-id ${draftFreezeId}`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
 
 		const family = reconstructWorkflowFamilies(entries)[0];
 		const draftId = path.basename(draftPath);
@@ -1137,12 +1152,18 @@ edges: []
 		).toBeTrue();
 		expect(family?.freezes).toHaveLength(2);
 		expect(family?.freezes.at(-1)?.definition.nodes.map(node => node.id)).toEqual(["build", "verify"]);
+		expect(restartedNodes).toEqual(["verify"]);
 		expect(family?.changeRequests[0]?.applications).toMatchObject([
 			{
 				actor: "human:sihao",
 				target: "draft",
 				draftId,
 				reason: "draft generated",
+			},
+			{
+				actor: "human:sihao",
+				target: "freeze",
+				freezeId: draftFreezeId,
 			},
 		]);
 	});
