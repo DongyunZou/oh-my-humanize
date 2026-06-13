@@ -31,6 +31,9 @@ export interface RuntimeBindingSnapshot {
 	modelBindings?: Record<string, WorkflowModelResolutionAudit>;
 	tools: string[];
 	agents: string[];
+	plugins?: string[];
+	extensions?: string[];
+	skills?: string[];
 	unavailable: string[];
 	warnings: string[];
 }

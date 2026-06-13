@@ -253,6 +253,39 @@ edges: []
 		expect(definition.nodes[0]?.writes).toEqual(["/review"]);
 	});
 
+	it("preserves plugin, extension, and skill capability declarations", () => {
+		const source = `
+name: capability-contract
+version: 1
+capabilities:
+  tools:
+    - task
+  agents:
+    - reviewer
+  plugins:
+    - humanize-loop
+    - optimizer@community
+  extensions:
+    - humanize-extension
+  skills:
+    - grill-me
+nodes:
+  review:
+    type: review
+edges: []
+`;
+
+		const definition = parseWorkflowDefinition(source, { sourcePath: "capabilities.yml" });
+
+		expect(definition.capabilities).toEqual({
+			tools: ["task"],
+			agents: ["reviewer"],
+			plugins: ["humanize-loop", "optimizer@community"],
+			extensions: ["humanize-extension"],
+			skills: ["grill-me"],
+		});
+	});
+
 	it("preserves explicit script language and package file selection", () => {
 		const source = `
 name: script-source

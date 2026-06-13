@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Settings } from "../../src/config/settings";
+import { PluginManager } from "../../src/extensibility/plugins/manager";
+import { MarketplaceManager } from "../../src/extensibility/plugins/marketplace";
+import type { Skill } from "../../src/extensibility/skills";
 import type { InteractiveModeContext } from "../../src/modes/types";
 import type { AgentSession } from "../../src/session/agent-session";
 import type { SessionManager } from "../../src/session/session-manager";
@@ -82,6 +85,7 @@ async function createTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -100,6 +104,8 @@ function createHost(): WorkflowRunStoreHost & { entries: CapturedEntry[] } {
 interface RuntimeSessionOptions {
 	availableModels?: Model<Api>[];
 	activeModel?: Model<Api>;
+	extensionPaths?: string[];
+	skills?: Skill[];
 }
 
 function createRuntime(
@@ -118,6 +124,10 @@ function createRuntime(
 				}
 			: {}),
 		...(sessionOptions.activeModel !== undefined ? { model: sessionOptions.activeModel } : {}),
+		...(sessionOptions.extensionPaths !== undefined
+			? { extensionRunner: { getExtensionPaths: () => sessionOptions.extensionPaths ?? [] } }
+			: {}),
+		...(sessionOptions.skills !== undefined ? { skills: sessionOptions.skills } : {}),
 	} as unknown as AgentSession;
 	const sessionManager = {
 		appendCustomEntry: (customType: string, data?: unknown) => {
@@ -877,6 +887,124 @@ edges: []
 				"agent:planner: workflow runtime host does not support agent nodes",
 			],
 		});
+	});
+
+	it("records plugin, extension, and skill capability binding diagnostics", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "portable-capabilities"), { recursive: true });
+		await Bun.write(
+			path.join(dir, "portable-capabilities.omhflow"),
+			`---
+name: portable-capabilities-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Portable Capabilities Demo
+
+\`\`\`yaml workflow
+capabilities:
+  plugins:
+    - humanize-loop
+    - optimizer@community
+    - missing-plugin
+  extensions:
+    - humanize-extension
+    - absent-extension
+  skills:
+    - grill-me
+    - missing-skill
+nodes:
+  build:
+    type: script
+    script:
+      inline: |
+        return { summary: "built" };
+edges: []
+\`\`\`
+`,
+		);
+		vi.spyOn(PluginManager.prototype, "list").mockResolvedValue([
+			{
+				name: "humanize-loop",
+				version: "1.0.0",
+				path: "/plugins/humanize-loop",
+				manifest: { version: "1.0.0" },
+				enabledFeatures: null,
+				enabled: true,
+			},
+		]);
+		vi.spyOn(MarketplaceManager.prototype, "listInstalledPlugins").mockResolvedValue([
+			{
+				id: "optimizer@community",
+				scope: "user",
+				entries: [
+					{
+						scope: "user",
+						installPath: "/plugins/optimizer",
+						version: "1.0.0",
+						installedAt: "2026-06-13T00:00:00.000Z",
+						lastUpdated: "2026-06-13T00:00:00.000Z",
+						enabled: false,
+					},
+				],
+			},
+		]);
+		const entries: CapturedEntry[] = [];
+		const { output, runtime } = createRuntime(
+			entries,
+			{},
+			{
+				availableModels: [openAiModel],
+				activeModel: openAiModel,
+				extensionPaths: ["/extensions/humanize-extension.ts"],
+				skills: [
+					{
+						name: "grill-me",
+						description: "Interrogate a plan.",
+						filePath: "/skills/grill-me/SKILL.md",
+						baseDir: "/skills/grill-me",
+						source: "test",
+					},
+				],
+			},
+		);
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow start ${path.join(dir, "portable-capabilities.omhflow")} --run-id run-portable --family-id family-portable --max-activations 0`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+
+		const families = reconstructWorkflowFamilies(entries);
+		expect(families[0]?.attempts[0]?.runtimeBindingSnapshot).toMatchObject({
+			id: "run-portable:binding-1",
+			plugins: ["humanize-loop", "missing-plugin", "optimizer@community"],
+			extensions: ["absent-extension", "humanize-extension"],
+			skills: ["grill-me", "missing-skill"],
+			unavailable: [
+				"tool:eval: workflow runtime host does not support script nodes",
+				"plugin:optimizer@community: installed marketplace plugin is disabled",
+				"plugin:missing-plugin: workflow runtime cannot resolve declared plugin",
+				"extension:absent-extension: active session has no matching extension",
+				"skill:missing-skill: active session has no matching skill",
+			],
+		});
+
+		expect(await executeAcpBuiltinSlashCommand("/workflow manager --family-id family-portable", runtime)).toEqual({
+			consumed: true,
+		});
+		expect(output.at(-1)).toContain(
+			"plugins=humanize-loop,missing-plugin,optimizer@community extensions=absent-extension,humanize-extension skills=grill-me,missing-skill",
+		);
+		expect(output.at(-1)).toContain(
+			"unavailable: plugin:optimizer@community: installed marketplace plugin is disabled",
+		);
 	});
 
 	it("freezes artifacts and records file-based change request approvals", async () => {

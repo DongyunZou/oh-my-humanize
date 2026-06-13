@@ -40,6 +40,9 @@ export interface WorkflowResourceDeclaration {
 export interface WorkflowCapabilityContract {
 	tools?: string[];
 	agents?: string[];
+	plugins?: string[];
+	extensions?: string[];
+	skills?: string[];
 }
 
 export interface WorkflowMigrationRule {
@@ -302,9 +305,15 @@ function parseCapabilityContract(
 	const raw = expectRecord(value, path, sourcePath);
 	const tools = parseOptionalStringList(raw.tools, `${path}.tools`, sourcePath);
 	const agents = parseOptionalStringList(raw.agents, `${path}.agents`, sourcePath);
+	const plugins = parseOptionalStringList(raw.plugins, `${path}.plugins`, sourcePath);
+	const extensions = parseOptionalStringList(raw.extensions, `${path}.extensions`, sourcePath);
+	const skills = parseOptionalStringList(raw.skills, `${path}.skills`, sourcePath);
 	const contract: WorkflowCapabilityContract = {};
 	if (tools !== undefined) contract.tools = tools;
 	if (agents !== undefined) contract.agents = agents;
+	if (plugins !== undefined) contract.plugins = plugins;
+	if (extensions !== undefined) contract.extensions = extensions;
+	if (skills !== undefined) contract.skills = skills;
 	return Object.keys(contract).length > 0 ? contract : undefined;
 }
 

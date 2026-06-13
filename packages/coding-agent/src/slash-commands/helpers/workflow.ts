@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { formatModelString } from "../../config/model-resolver";
+import { PluginManager } from "../../extensibility/plugins/manager";
 import { parseCommandArgs } from "../../utils/command-args";
 import { evaluateWorkflowCondition } from "../../workflow/condition";
 import type {
@@ -64,6 +65,7 @@ import {
 import type { WorkflowActivation } from "../../workflow/scheduler";
 import { applyWorkflowStatePatch } from "../../workflow/state";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
+import { createMarketplaceManager } from "./marketplace-manager";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./parse";
 
 interface WorkflowStartArgs {
@@ -279,18 +281,26 @@ async function handleStartCommand(rest: string, runtime: SlashCommandRuntime): P
 	if (startConflict !== undefined) return usage(startConflict, runtime);
 	const modelResolution = createWorkflowModelResolution(runtime);
 	const runtimeHost = await runtime.createWorkflowRuntimeHost();
-	const lifecycle =
+	const runtimeBindingSnapshot =
 		pkg.freeze !== undefined && lifecycleFamilyId !== undefined && lifecycleAttemptId !== undefined
+			? await createRuntimeBindingSnapshot(
+					pkg.definition,
+					`${runId}:binding-1`,
+					modelResolution,
+					runtimeHost,
+					runtime,
+				)
+			: undefined;
+	const lifecycle =
+		pkg.freeze !== undefined &&
+		lifecycleFamilyId !== undefined &&
+		lifecycleAttemptId !== undefined &&
+		runtimeBindingSnapshot !== undefined
 			? ({
 					familyId: lifecycleFamilyId,
 					attemptId: lifecycleAttemptId,
 					freeze: pkg.freeze,
-					runtimeBindingSnapshot: createRuntimeBindingSnapshot(
-						pkg.definition,
-						`${runId}:binding-1`,
-						modelResolution,
-						runtimeHost,
-					),
+					runtimeBindingSnapshot,
 				} satisfies WorkflowRunnerLifecycleOptions)
 			: undefined;
 	if (parsed.background && lifecycle === undefined) {
@@ -719,6 +729,13 @@ async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime):
 	}
 	const modelResolution = createWorkflowModelResolution(runtime);
 	const runtimeHost = await runtime.createWorkflowRuntimeHost();
+	const runtimeBindingSnapshot = await createRuntimeBindingSnapshot(
+		freeze.definition,
+		`${attemptId}:binding-1`,
+		modelResolution,
+		runtimeHost,
+		runtime,
+	);
 	const stopController = new AbortController();
 	const nodeAbortController = new AbortController();
 	const lifecycle: WorkflowRunnerLifecycleOptions = {
@@ -726,12 +743,7 @@ async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime):
 		attemptId,
 		checkpointId: located.checkpoint.id,
 		freeze,
-		runtimeBindingSnapshot: createRuntimeBindingSnapshot(
-			freeze.definition,
-			`${attemptId}:binding-1`,
-			modelResolution,
-			runtimeHost,
-		),
+		runtimeBindingSnapshot,
 		recordFamily: false,
 		recordFreeze: false,
 	};
@@ -1213,16 +1225,39 @@ function activeWorkflowAttemptMap(runtime: SlashCommandRuntime): Map<string, Act
 	return created;
 }
 
-function createRuntimeBindingSnapshot(
+interface RuntimeCapabilitySnapshot {
+	availablePlugins: Set<string>;
+	disabledPluginReasons: Map<string, string>;
+	availableExtensions: Set<string>;
+	availableSkills: Set<string>;
+	warnings: string[];
+}
+
+interface RuntimeCapabilitySnapshotRequest {
+	plugins: boolean;
+	extensions: boolean;
+	skills: boolean;
+}
+
+async function createRuntimeBindingSnapshot(
 	definition: WorkflowDefinition,
 	id: string,
 	modelResolution: WorkflowRunnerModelResolutionOptions | undefined,
 	runtimeHost: WorkflowNodeRuntimeHost,
-): RuntimeBindingSnapshot {
+	runtime: SlashCommandRuntime,
+): Promise<RuntimeBindingSnapshot> {
 	const tools = new Set<string>();
 	const agents = new Set<string>();
+	const plugins = new Set<string>();
+	const extensions = new Set<string>();
+	const skills = new Set<string>();
 	const modelBindings: Record<string, WorkflowModelResolutionAudit> = {};
 	const unavailable: string[] = [];
+	const runtimeCapabilities = await createRuntimeCapabilitySnapshot(runtime, {
+		plugins: (definition.capabilities?.plugins?.length ?? 0) > 0,
+		extensions: (definition.capabilities?.extensions?.length ?? 0) > 0,
+		skills: (definition.capabilities?.skills?.length ?? 0) > 0,
+	});
 	for (const node of definition.nodes) {
 		if (node.type === "script") tools.add("eval");
 		if (node.type === "human") tools.add("ask");
@@ -1239,6 +1274,18 @@ function createRuntimeBindingSnapshot(
 		agents.add(agent);
 		recordRuntimeBindingDeclaredAgent(agent, runtimeHost, unavailable);
 	}
+	for (const plugin of definition.capabilities?.plugins ?? []) {
+		plugins.add(plugin);
+		recordRuntimeBindingDeclaredPlugin(plugin, runtimeCapabilities, unavailable);
+	}
+	for (const extension of definition.capabilities?.extensions ?? []) {
+		extensions.add(extension);
+		recordRuntimeBindingDeclaredExtension(extension, runtimeCapabilities, unavailable);
+	}
+	for (const skill of definition.capabilities?.skills ?? []) {
+		skills.add(skill);
+		recordRuntimeBindingDeclaredSkill(skill, runtimeCapabilities, unavailable);
+	}
 	const modelDiagnostics = runtimeBindingModelDiagnostics(modelBindings);
 	return {
 		id,
@@ -1247,9 +1294,100 @@ function createRuntimeBindingSnapshot(
 		modelBindings,
 		tools: [...tools].sort(),
 		agents: [...agents].sort(),
+		plugins: [...plugins].sort(),
+		extensions: [...extensions].sort(),
+		skills: [...skills].sort(),
 		unavailable: [...unavailable, ...modelDiagnostics.unavailable],
-		warnings: modelDiagnostics.warnings,
+		warnings: [...runtimeCapabilities.warnings, ...modelDiagnostics.warnings],
 	};
+}
+
+async function createRuntimeCapabilitySnapshot(
+	runtime: SlashCommandRuntime,
+	request: RuntimeCapabilitySnapshotRequest,
+): Promise<RuntimeCapabilitySnapshot> {
+	const availablePlugins = new Set<string>();
+	const disabledPluginReasons = new Map<string, string>();
+	const warnings: string[] = [];
+	if (request.plugins) {
+		await collectPluginCapabilities(runtime, availablePlugins, disabledPluginReasons, warnings);
+	}
+	return {
+		availablePlugins,
+		disabledPluginReasons,
+		availableExtensions: request.extensions ? collectExtensionCapabilities(runtime) : new Set(),
+		availableSkills: request.skills ? collectSkillCapabilities(runtime) : new Set(),
+		warnings,
+	};
+}
+
+async function collectPluginCapabilities(
+	runtime: SlashCommandRuntime,
+	availablePlugins: Set<string>,
+	disabledPluginReasons: Map<string, string>,
+	warnings: string[],
+): Promise<void> {
+	try {
+		for (const plugin of await new PluginManager(runtime.cwd).list()) {
+			for (const identifier of pluginCapabilityIdentifiers(plugin.name, plugin.manifest.name)) {
+				if (plugin.enabled) {
+					availablePlugins.add(identifier);
+					disabledPluginReasons.delete(identifier);
+				} else if (!availablePlugins.has(identifier)) {
+					disabledPluginReasons.set(identifier, "installed plugin is disabled");
+				}
+			}
+		}
+	} catch (error) {
+		warnings.push(`plugin capabilities could not be inspected: ${formatRuntimeBindingErrorMessage(error)}`);
+	}
+	try {
+		const marketplaceManager = await createMarketplaceManager(runtime);
+		for (const plugin of await marketplaceManager.listInstalledPlugins()) {
+			if (plugin.shadowedBy !== undefined) continue;
+			const enabled = plugin.entries.some(entry => entry.enabled !== false);
+			if (enabled) {
+				availablePlugins.add(plugin.id);
+				disabledPluginReasons.delete(plugin.id);
+			} else if (!availablePlugins.has(plugin.id)) {
+				disabledPluginReasons.set(plugin.id, "installed marketplace plugin is disabled");
+			}
+		}
+	} catch (error) {
+		warnings.push(
+			`marketplace plugin capabilities could not be inspected: ${formatRuntimeBindingErrorMessage(error)}`,
+		);
+	}
+}
+
+function pluginCapabilityIdentifiers(name: string, manifestName: string | undefined): string[] {
+	if (manifestName === undefined || manifestName === name) return [name];
+	return [name, manifestName];
+}
+
+function collectExtensionCapabilities(runtime: SlashCommandRuntime): Set<string> {
+	const available = new Set<string>();
+	for (const extensionPath of runtime.session.extensionRunner?.getExtensionPaths() ?? []) {
+		addExtensionIdentifier(available, extensionPath);
+	}
+	return available;
+}
+
+function addExtensionIdentifier(available: Set<string>, extensionPath: string): void {
+	const trimmed = extensionPath.trim();
+	if (!trimmed) return;
+	const normalized = path.normalize(trimmed);
+	available.add(trimmed);
+	available.add(normalized);
+	const base = path.basename(normalized);
+	if (!base) return;
+	available.add(base);
+	const ext = path.extname(base);
+	if (ext) available.add(base.slice(0, -ext.length));
+}
+
+function collectSkillCapabilities(runtime: SlashCommandRuntime): Set<string> {
+	return new Set((runtime.session.skills ?? []).map(skill => skill.name));
 }
 
 function recordRuntimeBindingTool(
@@ -1304,6 +1442,41 @@ function recordRuntimeBindingDeclaredAgent(
 ): void {
 	if (runtimeHost.runAgentNode === undefined) {
 		pushUnique(unavailable, `agent:${agent}: workflow runtime host does not support agent nodes`);
+	}
+}
+
+function recordRuntimeBindingDeclaredPlugin(
+	plugin: string,
+	runtimeCapabilities: RuntimeCapabilitySnapshot,
+	unavailable: string[],
+): void {
+	if (runtimeCapabilities.availablePlugins.has(plugin)) return;
+	const disabledReason = runtimeCapabilities.disabledPluginReasons.get(plugin);
+	pushUnique(
+		unavailable,
+		disabledReason
+			? `plugin:${plugin}: ${disabledReason}`
+			: `plugin:${plugin}: workflow runtime cannot resolve declared plugin`,
+	);
+}
+
+function recordRuntimeBindingDeclaredExtension(
+	extension: string,
+	runtimeCapabilities: RuntimeCapabilitySnapshot,
+	unavailable: string[],
+): void {
+	if (!runtimeCapabilities.availableExtensions.has(extension)) {
+		pushUnique(unavailable, `extension:${extension}: active session has no matching extension`);
+	}
+}
+
+function recordRuntimeBindingDeclaredSkill(
+	skill: string,
+	runtimeCapabilities: RuntimeCapabilitySnapshot,
+	unavailable: string[],
+): void {
+	if (!runtimeCapabilities.availableSkills.has(skill)) {
+		pushUnique(unavailable, `skill:${skill}: active session has no matching skill`);
 	}
 }
 
@@ -1432,6 +1605,10 @@ async function restoreWorkflowDraftResources(resourceDir: string, freeze: FlowFr
 		await fs.mkdir(path.dirname(resourcePath), { recursive: true });
 		await Bun.write(resourcePath, snapshot.text);
 	}
+}
+
+function formatRuntimeBindingErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function workflowDraftResourcePath(resourceDir: string, relativePath: string): string {
@@ -2462,7 +2639,19 @@ function formatWorkflowManagerOperation(operation: WorkflowGraphPatchOperation):
 
 function formatWorkflowManagerBinding(attempt: WorkflowRunAttemptSnapshot): string {
 	const binding = attempt.runtimeBindingSnapshot;
-	return `- ${attempt.id} ${binding.id} tools=${formatWorkflowManagerList(binding.tools)} agents=${formatWorkflowManagerList(binding.agents)} models=${formatWorkflowManagerModels(binding.resolvedModels)}`;
+	const parts = [
+		`tools=${formatWorkflowManagerList(binding.tools)}`,
+		`agents=${formatWorkflowManagerList(binding.agents)}`,
+		...(binding.plugins && binding.plugins.length > 0
+			? [`plugins=${formatWorkflowManagerList(binding.plugins)}`]
+			: []),
+		...(binding.extensions && binding.extensions.length > 0
+			? [`extensions=${formatWorkflowManagerList(binding.extensions)}`]
+			: []),
+		...(binding.skills && binding.skills.length > 0 ? [`skills=${formatWorkflowManagerList(binding.skills)}`] : []),
+		`models=${formatWorkflowManagerModels(binding.resolvedModels)}`,
+	];
+	return `- ${attempt.id} ${binding.id} ${parts.join(" ")}`;
 }
 
 function formatWorkflowManagerModels(models: Record<string, string>): string {
