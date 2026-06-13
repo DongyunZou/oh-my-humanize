@@ -408,6 +408,50 @@ edges:
 		]);
 	});
 
+	it("reports .omhflow freeze errors during workflow start without rejecting the command", async () => {
+		const dir = await createTempDir();
+		await Bun.write(
+			path.join(dir, "missing-resource-dir.omhflow"),
+			`---
+name: missing-resource-dir
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Missing Resource Directory
+
+\`\`\`yaml workflow
+nodes:
+  check:
+    type: script
+    script:
+      language: sh
+      inline: |
+        printf '{"summary":"checked"}\\n'
+edges: []
+\`\`\`
+`,
+		);
+		const entries: CapturedEntry[] = [];
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async () => ({ summary: "checked" }),
+		};
+		const { output, runtime } = createRuntime(entries, runtimeHost);
+
+		await expect(
+			executeAcpBuiltinSlashCommand(
+				`/workflow start ${path.join(dir, "missing-resource-dir.omhflow")} --run-id run-missing-resource --family-id family-missing-resource`,
+				runtime,
+			),
+		).resolves.toEqual({ consumed: true });
+		expect(output.at(-1)).toContain("workflow same-name resource directory is not readable");
+		expect(reconstructWorkflowFamilies(entries)).toEqual([]);
+	});
+
 	it("rejects duplicate workflow start run ids before launching nodes", async () => {
 		const dir = await createTempDir();
 		await Bun.write(

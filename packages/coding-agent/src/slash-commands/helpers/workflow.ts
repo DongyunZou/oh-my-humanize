@@ -267,7 +267,12 @@ async function handleStartCommand(rest: string, runtime: SlashCommandRuntime): P
 	if (!runtime.createWorkflowRuntimeHost) {
 		return usage("Workflow start requires a workflow runtime host.", runtime);
 	}
-	const pkg = await loadWorkflowStartPackage(resolveWorkflowPath(parsed.workflowPath, runtime.cwd));
+	let pkg: WorkflowStartPackage;
+	try {
+		pkg = await loadWorkflowStartPackage(resolveWorkflowPath(parsed.workflowPath, runtime.cwd));
+	} catch (error) {
+		return usage(errorMessage(error), runtime);
+	}
 	const startNodeIds =
 		parsed.startNodeId !== undefined ? [parsed.startNodeId] : defaultWorkflowStartNodeIds(pkg.definition);
 	const startNodeId = startNodeIds[0];
