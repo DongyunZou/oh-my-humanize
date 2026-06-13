@@ -30,9 +30,11 @@ export function createTaskToolAgentRunner(toolSession: ToolSession): WorkflowAge
 			exitCode: taskResult.exitCode,
 			output: taskResult.output,
 			stderr: taskResult.stderr,
+			agentId: taskResult.id,
 		};
 		if (taskResult.error !== undefined) output.error = taskResult.error;
 		if (taskResult.outputPath !== undefined) output.outputPath = taskResult.outputPath;
+		if (taskResult.sessionFile !== undefined) output.sessionFile = taskResult.sessionFile;
 		return output;
 	};
 }

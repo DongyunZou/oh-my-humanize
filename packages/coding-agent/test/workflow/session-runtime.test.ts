@@ -280,6 +280,36 @@ describe("session workflow runtime host", () => {
 		});
 	});
 
+	it("records workflow agent outputs as focusable agent artifacts without persisting session paths", async () => {
+		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
+		const node = definition.nodes.find(candidate => candidate.id === "build");
+		if (!node) throw new Error("expected build node");
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: process.cwd(),
+			runAgentTask: async () => ({
+				exitCode: 0,
+				output: "agent completed",
+				agentId: "build",
+				sessionFile: "/tmp/omp-workflow-agent.jsonl",
+			}),
+		});
+
+		const output = await host.runAgentNode?.({
+			node,
+			activation: activation(node.id),
+			agent: "task",
+			prompt: node.prompt,
+			model: node.model,
+		});
+
+		expect(output).toEqual({
+			summary: "agent completed",
+			data: { exitCode: 0 },
+			artifacts: ["agent-output://build"],
+		});
+		expect(JSON.stringify(output)).not.toContain("omp-workflow-agent.jsonl");
+	});
+
 	it("accepts structured activation output from agent task results", async () => {
 		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
 		const node = definition.nodes.find(candidate => candidate.id === "build");

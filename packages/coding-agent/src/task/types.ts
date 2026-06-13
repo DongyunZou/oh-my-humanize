@@ -310,6 +310,8 @@ export interface SingleResult {
 	usage?: Usage;
 	/** Output path for the task result */
 	outputPath?: string;
+	/** Persisted transcript for reviving or inspecting this subagent. */
+	sessionFile?: string;
 	/** Patch path for isolated worktree output */
 	patchPath?: string;
 	/** Branch name for isolated branch-mode output */

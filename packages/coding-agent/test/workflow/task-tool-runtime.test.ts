@@ -42,6 +42,7 @@ describe("workflow task tool runtime adapter", () => {
 	it("runs a workflow agent task through TaskTool and returns the first task result", async () => {
 		let capturedParams: TaskParams | undefined;
 		const outputPath = path.join(os.tmpdir(), "agent-output.md");
+		const sessionFile = path.join(os.tmpdir(), "agent-session.jsonl");
 		const taskTool = {
 			execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<TaskToolDetails>> => {
 				capturedParams = params as TaskParams;
@@ -67,6 +68,7 @@ describe("workflow task tool runtime adapter", () => {
 								tokens: 0,
 								requests: 1,
 								outputPath,
+								sessionFile,
 							},
 						],
 					},
@@ -90,7 +92,9 @@ describe("workflow task tool runtime adapter", () => {
 			exitCode: 0,
 			output: "agent completed",
 			stderr: "",
+			agentId: "build",
 			outputPath,
+			sessionFile,
 		});
 	});
 

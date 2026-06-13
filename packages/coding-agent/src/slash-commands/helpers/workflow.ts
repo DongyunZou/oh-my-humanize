@@ -2642,12 +2642,10 @@ function formatWorkflowManager(
 		lines.push("- Agent Hub watches live transcripts; interrupt/restart if an intervened node does not settle.");
 		for (const agent of graphView.activeAgents) {
 			const summary = formatWorkflowDetail(agent.summary);
-			lines.push(`- ${agent.role} · ${agent.label} live${summary} (activation ${agent.activationId})`);
+			lines.push(`- ${agent.role} · ${agent.label} live${summary} (focus ${agent.focusAgentId})`);
 		}
-		const labels = graphView.activeAgents.map(agent => agent.label).join("/");
-		lines.push(
-			`- focus live agent: open Agent Hub with double-left or the observe key, select ${labels}, press Enter`,
-		);
+		const focusTargets = graphView.activeAgents.map(agent => agent.focusAgentId).join(" or ");
+		lines.push(`- focus live agent: open Agent Hub with double-left or the observe key, then focus ${focusTargets}`);
 		if (currentAttempt?.status === "running") {
 			lines.push(`- interrupt active attempt: /workflow stop ${currentAttempt.id} --deadline-ms 30000`);
 		}

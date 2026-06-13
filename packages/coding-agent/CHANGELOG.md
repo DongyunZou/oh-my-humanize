@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added active workflow-agent visibility to the TUI workflow graph and `/workflow manager`, including human-facing node roles and Agent Hub focus hints for live workflow nodes.
+- Added active workflow-agent visibility to the TUI workflow graph and `/workflow manager`, including human-facing node roles, stable Agent Hub focus targets, and `agent-output://` workflow artifacts for live workflow nodes.
 - Added `--background` support to `/workflow restart` so long-running checkpoint resumes can keep the operator in the interactive TUI with the resident workflow monitor visible.
 
 ### Fixed

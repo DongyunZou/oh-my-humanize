@@ -4032,7 +4032,7 @@ edges: []
 		expect(managerOutput).toContain("- Builder · Build round live");
 		expect(managerOutput).toContain("- Reviewer · Review round live");
 		expect(managerOutput).toContain(
-			"- focus live agent: open Agent Hub with double-left or the observe key, select Build round/Review round, press Enter",
+			"- focus live agent: open Agent Hub with double-left or the observe key, then focus buildRound or reviewRound",
 		);
 		expect(managerOutput).toContain(
 			"- interrupt active attempt: /workflow stop live-manager:attempt-1 --deadline-ms 30000",

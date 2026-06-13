@@ -1556,6 +1556,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 		abortReason: finalAbortReason,
 		usage: monitor.hasUsage() ? monitor.accumulatedUsage : undefined,
 		outputPath,
+		...(args.sessionFile !== undefined ? { sessionFile: args.sessionFile } : {}),
 		extractedToolData: progress.extractedToolData,
 		retryFailure: progress.retryFailure,
 		outputMeta,

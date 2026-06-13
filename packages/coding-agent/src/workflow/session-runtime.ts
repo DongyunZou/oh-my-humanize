@@ -1,3 +1,4 @@
+import { workflowAgentTaskIdForNode } from "./agent-task-id";
 import type { WorkflowScriptLanguage } from "./definition";
 import type { WorkflowNodeRuntimeHost, WorkflowReviewNodeOutput } from "./node-runtime";
 import { WorkflowNodeRuntimeError } from "./node-runtime";
@@ -32,7 +33,9 @@ export interface WorkflowAgentTaskResult {
 	output: string;
 	stderr?: string;
 	error?: string;
+	agentId?: string;
 	outputPath?: string;
+	sessionFile?: string;
 }
 
 export type WorkflowAgentTaskRunner = (request: WorkflowAgentTaskRequest) => Promise<WorkflowAgentTaskResult>;
@@ -91,7 +94,7 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				);
 			}
 			const task: WorkflowAgentTaskItem = {
-				id: taskIdForNode(input.node.id),
+				id: workflowAgentTaskIdForNode(input.node.id),
 				description: input.node.id,
 				assignment: input.prompt?.trim() || `Run workflow node "${input.node.id}".`,
 			};
@@ -157,7 +160,7 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				activationId: input.activation.id,
 				nodeId: input.node.id,
 				task: {
-					id: taskIdForNode(input.node.id),
+					id: workflowAgentTaskIdForNode(input.node.id),
 					description: input.node.id,
 					assignment,
 				},
@@ -261,29 +264,22 @@ function hasActivationOutputField(value: Record<string, unknown>): boolean {
 	);
 }
 
-function taskIdForNode(nodeId: string): string {
-	const sanitized = nodeId.replaceAll(/[^A-Za-z0-9_]/g, "_").slice(0, 48);
-	return sanitized || "workflow_node";
-}
-
 function activationOutputFromTaskResult(nodeId: string, result: WorkflowAgentTaskResult): WorkflowActivationOutput {
 	if (result.exitCode !== 0) {
 		const reason = result.error || result.stderr || `exit code ${result.exitCode}`;
 		throw new WorkflowNodeRuntimeError(`workflow agent node "${nodeId}" failed: ${reason}`);
 	}
+	const artifacts = taskResultArtifactReferences(result);
 	const structured = parseStructuredActivationOutput(result.output);
 	if (structured) {
-		if (result.outputPath && structured.artifacts === undefined) {
-			return { ...structured, artifacts: [`local://${result.outputPath}`] };
-		}
-		return structured;
+		return mergeActivationArtifacts(structured, artifacts);
 	}
 	const output: WorkflowActivationOutput = {
 		summary: result.output.trim() || `agent node "${nodeId}" completed`,
 		data: { exitCode: result.exitCode },
 	};
-	if (result.outputPath) {
-		output.artifacts = [`local://${result.outputPath}`];
+	if (artifacts.length > 0) {
+		output.artifacts = artifacts;
 	}
 	return output;
 }
@@ -315,10 +311,30 @@ function reviewOutputFromTaskResult(
 		summary: parsed.summary,
 		verdict: parsed.verdict,
 	};
-	if (result.outputPath) {
-		output.artifacts = [`local://${result.outputPath}`];
+	const artifacts = taskResultArtifactReferences(result);
+	if (artifacts.length > 0) {
+		output.artifacts = artifacts;
 	}
 	return output;
+}
+
+function taskResultArtifactReferences(result: WorkflowAgentTaskResult): string[] {
+	const artifacts: string[] = [];
+	if (result.agentId !== undefined) artifacts.push(`agent-output://${result.agentId}`);
+	if (result.outputPath !== undefined) artifacts.push(`local://${result.outputPath}`);
+	return artifacts;
+}
+
+function mergeActivationArtifacts(
+	output: WorkflowActivationOutput,
+	additionalArtifacts: readonly string[],
+): WorkflowActivationOutput {
+	if (additionalArtifacts.length === 0) return output;
+	const artifacts = output.artifacts === undefined ? [] : [...output.artifacts];
+	for (const artifact of additionalArtifacts) {
+		if (!artifacts.includes(artifact)) artifacts.push(artifact);
+	}
+	return { ...output, artifacts };
 }
 
 function parseReviewTaskOutput(

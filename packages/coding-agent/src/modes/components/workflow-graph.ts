@@ -141,7 +141,8 @@ function workflowGraphActiveAgentLines(view: WorkflowGraphView, width: number): 
 	for (const agent of view.activeAgents ?? []) {
 		const summary =
 			agent.summary === undefined ? "" : ` - ${sanitizeWorkflowAgentSummary(agent.summary, Math.floor(width / 2))}`;
-		const line = `${theme.fg("accent", "●")} ${agent.role}${theme.fg("muted", ` · ${agent.label}`)} ${theme.fg("accent", "live")}${summary}`;
+		const focus = theme.fg("muted", ` focus ${agent.focusAgentId}`);
+		const line = `${theme.fg("accent", "●")} ${agent.role}${theme.fg("muted", ` · ${agent.label}`)} ${theme.fg("accent", "live")}${summary}${focus}`;
 		lines.push(truncateToWidth(replaceTabs(line), Math.max(20, width)));
 	}
 	return lines;

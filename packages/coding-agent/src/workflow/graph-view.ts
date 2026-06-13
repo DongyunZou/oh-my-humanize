@@ -1,4 +1,5 @@
 import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { workflowAgentTaskIdForNode } from "./agent-task-id";
 import type { WorkflowNode } from "./definition";
 import type {
 	WorkflowAttemptActivationRecord,
@@ -58,6 +59,7 @@ export interface WorkflowGraphSubflowView {
 
 export interface WorkflowGraphActiveAgentView {
 	activationId: string;
+	focusAgentId: string;
 	nodeId: string;
 	label: string;
 	role: string;
@@ -149,13 +151,14 @@ export function buildWorkflowGraphView(
 			if (edge.condition?.source !== undefined) view.condition = edge.condition.source;
 			return view;
 		}) ?? [];
+	const activeAgents = formatActiveWorkflowAgents(currentAttempt, currentFreeze?.definition.nodes ?? [], options);
 	const view: WorkflowGraphView = {
 		familyId: family.id,
 		changes: countWorkflowChangeRequests(family),
 		nodes,
 		edges,
 		lineage: family.changeRequests.map(formatLineage),
-		actions: formatWorkflowGraphActions(family, currentAttempt, currentCheckpoint, options),
+		actions: formatWorkflowGraphActions(family, currentAttempt, currentCheckpoint, options, activeAgents),
 	};
 	if (currentFreeze?.definition.subflows !== undefined) {
 		view.subflows = currentFreeze.definition.subflows.map(subflow => ({
@@ -169,7 +172,6 @@ export function buildWorkflowGraphView(
 			...(subflow.resourcePrefix !== undefined ? { resourcePrefix: subflow.resourcePrefix } : {}),
 		}));
 	}
-	const activeAgents = formatActiveWorkflowAgents(currentAttempt, currentFreeze?.definition.nodes ?? [], options);
 	if (activeAgents.length > 0) view.activeAgents = activeAgents;
 	if (family.objective !== undefined) view.objective = family.objective;
 	if (latestFreeze?.id !== undefined) view.latestFreezeId = latestFreeze.id;
@@ -858,6 +860,7 @@ function formatActiveWorkflowAgents(
 		if (!node || !workflowNodeIsAgentLike(node)) continue;
 		const view: WorkflowGraphActiveAgentView = {
 			activationId: activation.id,
+			focusAgentId: workflowAgentTaskIdForNode(node.id),
 			nodeId: node.id,
 			label: formatWorkflowNodeDisplayName(node.id),
 			role: formatWorkflowNodeRole(node),
@@ -875,7 +878,7 @@ function workflowNodeIsAgentLike(node: WorkflowNode): boolean {
 
 function formatActiveWorkflowAgent(agent: WorkflowGraphActiveAgentView): string {
 	const summary = agent.summary === undefined ? "" : ` - ${formatSingleLineWorkflowDetail(agent.summary)}`;
-	return `${agent.role} · ${agent.label} live${summary} (activation ${agent.activationId})`;
+	return `${agent.role} · ${agent.label} live${summary} (focus ${agent.focusAgentId})`;
 }
 
 function formatCheckpointFrontier(checkpoint: WorkflowGraphCheckpointView): string {
@@ -912,6 +915,7 @@ function formatWorkflowGraphActions(
 	currentAttempt: WorkflowRunAttemptSnapshot | undefined,
 	currentCheckpoint: WorkflowCheckpointSnapshot | undefined,
 	options: WorkflowGraphViewOptions,
+	activeAgents: readonly WorkflowGraphActiveAgentView[],
 ): string[] {
 	const actions = [`Refresh: /workflow graph --family-id ${family.id}`];
 	if (currentAttempt?.status === "running") {
@@ -919,7 +923,9 @@ function formatWorkflowGraphActions(
 		const hasLiveAttempt = options.liveAttemptIds === undefined || options.liveAttemptIds.has(currentAttempt.id);
 		if (hasLiveAttempt && currentAttempt.activations.some(activation => activation.status === "running")) {
 			actions.push(`Active agents: /workflow manager --family-id ${family.id}`);
-			actions.push("Open Agent Hub: double-left or observe key, then Enter focuses the selected live agent");
+			const focusTargets = activeAgents.map(agent => agent.focusAgentId).join(" or ");
+			const targetHint = focusTargets.length === 0 ? "the selected live agent" : focusTargets;
+			actions.push(`Open Agent Hub: double-left or observe key; focus ${targetHint}`);
 		}
 	}
 	actions.push(`Propose change: /workflow request-change <file> --family-id ${family.id}`);

@@ -167,6 +167,7 @@ describe("workflow graph view rendering", () => {
 		expect(view.activeAgents).toEqual([
 			{
 				activationId: "activation-1",
+				focusAgentId: "buildRound",
 				nodeId: "buildRound",
 				label: "Build round",
 				role: "Builder",
@@ -174,6 +175,7 @@ describe("workflow graph view rendering", () => {
 			},
 			{
 				activationId: "activation-2",
+				focusAgentId: "reviewRound",
 				nodeId: "reviewRound",
 				label: "Review round",
 				role: "Reviewer",
@@ -185,9 +187,9 @@ describe("workflow graph view rendering", () => {
 
 		expect(text).toContain("Active agents:");
 		expect(text).toContain("Use Agent Hub to watch or intervene; use Interrupt if a live node does not settle.");
-		expect(text).toContain("- Builder · Build round live (activation activation-1)");
-		expect(text).toContain("- Reviewer · Review round live (activation activation-2)");
-		expect(text).toContain("Open Agent Hub: double-left or observe key, then Enter focuses the selected live agent");
+		expect(text).toContain("- Builder · Build round live");
+		expect(text).toContain("- Reviewer · Review round live");
+		expect(text).toContain("Open Agent Hub: double-left or observe key; focus buildRound or reviewRound");
 		expect(text).not.toContain("Focus agent: /agents");
 	});
 
@@ -673,6 +675,7 @@ describe("workflow graph view rendering", () => {
 		view.activeAgents = [
 			{
 				activationId: "activation-build",
+				focusAgentId: "buildRound",
 				nodeId: "buildRound",
 				label: "Build round",
 				role: "Builder",
@@ -687,6 +690,7 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain("active agents");
 		expect(text).toContain("Agent Hub watches live transcripts; Interrupt stops a stuck workflow node.");
 		expect(text).toContain("● Builder · Build round live - editing implementation");
+		expect(text).toContain("focus buildRound");
 		expect(text).not.toContain("activation-build");
 	});
 
