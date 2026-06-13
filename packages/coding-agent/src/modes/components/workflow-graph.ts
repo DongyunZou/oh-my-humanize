@@ -4,6 +4,7 @@ import type { State } from "../../tui/types";
 import {
 	formatActiveWorkflowAgentGeneration,
 	formatOmittedAbortedOutputs,
+	formatWorkflowActiveAgentGuidance,
 	formatWorkflowSubflow,
 	renderWorkflowGraphDiagram,
 	type WorkflowGraphActiveAgentView,
@@ -143,10 +144,7 @@ function workflowGraphSubflowLines(view: WorkflowGraphView): string[] {
 }
 
 function workflowGraphActiveAgentLines(view: WorkflowGraphView, width: number): string[] {
-	const lines = [
-		theme.fg("muted", "Agent Hub watches live transcripts; interrupt a selected live agent if needed."),
-		theme.fg("muted", "Enter in Agent Hub attaches the main prompt; Esc returns to workflow control."),
-	];
+	const lines = formatWorkflowActiveAgentGuidance().map(line => theme.fg("muted", line));
 	for (const agent of view.activeAgents ?? []) {
 		const activity = workflowAgentActivityText(agent, width);
 		const model = agent.model === undefined ? "" : theme.fg("muted", ` · ${agent.model}`);

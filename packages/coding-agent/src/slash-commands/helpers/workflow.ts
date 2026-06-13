@@ -24,7 +24,8 @@ import type {
 import { type FlowFreeze, freezeWorkflowArtifact } from "../../workflow/freeze";
 import {
 	buildWorkflowGraphView,
-	formatActiveWorkflowAgentGeneration,
+	formatActiveWorkflowAgent,
+	formatWorkflowActiveAgentGuidance,
 	renderWorkflowGraphText,
 	type WorkflowGraphView,
 } from "../../workflow/graph-view";
@@ -2837,14 +2838,9 @@ function formatWorkflowManager(
 			lines.push("- none");
 		}
 	} else {
-		lines.push("- Agent Hub watches live transcripts; interrupt a selected live agent if it does not settle.");
-		lines.push("- Agent Hub Enter attaches the main prompt to a live agent; Esc returns to workflow control.");
+		for (const guidance of formatWorkflowActiveAgentGuidance()) lines.push(`- ${guidance}`);
 		for (const agent of graphView.activeAgents) {
-			const summary = formatWorkflowDetail(agent.summary);
-			const generation = formatActiveWorkflowAgentGeneration(agent);
-			lines.push(
-				`- ${agent.role} · ${agent.label} live${generation}${summary} (watch/intervene ${agent.focusAgentId})`,
-			);
+			lines.push(`- ${formatActiveWorkflowAgent(agent)}`);
 		}
 		if (currentAttempt?.status === "running") {
 			for (const agent of graphView.activeAgents) {

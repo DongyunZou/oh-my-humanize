@@ -4102,7 +4102,7 @@ edges: []
 		const managerOutput = output.at(-1) ?? "";
 		expect(managerOutput).toContain("Active agents:");
 		expect(managerOutput).toContain(
-			"- Agent Hub watches live transcripts; interrupt a selected live agent if it does not settle.",
+			"- Use Agent Hub to watch or intervene; interrupt a selected live agent if it does not settle.",
 		);
 		expect(managerOutput).toContain(
 			"- Agent Hub Enter attaches the main prompt to a live agent; Esc returns to workflow control.",
@@ -4404,7 +4404,8 @@ edges:
 			true,
 		);
 		const managerOutput = output.at(-1) ?? "";
-		expect(managerOutput).toContain("- Builder · Build path live · round 2 (watch/intervene build_path-2)");
+		expect(managerOutput).toContain("- Builder · Build path live · round 2 · openai/gpt-4o");
+		expect(managerOutput).toContain("(watch/intervene build_path-2)");
 		expect(managerOutput).toContain(
 			"- interrupt agent Builder · Build path: /workflow interrupt sanitized-loop-interrupt:attempt-1 build_path-2 --deadline-ms 30000",
 		);

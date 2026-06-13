@@ -928,8 +928,12 @@ describe("workflow graph view rendering", () => {
 		const text = stripAnsi(component.render(120).join("\n"));
 
 		expect(text).toContain("active agents");
-		expect(text).toContain("Agent Hub watches live transcripts; interrupt a selected live agent if needed.");
-		expect(text).toContain("Enter in Agent Hub attaches the main prompt; Esc returns to workflow control.");
+		expect(text).toContain(
+			"Use Agent Hub to watch or intervene; interrupt a selected live agent if it does not settle.",
+		);
+		expect(text).toContain(
+			"Agent Hub Enter attaches the main prompt to a live agent; Esc returns to workflow control.",
+		);
 		expect(text).toContain("● Builder · Build round live · round 3 - editing implementation");
 		expect(text).toContain("watch/intervene buildRound");
 		expect(text).not.toContain("activation-build");

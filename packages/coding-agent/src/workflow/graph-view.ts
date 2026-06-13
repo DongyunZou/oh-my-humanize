@@ -246,8 +246,7 @@ export function renderWorkflowGraphText(view: WorkflowGraphView, options: Workfl
 	}
 	if (view.activeAgents !== undefined && view.activeAgents.length > 0) {
 		lines.push("Active agents:");
-		lines.push("Use Agent Hub to watch or intervene; interrupt a selected live agent if it does not settle.");
-		lines.push("Agent Hub Enter attaches the main prompt to a live agent; Esc returns to workflow control.");
+		lines.push(...formatWorkflowActiveAgentGuidance());
 		for (const agent of view.activeAgents) lines.push(`- ${formatActiveWorkflowAgent(agent)}`);
 	}
 	lines.push("Diagram:");
@@ -926,7 +925,7 @@ function workflowNodeIsAgentLike(node: WorkflowNode): boolean {
 	return node.type === "agent" || node.type === "review";
 }
 
-function formatActiveWorkflowAgent(agent: WorkflowGraphActiveAgentView): string {
+export function formatActiveWorkflowAgent(agent: WorkflowGraphActiveAgentView): string {
 	const generation = formatActiveWorkflowAgentGeneration(agent);
 	const model = agent.model === undefined ? "" : ` · ${formatSingleLineWorkflowDetail(agent.model)}`;
 	const tool = agent.tool === undefined ? "" : ` · tool ${formatSingleLineWorkflowDetail(agent.tool)}`;
@@ -934,6 +933,13 @@ function formatActiveWorkflowAgent(agent: WorkflowGraphActiveAgentView): string 
 	const activity = agent.activity === undefined ? "" : ` - ${formatSingleLineWorkflowDetail(agent.activity)}`;
 	const summary = agent.summary === undefined ? "" : ` - ${formatSingleLineWorkflowDetail(agent.summary)}`;
 	return `${agent.role} · ${agent.label} live${generation}${model}${tool}${stats}${activity}${summary} (watch/intervene ${agent.focusAgentId})`;
+}
+
+export function formatWorkflowActiveAgentGuidance(): string[] {
+	return [
+		"Use Agent Hub to watch or intervene; interrupt a selected live agent if it does not settle.",
+		"Agent Hub Enter attaches the main prompt to a live agent; Esc returns to workflow control.",
+	];
 }
 
 export function formatActiveWorkflowAgentGeneration(agent: WorkflowGraphActiveAgentView): string {
