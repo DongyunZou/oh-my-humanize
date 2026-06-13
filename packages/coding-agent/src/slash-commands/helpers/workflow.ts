@@ -17,6 +17,7 @@ import type {
 	WorkflowScriptLanguage,
 	WorkflowScriptSource,
 	WorkflowTemplatePromptBindingSource,
+	WorkflowTemplatePromptSource,
 } from "../../workflow/definition";
 import { type FlowFreeze, freezeWorkflowArtifact, type WorkflowChangePolicy } from "../../workflow/freeze";
 import { buildWorkflowGraphView, renderWorkflowGraphText, type WorkflowGraphView } from "../../workflow/graph-view";
@@ -2073,9 +2074,9 @@ function parseWorkflowPatchPrompt(
 		};
 	}
 	const raw = expectWorkflowPatchRecord(value, pathLabel);
-	const sourceKeys = ["inline", "file", "state", "output", "human"].filter(key => raw[key] !== undefined);
+	const sourceKeys = ["inline", "file", "state", "output", "human", "template"].filter(key => raw[key] !== undefined);
 	if (sourceKeys.length !== 1) {
-		throw new Error(`${pathLabel} must define exactly one of inline, file, state, output, or human`);
+		throw new Error(`${pathLabel} must define exactly one of inline, file, state, output, human, or template`);
 	}
 	const sourceKey = sourceKeys[0];
 	if (sourceKey === "inline") {
@@ -2091,6 +2092,9 @@ function parseWorkflowPatchPrompt(
 	}
 	if (sourceKey === "human") {
 		return { promptSource: { kind: "human", path: expectWorkflowPatchJsonPointer(raw.human, `${pathLabel}.human`) } };
+	}
+	if (sourceKey === "template") {
+		return { promptSource: parseWorkflowPatchTemplatePrompt(raw.template, `${pathLabel}.template`) };
 	}
 	const output = expectWorkflowPatchRecord(raw.output, `${pathLabel}.output`);
 	return {
@@ -2126,7 +2130,71 @@ function parseWorkflowPatchPromptSource(value: unknown, pathLabel: string): Work
 			activation: parseWorkflowPatchPromptActivationSelector(raw.activation, `${pathLabel}.activation`),
 		};
 	}
-	throw new Error(`${pathLabel}.kind must be inline, file, state, output, or human`);
+	if (kind === "template") {
+		return parseWorkflowPatchTemplatePrompt(raw, pathLabel);
+	}
+	throw new Error(`${pathLabel}.kind must be inline, file, state, output, human, or template`);
+}
+
+function parseWorkflowPatchTemplatePrompt(value: unknown, pathLabel: string): WorkflowTemplatePromptSource {
+	const raw = expectWorkflowPatchRecord(value, pathLabel);
+	return {
+		kind: "template",
+		file: expectWorkflowPatchString(raw.file, `${pathLabel}.file`),
+		bindings: parseWorkflowPatchTemplateBindings(raw.bindings, `${pathLabel}.bindings`),
+	};
+}
+
+function parseWorkflowPatchTemplateBindings(
+	value: unknown,
+	pathLabel: string,
+): Record<string, WorkflowTemplatePromptBindingSource> {
+	const raw = expectWorkflowPatchRecord(value, pathLabel);
+	const bindings: Record<string, WorkflowTemplatePromptBindingSource> = {};
+	for (const [name, binding] of Object.entries(raw)) {
+		bindings[name] = parseWorkflowPatchTemplateBinding(binding, `${pathLabel}.${name}`);
+	}
+	return bindings;
+}
+
+function parseWorkflowPatchTemplateBinding(value: unknown, pathLabel: string): WorkflowTemplatePromptBindingSource {
+	const raw = expectWorkflowPatchRecord(value, pathLabel);
+	if (raw.kind !== undefined) {
+		const kind = expectWorkflowPatchString(raw.kind, `${pathLabel}.kind`);
+		if (kind === "inline") return { kind, text: expectWorkflowPatchString(raw.text, `${pathLabel}.text`) };
+		if (kind === "state") return { kind, path: expectWorkflowPatchJsonPointer(raw.path, `${pathLabel}.path`) };
+		if (kind === "human") return { kind, path: expectWorkflowPatchJsonPointer(raw.path, `${pathLabel}.path`) };
+		if (kind === "output") {
+			return {
+				kind,
+				node: expectWorkflowPatchString(raw.node, `${pathLabel}.node`),
+				path: expectWorkflowPatchJsonPointer(raw.path, `${pathLabel}.path`),
+				activation: parseWorkflowPatchPromptActivationSelector(raw.activation, `${pathLabel}.activation`),
+			};
+		}
+		throw new Error(`${pathLabel}.kind must be inline, state, output, or human`);
+	}
+	const sourceKeys = ["inline", "state", "output", "human"].filter(key => raw[key] !== undefined);
+	if (sourceKeys.length !== 1) {
+		throw new Error(`${pathLabel} must define exactly one of inline, state, output, or human`);
+	}
+	const sourceKey = sourceKeys[0];
+	if (sourceKey === "inline") {
+		return { kind: "inline", text: expectWorkflowPatchString(raw.inline, `${pathLabel}.inline`) };
+	}
+	if (sourceKey === "state") {
+		return { kind: "state", path: expectWorkflowPatchJsonPointer(raw.state, `${pathLabel}.state`) };
+	}
+	if (sourceKey === "human") {
+		return { kind: "human", path: expectWorkflowPatchJsonPointer(raw.human, `${pathLabel}.human`) };
+	}
+	const output = expectWorkflowPatchRecord(raw.output, `${pathLabel}.output`);
+	return {
+		kind: "output",
+		node: expectWorkflowPatchString(output.node, `${pathLabel}.output.node`),
+		path: expectWorkflowPatchJsonPointer(output.path, `${pathLabel}.output.path`),
+		activation: parseWorkflowPatchPromptActivationSelector(output.activation, `${pathLabel}.output.activation`),
+	};
 }
 
 function parseWorkflowPatchPromptActivationSelector(

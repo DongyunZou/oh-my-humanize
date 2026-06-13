@@ -12,6 +12,7 @@ import {
 	completeWorkflowAttempt,
 	createWorkflowCheckpoint,
 	proposeWorkflowChangeRequest,
+	recordWorkflowChangeRequestApplied,
 	recordWorkflowFreeze,
 	startWorkflowAttempt,
 	startWorkflowFamily,
@@ -179,6 +180,13 @@ describe("HTML export workflow inspection support", () => {
 				changeRequestId: "change-export",
 				actor: "human:sihao",
 			});
+			recordWorkflowChangeRequestApplied(sm, {
+				changeRequestId: "change-export",
+				target: "draft",
+				actor: "human:sihao",
+				draftId: "export-draft.omhflow",
+				reason: "drafted export verification flow",
+			});
 			createWorkflowCheckpoint(sm, {
 				checkpointId: "checkpoint-export",
 				familyId: "family-export",
@@ -232,6 +240,14 @@ describe("HTML export workflow inspection support", () => {
 							operationCount: 1,
 							frontierMapping: { build: "verify" },
 							approvedBy: "human:sihao",
+							applications: [
+								{
+									target: "draft",
+									actor: "human:sihao",
+									draftId: "export-draft.omhflow",
+									reason: "drafted export verification flow",
+								},
+							],
 						},
 					],
 				},

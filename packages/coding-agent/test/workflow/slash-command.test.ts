@@ -1211,6 +1211,128 @@ edges: []
 		]);
 	});
 
+	it("records template prompt sources in workflow change requests", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "release"), { recursive: true });
+		await Bun.write(path.join(dir, "release.omhflow"), workflowArtifactSource());
+		await Bun.write(
+			path.join(dir, "change.json"),
+			JSON.stringify({
+				id: "change-template-prompt",
+				actor: "human:sihao",
+				origin: "human",
+				reason: "compose prompts from state and prior output",
+				operations: [
+					{
+						op: "replace_node_prompt_source",
+						nodeId: "build",
+						promptSource: {
+							kind: "template",
+							file: "prompts/build.md",
+							bindings: {
+								plan: { kind: "state", path: "/plan" },
+								reviewSummary: {
+									kind: "output",
+									node: "review",
+									path: "/summary",
+									activation: "latest-completed",
+								},
+								approval: { kind: "human", path: "/approval" },
+								note: { kind: "inline", text: "Keep the implementation scoped." },
+							},
+						},
+					},
+					{
+						op: "add_node",
+						node: {
+							id: "review",
+							type: "review",
+							reads: ["/plan", "/summary"],
+							prompt: {
+								template: {
+									file: "prompts/review.md",
+									bindings: {
+										plan: { state: "/plan" },
+										buildSummary: {
+											output: {
+												node: "build",
+												path: "/summary",
+												activation: "latest-completed",
+											},
+										},
+									},
+								},
+							},
+							gates: ["pass", "fail"],
+						},
+					},
+				],
+				frontierMapping: { build: "review" },
+			}),
+		);
+		const entries: CapturedEntry[] = [];
+		const { output, runtime } = createRuntime(entries);
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow freeze ${path.join(dir, "release.omhflow")} --family-id family-template-prompt`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow request-change ${path.join(dir, "change.json")} --family-id family-template-prompt`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+
+		const family = reconstructWorkflowFamilies(entries)[0];
+		expect(output.some(entry => entry.includes("Workflow change request: change-template-prompt"))).toBeTrue();
+		expect(family?.changeRequests[0]?.operations).toEqual([
+			{
+				op: "replace_node_prompt_source",
+				nodeId: "build",
+				promptSource: {
+					kind: "template",
+					file: "prompts/build.md",
+					bindings: {
+						plan: { kind: "state", path: "/plan" },
+						reviewSummary: {
+							kind: "output",
+							node: "review",
+							path: "/summary",
+							activation: "latest-completed",
+						},
+						approval: { kind: "human", path: "/approval" },
+						note: { kind: "inline", text: "Keep the implementation scoped." },
+					},
+				},
+			},
+			{
+				op: "add_node",
+				node: {
+					id: "review",
+					type: "review",
+					promptSource: {
+						kind: "template",
+						file: "prompts/review.md",
+						bindings: {
+							plan: { kind: "state", path: "/plan" },
+							buildSummary: {
+								kind: "output",
+								node: "build",
+								path: "/summary",
+								activation: "latest-completed",
+							},
+						},
+					},
+					gates: ["pass", "fail"],
+					reads: ["/plan", "/summary"],
+				},
+			},
+		]);
+	});
+
 	it("rejects unknown workflow change request operations before recording them", async () => {
 		const dir = await createTempDir();
 		await fs.mkdir(path.join(dir, "release"), { recursive: true });

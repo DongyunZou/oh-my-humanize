@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { compileWorkflowDslBlock } from "../../src/workflow/dsl";
 import { freezeWorkflowArtifact } from "../../src/workflow/freeze";
 import type { WorkflowNodeRuntimeHost } from "../../src/workflow/node-runtime";
 import { loadWorkflowArtifact } from "../../src/workflow/package-loader";
@@ -142,6 +143,59 @@ edges: []
 		await expect(loadWorkflowArtifact(flowPath)).rejects.toThrow(
 			".omhflow must contain exactly one fenced workflow block",
 		);
+	});
+
+	it("namespaces parsed template prompt output bindings in external modules", () => {
+		const compiled = compileWorkflowDslBlock(
+			{ sequence: [{ use: "humanize" }] },
+			{
+				externalModules: {
+					humanize: {
+						nodes: {
+							review: { id: "review", type: "review", prompt: "Review." },
+							build: {
+								id: "build",
+								type: "agent",
+								agent: "task",
+								promptSource: {
+									kind: "template",
+									file: "prompts/build.md",
+									bindings: {
+										reviewSummary: {
+											kind: "output",
+											node: "review",
+											path: "/summary",
+											activation: "latest-completed",
+										},
+									},
+								},
+							},
+						},
+						edges: [{ from: "review", to: "build" }],
+						entries: ["review"],
+						exits: [{ nodeId: "build" }],
+						resourcePrefix: "humanize",
+					},
+				},
+			},
+		);
+
+		expect(compiled.nodes).toMatchObject({
+			humanize__build: {
+				promptSource: {
+					kind: "template",
+					file: "humanize/prompts/build.md",
+					bindings: {
+						reviewSummary: {
+							kind: "output",
+							node: "humanize__review",
+							path: "/summary",
+							activation: "latest-completed",
+						},
+					},
+				},
+			},
+		});
 	});
 
 	it("compiles workflow templates and carries static contracts into the freeze", async () => {

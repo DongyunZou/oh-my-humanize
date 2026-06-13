@@ -398,6 +398,9 @@ function namespaceTemplatePromptBinding(
 	knownNodeIds: Set<string>,
 ): Record<string, unknown> {
 	const next = { ...binding };
+	if (next.kind === "output" && typeof next.node === "string" && knownNodeIds.has(next.node)) {
+		next.node = `${prefix}${next.node}`;
+	}
 	const output = next.output;
 	if (isRecord(output) && typeof output.node === "string" && knownNodeIds.has(output.node)) {
 		next.output = { ...output, node: `${prefix}${output.node}` };
