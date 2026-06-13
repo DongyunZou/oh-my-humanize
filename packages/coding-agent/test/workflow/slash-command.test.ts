@@ -744,6 +744,15 @@ edges: []
 			id: "run-missing:binding-1",
 			requestedRoles: { reviewer: "anthropic/claude-sonnet-4-5" },
 			resolvedModels: {},
+			modelBindings: {
+				review: {
+					source: "workflow-default",
+					requestedRole: "reviewer",
+					requestedPattern: "anthropic/claude-sonnet-4-5",
+					error: 'workflow model for node "review" could not resolve requested model',
+					fallbackUsed: false,
+				},
+			},
 			unavailable: ['model:review: workflow model for node "review" could not resolve requested model'],
 		});
 	});

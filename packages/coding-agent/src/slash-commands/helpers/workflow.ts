@@ -1221,25 +1221,15 @@ function createRuntimeBindingSnapshot(
 ): RuntimeBindingSnapshot {
 	const tools = new Set<string>();
 	const agents = new Set<string>();
-	const resolvedModels: Record<string, string> = {};
 	const modelBindings: Record<string, WorkflowModelResolutionAudit> = {};
 	const unavailable: string[] = [];
-	const warnings: string[] = [];
 	for (const node of definition.nodes) {
 		if (node.type === "script") tools.add("eval");
 		if (node.type === "human") tools.add("ask");
 		if (node.type === "agent" || node.type === "review") tools.add("task");
 		if (node.agent) agents.add(node.agent);
 		recordRuntimeBindingTool(node, runtimeHost, unavailable);
-		recordRuntimeBindingModel(
-			definition,
-			node,
-			modelResolution,
-			resolvedModels,
-			modelBindings,
-			unavailable,
-			warnings,
-		);
+		recordRuntimeBindingModel(definition, node, modelResolution, modelBindings);
 	}
 	for (const tool of definition.capabilities?.tools ?? []) {
 		tools.add(tool);
@@ -1249,15 +1239,16 @@ function createRuntimeBindingSnapshot(
 		agents.add(agent);
 		recordRuntimeBindingDeclaredAgent(agent, runtimeHost, unavailable);
 	}
+	const modelDiagnostics = runtimeBindingModelDiagnostics(modelBindings);
 	return {
 		id,
 		requestedRoles: { ...definition.models.roles },
-		resolvedModels,
+		resolvedModels: modelDiagnostics.resolvedModels,
 		modelBindings,
 		tools: [...tools].sort(),
 		agents: [...agents].sort(),
-		unavailable,
-		warnings,
+		unavailable: [...unavailable, ...modelDiagnostics.unavailable],
+		warnings: modelDiagnostics.warnings,
 	};
 }
 
@@ -1320,44 +1311,60 @@ function recordRuntimeBindingModel(
 	definition: WorkflowDefinition,
 	node: WorkflowNode,
 	modelResolution: WorkflowRunnerModelResolutionOptions | undefined,
-	resolvedModels: Record<string, string>,
 	modelBindings: Record<string, WorkflowModelResolutionAudit>,
-	unavailable: string[],
-	warnings: string[],
 ): void {
 	if (!workflowNodeRequiresModel(node)) return;
-	if (!modelResolution) {
-		unavailable.push(`model:${node.id}: no available models from oh-my-pi runtime configuration`);
-		return;
-	}
+	modelBindings[node.id] = resolveRuntimeBindingModelAudit(definition, node, modelResolution);
+}
+
+function resolveRuntimeBindingModelAudit(
+	definition: WorkflowDefinition,
+	node: WorkflowNode,
+	modelResolution: WorkflowRunnerModelResolutionOptions | undefined,
+): WorkflowModelResolutionAudit {
 	const result = resolveWorkflowNodeModel(definition, node, {
-		availableModels: modelResolution.availableModels,
-		settings: modelResolution.settings,
-		matchPreferences: modelResolution.matchPreferences,
-		modelRegistry: modelResolution.modelRegistry,
-		parentActiveModelPattern: modelResolution.parentActiveModelPattern,
-		agentModel: workflowRuntimeAgentModelPattern(modelResolution, node),
+		availableModels: modelResolution?.availableModels ?? [],
+		settings: modelResolution?.settings,
+		matchPreferences: modelResolution?.matchPreferences,
+		modelRegistry: modelResolution?.modelRegistry,
+		parentActiveModelPattern: modelResolution?.parentActiveModelPattern,
+		agentModel: modelResolution === undefined ? undefined : workflowRuntimeAgentModelPattern(modelResolution, node),
 	});
-	const audit = result.audit;
-	modelBindings[node.id] = audit;
-	if (audit.resolvedModel !== undefined) {
-		resolvedModels[node.id] = audit.resolvedModel;
+	if (modelResolution !== undefined) return result.audit;
+	return {
+		...result.audit,
+		error: "no available models from oh-my-pi runtime configuration",
+	};
+}
+
+interface RuntimeBindingModelDiagnostics {
+	resolvedModels: Record<string, string>;
+	unavailable: string[];
+	warnings: string[];
+}
+
+function runtimeBindingModelDiagnostics(
+	modelBindings: Record<string, WorkflowModelResolutionAudit>,
+): RuntimeBindingModelDiagnostics {
+	const resolvedModels: Record<string, string> = {};
+	const unavailable: string[] = [];
+	const warnings: string[] = [];
+	for (const [nodeId, audit] of Object.entries(modelBindings)) {
+		if (audit.resolvedModel !== undefined) {
+			resolvedModels[nodeId] = audit.resolvedModel;
+		}
+		if (audit.warning !== undefined) {
+			warnings.push(`model:${nodeId}: ${audit.warning}`);
+		}
+		if (audit.fallbackUsed) {
+			const reason = audit.fallbackReason === undefined ? "fallback used" : audit.fallbackReason;
+			warnings.push(`model:${nodeId}: ${reason}`);
+		}
+		if (audit.error !== undefined) {
+			unavailable.push(`model:${nodeId}: ${audit.error}`);
+		}
 	}
-	if (audit.warning !== undefined) {
-		warnings.push(`model:${node.id}: ${audit.warning}`);
-	}
-	if (audit.fallbackUsed) {
-		const reason = audit.fallbackReason === undefined ? "fallback used" : audit.fallbackReason;
-		warnings.push(`model:${node.id}: ${reason}`);
-	}
-	if (audit.error !== undefined) {
-		unavailable.push(`model:${node.id}: ${audit.error}`);
-		return;
-	}
-	if (audit.source === "none" && modelResolution.parentActiveModelPattern !== undefined) {
-		resolvedModels[node.id] = modelResolution.parentActiveModelPattern;
-		warnings.push(`model:${node.id}: using active session model`);
-	}
+	return { resolvedModels, unavailable, warnings };
 }
 
 function workflowRuntimeAgentModelPattern(
