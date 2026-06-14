@@ -18,6 +18,12 @@ saveTextLockfile = true
 pathIgnorePatterns = [
   "**/node_modules/**",
   "temp/**",
+  "**/.git/**",
+  "**/target/**",
+  "**/dist/**",
+  "python/**",
+  "docs/**",
+  "runs/**",
   "python/robomp/data/**",
   ".wt/**",
   ".worktrees/**",
