@@ -1193,6 +1193,48 @@ describe("workflow graph view rendering", () => {
 		expect(view.actions).not.toContain("Restart: /workflow restart checkpoint-1 --background");
 	});
 
+	it("does not advertise Agent Hub controls when running work has no live agent", () => {
+		const definition: WorkflowDefinition = {
+			name: "script-running",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [{ id: "build", type: "script" }],
+			edges: [],
+		};
+		const freeze = createFreeze(definition);
+		const family: WorkflowRunFamilySnapshot = {
+			id: "script-running:family",
+			freezes: [freeze],
+			attempts: [
+				{
+					id: "script-running:attempt-1",
+					familyId: "script-running:family",
+					freezeId: freeze.id,
+					startNodeId: "build",
+					status: "running",
+					runtimeBindingSnapshot: createBinding(),
+					activations: [
+						{
+							id: "activation-build",
+							nodeId: "build",
+							parentActivationIds: [],
+							status: "running",
+						},
+					],
+				},
+			],
+			checkpoints: [],
+			changeRequests: [],
+		};
+
+		const view = buildWorkflowGraphView(family);
+
+		expect(view.actions).toContain("Status: /workflow manager --family-id script-running:family");
+		expect(view.actions).not.toContain("Active agents: /workflow manager --family-id script-running:family");
+		expect(view.actions.join("\n")).not.toContain("Open Agent Hub");
+		expect(view.actions.join("\n")).not.toContain("Focused prompt");
+	});
+
 	it("renders the live TUI graph as an operator cockpit before the diagram", async () => {
 		const theme = await getThemeByName("dark");
 		if (!theme) throw new Error("dark theme fixture is required");

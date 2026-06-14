@@ -1358,20 +1358,24 @@ function formatWorkflowGraphActions(
 	const actions = [`Refresh: /workflow graph --family-id ${family.id}`];
 	if (currentAttempt?.status === "running") {
 		actions.push(`Stop attempt: /workflow stop ${currentAttempt.id} --deadline-ms 30000`);
-		const hasLiveAttempt = options.liveAttemptIds === undefined || options.liveAttemptIds.has(currentAttempt.id);
-		if (hasLiveAttempt && currentAttempt.activations.some(activation => activation.status === "running")) {
-			actions.push(`Active agents: /workflow manager --family-id ${family.id}`);
-			for (const agent of activeAgents) {
+		if (currentAttempt.activations.some(activation => activation.status === "running")) {
+			const hasLiveAttempt = options.liveAttemptIds === undefined || options.liveAttemptIds.has(currentAttempt.id);
+			if (!hasLiveAttempt || activeAgents.length === 0) {
+				actions.push(`Status: /workflow manager --family-id ${family.id}`);
+			} else {
+				actions.push(`Active agents: /workflow manager --family-id ${family.id}`);
+				for (const agent of activeAgents) {
+					actions.push(
+						`Interrupt ${agent.role} · ${agent.label}: /workflow interrupt ${currentAttempt.id} ${agent.focusAgentId} --deadline-ms 30000`,
+					);
+				}
+				const focusTargets = activeAgents.map(agent => agent.focusAgentId).join(" or ");
+				const targetHint = focusTargets.length === 0 ? "the selected live agent" : focusTargets;
+				actions.push(`Open Agent Hub: double-left or observe key; watch/intervene ${targetHint}`);
 				actions.push(
-					`Interrupt ${agent.role} · ${agent.label}: /workflow interrupt ${currentAttempt.id} ${agent.focusAgentId} --deadline-ms 30000`,
+					"Focused prompt: Agent Hub Enter attaches to the selected agent; Esc returns to workflow control",
 				);
 			}
-			const focusTargets = activeAgents.map(agent => agent.focusAgentId).join(" or ");
-			const targetHint = focusTargets.length === 0 ? "the selected live agent" : focusTargets;
-			actions.push(`Open Agent Hub: double-left or observe key; watch/intervene ${targetHint}`);
-			actions.push(
-				"Focused prompt: Agent Hub Enter attaches to the selected agent; Esc returns to workflow control",
-			);
 		}
 	}
 	actions.push(`Propose change: /workflow request-change <file> --family-id ${family.id}`);
