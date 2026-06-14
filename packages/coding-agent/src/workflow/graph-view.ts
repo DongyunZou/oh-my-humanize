@@ -295,10 +295,10 @@ export function renderWorkflowGraphText(view: WorkflowGraphView, options: Workfl
 		lines.push("On-flight:");
 		for (const line of onFlight) lines.push(`- ${line}`);
 	}
-	const recentOutput = formatWorkflowRecentOutputLines(view);
-	if (recentOutput.length > 0) {
-		lines.push("Recent output:");
-		for (const line of recentOutput) lines.push(`- ${line}`);
+	const recentActivity = formatWorkflowRecentActivityLines(view);
+	if (recentActivity.length > 0) {
+		lines.push("Recent activity:");
+		for (const line of recentActivity) lines.push(`- ${line}`);
 	}
 	lines.push("Diagram:");
 	lines.push(...renderWorkflowGraphDiagram(view, options));
@@ -1340,6 +1340,36 @@ export function formatWorkflowRecentOutputLines(view: WorkflowGraphView): string
 		if (node.status === "failed" && node.error !== undefined) {
 			lines.push(`${formatWorkflowNodeDisplayName(node.id)} stderr: ${formatSingleLineWorkflowDetail(node.error)}`);
 		}
+	}
+	return lines.slice(0, WORKFLOW_RECENT_OUTPUT_LINES);
+}
+
+export function formatWorkflowRecentActivityLines(view: WorkflowGraphView): string[] {
+	const lines: string[] = [];
+	for (const agent of view.activeAgents ?? []) {
+		if (agent.activity !== undefined) {
+			lines.push(`progress · ${agent.role} · ${agent.label}: ${formatSingleLineWorkflowDetail(agent.activity)}`);
+		}
+		for (const output of agent.recentOutput ?? []) {
+			lines.push(`stdout · ${agent.role} · ${agent.label}: ${formatSingleLineWorkflowDetail(output)}`);
+		}
+	}
+	for (const node of view.nodes) {
+		if (node.status === "failed" && node.error !== undefined) {
+			lines.push(
+				`stderr · ${formatWorkflowNodeDisplayName(node.id)}: ${formatSingleLineWorkflowDetail(node.error)}`,
+			);
+		}
+	}
+	for (const request of view.lineage) {
+		if (request.status === "rejected") continue;
+		const applied = request.applications.length === 0 ? "" : " · applied";
+		lines.push(
+			`changes · ${request.id} ${request.status}${applied}: ${formatSingleLineWorkflowDetail(request.reason)}`,
+		);
+	}
+	for (const route of view.selectedRoutes ?? []) {
+		lines.push(`route · ${formatWorkflowSelectedRoute(route)}`);
 	}
 	return lines.slice(0, WORKFLOW_RECENT_OUTPUT_LINES);
 }

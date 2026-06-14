@@ -7,7 +7,7 @@ import {
 	formatWorkflowFocusLines,
 	formatWorkflowOnFlightLines,
 	formatWorkflowOverviewLines,
-	formatWorkflowRecentOutputLines,
+	formatWorkflowRecentActivityLines,
 	formatWorkflowSelectedRoute,
 	formatWorkflowSubflow,
 	renderWorkflowGraphDiagram,
@@ -63,7 +63,7 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 		if (this.#viewProvider === undefined && this.#cache?.width === safeWidth) return this.#cache.lines;
 		const focusLines = workflowGraphFocusLines(view, safeWidth - 8);
 		const onFlightLines = workflowGraphOnFlightLines(view, safeWidth - 8);
-		const recentOutputLines = workflowGraphRecentOutputLines(view, safeWidth - 8);
+		const recentActivityLines = workflowGraphRecentActivityLines(view, safeWidth - 8);
 		const lines = renderOutputBlock(
 			{
 				header: "Workflow graph",
@@ -78,7 +78,7 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 						? [{ label: "flow calls", lines: workflowGraphSubflowLines(view) }]
 						: []),
 					...(onFlightLines.length > 0 ? [{ label: "on-flight", lines: onFlightLines }] : []),
-					...(recentOutputLines.length > 0 ? [{ label: "recent output", lines: recentOutputLines }] : []),
+					...(recentActivityLines.length > 0 ? [{ label: "recent activity", lines: recentActivityLines }] : []),
 					{
 						label: "diagram",
 						lines: colorWorkflowDiagram(renderWorkflowGraphDiagram(view, { width: safeWidth - 8 })),
@@ -136,8 +136,8 @@ function workflowGraphOnFlightLines(view: WorkflowGraphView, width: number): str
 	});
 }
 
-function workflowGraphRecentOutputLines(view: WorkflowGraphView, width: number): string[] {
-	return formatWorkflowRecentOutputLines(view).map(line =>
+function workflowGraphRecentActivityLines(view: WorkflowGraphView, width: number): string[] {
+	return formatWorkflowRecentActivityLines(view).map(line =>
 		theme.fg("muted", truncateToWidth(replaceTabs(line), Math.max(20, width))),
 	);
 }

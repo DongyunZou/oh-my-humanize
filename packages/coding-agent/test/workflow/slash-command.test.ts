@@ -5015,8 +5015,11 @@ edges:
 		expect(output[0]).toContain("║! strongReview");
 		expect(nodeCenterHasIncomingConnector(output[0], "strongReview")).toBe(true);
 		expect(output[0]).toContain("failed - error: review prompt missing");
-		expect(output[0]).toContain("Recent output:");
-		expect(output[0]).toContain("- Strong review stderr: review prompt missing");
+		expect(output[0]).toContain("Recent activity:");
+		expect(output[0]).toContain("- stderr · Strong review: review prompt missing");
+		expect(output[0]).toContain(
+			"- changes · change-strong-review approved · applied: replace weak review with strong review",
+		);
 		expect(output[0]).toContain("Change review:");
 		expect(output[0]).toContain(
 			"- change-strong-review approved by human:sihao · applied - replace weak review with strong review",

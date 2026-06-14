@@ -31,7 +31,7 @@ import {
 	formatWorkflowControlLines,
 	formatWorkflowOnFlightLines,
 	formatWorkflowOverviewLines,
-	formatWorkflowRecentOutputLines,
+	formatWorkflowRecentActivityLines,
 	renderWorkflowGraphText,
 	type WorkflowGraphView,
 } from "../../workflow/graph-view";
@@ -2905,10 +2905,10 @@ function formatWorkflowManager(
 		for (const line of onFlight) lines.push(`- ${line}`);
 	}
 
-	const recentOutput = formatWorkflowRecentOutputLines(graphView);
-	if (recentOutput.length > 0) {
-		lines.push("Recent output:");
-		for (const line of recentOutput) lines.push(`- ${line}`);
+	const recentActivity = formatWorkflowRecentActivityLines(graphView);
+	if (recentActivity.length > 0) {
+		lines.push("Recent activity:");
+		for (const line of recentActivity) lines.push(`- ${line}`);
 	}
 
 	lines.push("Change review:");

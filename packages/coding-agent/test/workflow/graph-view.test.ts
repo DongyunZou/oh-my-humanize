@@ -359,9 +359,10 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain(
 			"- Builder · Build round live · rust.cat/gpt-5.5 · tool bash bun test · 1m05s · 4 tools - tightening the recursive runner validation",
 		);
-		expect(text).toContain("Recent output:");
-		expect(text).toContain("- Builder · Build round stdout: Running bun test");
-		expect(text).toContain("- Builder · Build round stdout: Fixed loop termination case");
+		expect(text).toContain("Recent activity:");
+		expect(text).toContain("- progress · Builder · Build round: tightening the recursive runner validation");
+		expect(text).toContain("- stdout · Builder · Build round: Running bun test");
+		expect(text).toContain("- stdout · Builder · Build round: Fixed loop termination case");
 		expect(text).not.toContain("activation-build");
 		expect(text).not.toContain("agent:task");
 	});
