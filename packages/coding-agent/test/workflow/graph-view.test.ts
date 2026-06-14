@@ -672,11 +672,38 @@ describe("workflow graph view rendering", () => {
 
 		const diagram = renderWorkflowGraphDiagram(view, { width: 80 }).join("\n");
 
-		expect(diagram).toContain("edge review to ship when verdict is finish");
+		expect(diagram).toContain("when verdict is finish");
 		expect(diagram).toContain("review back to build when verdict is retry");
 		expect(diagram).not.toContain('state.verdict == "finish"');
 		expect(diagram).not.toContain('state.verdict == "retry"');
+		expect(diagram).not.toContain("edge review to ship");
 		expect(diagram).not.toMatch(/[-─]+[>→▶]|[<←◀][-─]+|->|=>|→|↺/u);
+	});
+
+	it("anchors conditional edge labels to the connector column", () => {
+		const view = createView({
+			name: "conditional-label-anchor",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "review", type: "review" },
+				{ id: "ship", type: "script" },
+			],
+			edges: [{ from: "review", to: "ship", condition: { source: 'state.verdict == "finish"' } }],
+		});
+
+		const diagram = renderWorkflowGraphDiagram(view, { width: 72 });
+		const sourceBottomIndex = diagram.findIndex(
+			line => line.includes("└") && line.includes("┬") && line.includes("┘"),
+		);
+		const connectorColumn = visibleColumnsOf(diagram[sourceBottomIndex]!, "┬")[0];
+		const labelLine = diagram.find(line => line.includes("when verdict is finish"));
+
+		expect(connectorColumn).toBeDefined();
+		expect(labelLine).toBeDefined();
+		expect(charAtVisibleColumn(labelLine!, connectorColumn!)).toBe("│");
+		expect(labelLine!.trimStart()).toStartWith("│  when verdict is finish");
+		expect(labelLine).not.toContain("edge review to ship");
 	});
 
 	it("renders review-output loop conditions as human-facing verdict labels", () => {
@@ -709,9 +736,7 @@ describe("workflow graph view rendering", () => {
 		expect(diagram).toContain(
 			"reviewInvestigation back to writeInvestigation when review investigation verdict is CONTINUE",
 		);
-		expect(diagram).toContain(
-			"edge reviewInvestigation to archiveInvestigation when review investigation verdict is not CONTINUE",
-		);
+		expect(diagram).toContain("when review investigation verdict is not CONTINUE");
 		expect(diagram).not.toContain("outputs.reviewInvestigation.verdict");
 	});
 

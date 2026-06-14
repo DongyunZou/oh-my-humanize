@@ -339,6 +339,7 @@ interface WorkflowGraphLayout {
 	backEdges: WorkflowGraphEdgeView[];
 	nodeWidth: number;
 	totalWidth: number;
+	labelWidth: number;
 }
 
 function layoutWorkflowGraph(view: WorkflowGraphView, width: number | undefined): WorkflowGraphLayout {
@@ -367,13 +368,17 @@ function layoutWorkflowGraph(view: WorkflowGraphView, width: number | undefined)
 	}
 	const maxRankSize = Math.max(1, ...ranks.map(rank => rank.length));
 	const nodeWidth = workflowGraphNodeWidth(width, maxRankSize);
+	const totalWidth = rankWidth(maxRankSize, nodeWidth);
+	const labelWidth =
+		width === undefined || !Number.isFinite(width) ? totalWidth : Math.max(totalWidth, Math.floor(width));
 	return {
 		ranks,
 		rankByNodeId,
 		forwardEdges,
 		backEdges,
 		nodeWidth,
-		totalWidth: rankWidth(maxRankSize, nodeWidth),
+		totalWidth,
+		labelWidth,
 	};
 }
 
@@ -477,12 +482,28 @@ function renderWorkflowGraphConnector(rankIndex: number, layout: WorkflowGraphLa
 		else skippedEdges.push(edge);
 	}
 	const rows = renderWorkflowGraphConnectorRows(directEdges, layout.totalWidth);
-	const labeledEdges = [
-		...directEdges.filter(routed => routed.edge.condition !== undefined).map(routed => routed.edge),
-		...skippedEdges,
+	const directLabels = directEdges
+		.filter(routed => routed.edge.condition !== undefined)
+		.map(routed =>
+			renderWorkflowGraphConnectorLabel(
+				routed.target,
+				layout.labelWidth,
+				`when ${formatWorkflowConditionLabel(routed.edge.condition!)}`,
+			),
+		);
+	const skippedLabels = skippedEdges.flatMap(edge => {
+		const source = nodeCenter(edge.from, rankIndex, layout);
+		if (source === undefined) return [];
+		return [renderWorkflowGraphConnectorLabel(source, layout.labelWidth, `to ${formatEdgeTarget(edge)}`)];
+	});
+	if (directLabels.length === 0) return [...rows, ...skippedLabels];
+	const labelInsertionIndex = rows.length <= 1 ? rows.length : rows.length - 1;
+	return [
+		...rows.slice(0, labelInsertionIndex),
+		...directLabels,
+		...rows.slice(labelInsertionIndex),
+		...skippedLabels,
 	];
-	for (const edge of labeledEdges) rows.push(`  edge ${edge.from} to ${formatEdgeTarget(edge)}`);
-	return rows;
 }
 
 interface RoutedWorkflowGraphEdge {
@@ -504,6 +525,13 @@ function renderWorkflowGraphConnectorRows(edges: RoutedWorkflowGraphEdge[], widt
 		drawConnectorLanding(grid, 2, target);
 	}
 	return grid.map(row => connectorRowToString(row)).filter(line => line.trim().length > 0);
+}
+
+function renderWorkflowGraphConnectorLabel(column: number, width: number, label: string): string {
+	const safeColumn = Math.max(0, Math.min(column, Math.max(0, width - 1)));
+	const suffixWidth = Math.max(0, width - safeColumn - 1);
+	const suffix = suffixWidth === 0 ? "" : truncateToWidth(`  ${label}`, suffixWidth, Ellipsis.Ascii);
+	return `${" ".repeat(safeColumn)}│${suffix}`.trimEnd();
 }
 
 function hasIncomingWorkflowGraphConnector(nodeId: string, rankIndex: number, layout: WorkflowGraphLayout): boolean {

@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Changed workflow graph conditional edge labels to render as connector-anchored `when ...` rows instead of left-floating `edge ...` annotations, improving TUI diagram alignment.
 - Changed the workflow graph cockpit to include a focused-node detail band for the current live, failed, running, frontier, or checkpointed node, including recent output and intervention controls when available.
 - Changed workflow cockpit activity summaries to use labeled recent activity rows for progress, stdout, stderr, route, and change events instead of an output-only list.
 - Changed TUI workflow starts to show a single monitor-active status line when a resident workflow graph is mounted, leaving detailed graph, activation, and model information to the cockpit and inspect surfaces instead of duplicating it above the monitor.
