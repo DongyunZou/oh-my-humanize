@@ -2158,7 +2158,9 @@ edges: []
 
 		expect(result).toBe(true);
 		expect(output).toHaveLength(1);
-		expect(output[0]).toContain("Workflow run: run-monitor");
+		expect(output[0]).toBe("Workflow monitor active: run-monitor (family family-monitor).");
+		expect(output[0]).not.toContain("Current graph revision");
+		expect(output[0]).not.toContain("Graph nodes:");
 		expect(presentedComponents).toEqual([]);
 		expect(workflowMonitorComponents).toHaveLength(1);
 	});
@@ -2225,11 +2227,15 @@ edges: []
 			modelOverrideAuthFallback: false,
 		});
 		expect(capturedRequest?.task.assignment).toBe("Return pass.");
-		expect(output[0]).toContain("activation-1 review rust-cat/gpt-5.5 (node)");
+		expect(output[0]).toBe("Workflow monitor active: run-review (family run-review:family).");
 		const runs = reconstructWorkflowRuns(entries);
 		expect(runs[0]?.activations[0]?.output).toMatchObject({
 			summary: "review passed",
 			data: { verdict: "pass" },
+		});
+		expect(runs[0]?.activations[0]?.modelAudit).toMatchObject({
+			source: "node",
+			resolvedModel: "rust-cat/gpt-5.5",
 		});
 	});
 
@@ -2345,7 +2351,7 @@ edges: []
 			modelOverride: "rust-cat/gpt-5.5",
 			modelOverrideAuthFallback: false,
 		});
-		expect(output[0]).toContain("activation-1 build rust-cat/gpt-5.5 (parent-fallback)");
+		expect(output[0]).toBe("Workflow monitor active: run-session-agent (family run-session-agent:family).");
 		const families = reconstructWorkflowFamilies(entries);
 		expect(families[0]?.attempts[0]?.runtimeBindingSnapshot).toMatchObject({
 			requestedRoles: { builder: "openai/gpt-4o" },

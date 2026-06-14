@@ -406,6 +406,11 @@ async function handleStartCommand(rest: string, runtime: SlashCommandRuntime): P
 			candidate => candidate.id === lifecycleFamilyId,
 		);
 		if (family) {
+			if (runtime.outputWorkflowGraph) {
+				await emitWorkflowGraphViews([buildWorkflowGraphViewForRuntime(family, runtime)], runtime);
+				await runtime.output(`Workflow monitor active: ${runId} (family ${family.id}).`);
+				return commandConsumed();
+			}
 			await runtime.output(sections.join("\n\n"));
 			await emitWorkflowGraphViews([buildWorkflowGraphViewForRuntime(family, runtime)], runtime);
 			return commandConsumed();
