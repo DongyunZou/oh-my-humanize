@@ -4,6 +4,7 @@ import type { State } from "../../tui/types";
 import {
 	formatWorkflowChangeReviewLines,
 	formatWorkflowControlLines,
+	formatWorkflowFocusLines,
 	formatWorkflowOnFlightLines,
 	formatWorkflowOverviewLines,
 	formatWorkflowRecentOutputLines,
@@ -60,6 +61,7 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 		const view = this.#currentView();
 		this.#observeView(view);
 		if (this.#viewProvider === undefined && this.#cache?.width === safeWidth) return this.#cache.lines;
+		const focusLines = workflowGraphFocusLines(view, safeWidth - 8);
 		const onFlightLines = workflowGraphOnFlightLines(view, safeWidth - 8);
 		const recentOutputLines = workflowGraphRecentOutputLines(view, safeWidth - 8);
 		const lines = renderOutputBlock(
@@ -71,6 +73,7 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 				contentPaddingLeft: 2,
 				sections: [
 					{ lines: formatWorkflowOverviewLines(view) },
+					...(focusLines.length > 0 ? [{ label: "focused node", lines: focusLines }] : []),
 					...(view.subflows !== undefined && view.subflows.length > 0
 						? [{ label: "flow calls", lines: workflowGraphSubflowLines(view) }]
 						: []),
@@ -120,6 +123,10 @@ function workflowGraphControlLines(view: WorkflowGraphView): string[] {
 
 function workflowGraphSubflowLines(view: WorkflowGraphView): string[] {
 	return (view.subflows ?? []).map(subflow => formatWorkflowSubflow(subflow));
+}
+
+function workflowGraphFocusLines(view: WorkflowGraphView, width: number): string[] {
+	return formatWorkflowFocusLines(view).map(line => truncateToWidth(replaceTabs(line), Math.max(20, width)));
 }
 
 function workflowGraphOnFlightLines(view: WorkflowGraphView, width: number): string[] {

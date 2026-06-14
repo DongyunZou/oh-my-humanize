@@ -331,9 +331,31 @@ describe("workflow graph view rendering", () => {
 				recentOutput: ["Running bun test", "Fixed loop termination case"],
 			},
 		]);
+		expect(view.focus).toEqual({
+			nodeId: "buildRound",
+			label: "Build round",
+			role: "Builder",
+			status: "running",
+			focusAgentId: "buildRound",
+			model: "rust.cat/gpt-5.5",
+			tool: "bash bun test",
+			activity: "tightening the recursive runner validation",
+			stats: "1m05s · 4 tools",
+			recentOutput: ["Running bun test", "Fixed loop termination case"],
+			controls: [
+				"Watch: Agent Hub buildRound",
+				"Interrupt: /workflow interrupt attempt-1 buildRound --deadline-ms 30000",
+				"Steer: Agent Hub Enter attaches; Esc returns",
+			],
+		});
 
 		const text = renderWorkflowGraphText(view);
 
+		expect(text).toContain("Focused node:");
+		expect(text).toContain("- Builder · Build round live · rust.cat/gpt-5.5 · tool bash bun test · 1m05s · 4 tools");
+		expect(text).toContain("- activity: tightening the recursive runner validation");
+		expect(text).toContain("- stdout: Running bun test");
+		expect(text).toContain("- control: Interrupt: /workflow interrupt attempt-1 buildRound --deadline-ms 30000");
 		expect(text).toContain(
 			"- Builder · Build round live · rust.cat/gpt-5.5 · tool bash bun test · 1m05s · 4 tools - tightening the recursive runner validation",
 		);
@@ -342,6 +364,69 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain("- Builder · Build round stdout: Fixed loop termination case");
 		expect(text).not.toContain("activation-build");
 		expect(text).not.toContain("agent:task");
+	});
+
+	it("shows checkpoint frontier as the focused node after a stopped workflow", () => {
+		const freeze = createFreeze({
+			name: "checkpoint-focus",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "plan", type: "script", script: { language: "sh", code: "true" } },
+				{ id: "review", type: "review", prompt: "Review the plan" },
+			],
+			edges: [{ from: "plan", to: "review" }],
+		});
+		const view = buildWorkflowGraphView({
+			id: "checkpoint-focus-family",
+			freezes: [freeze],
+			attempts: [
+				{
+					id: "attempt-1",
+					familyId: "checkpoint-focus-family",
+					freezeId: freeze.id,
+					startNodeId: "plan",
+					status: "stopped",
+					runtimeBindingSnapshot: createBinding(),
+					checkpointId: "checkpoint-1",
+					activations: [
+						{
+							id: "activation-plan",
+							nodeId: "plan",
+							parentActivationIds: [],
+							status: "completed",
+							output: { summary: "planned next change" },
+						},
+					],
+				},
+			],
+			checkpoints: [
+				{
+					id: "checkpoint-1",
+					familyId: "checkpoint-focus-family",
+					attemptId: "attempt-1",
+					completedActivationIds: ["activation-plan"],
+					abortedActivationIds: [],
+					frontierNodeIds: ["review"],
+					state: {},
+					sourceMapping: {},
+				},
+			],
+			changeRequests: [],
+		});
+
+		expect(view.focus).toEqual({
+			nodeId: "review",
+			label: "Review",
+			role: "Reviewer",
+			status: "frontier",
+		});
+
+		const text = renderWorkflowGraphText(view);
+
+		expect(text).toContain("Focused node:");
+		expect(text).toContain("- Reviewer · Review frontier");
+		expect(text).toContain("Frontier: review to review");
 	});
 
 	it("labels repeated loop activations with the current round and focus target", () => {
