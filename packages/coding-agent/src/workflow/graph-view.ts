@@ -1,5 +1,6 @@
 import { Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { workflowAgentTaskIdForNode } from "./agent-task-id";
+import { evaluateWorkflowCondition } from "./condition";
 import type { WorkflowNode } from "./definition";
 import type {
 	WorkflowAttemptActivationRecord,
@@ -8,6 +9,7 @@ import type {
 	WorkflowRunAttemptSnapshot,
 	WorkflowRunFamilySnapshot,
 } from "./lifecycle";
+import { applyWorkflowStatePatch, type WorkflowActivationOutput } from "./state";
 
 export type WorkflowGraphNodeStatus =
 	| "pending"
@@ -28,6 +30,7 @@ export interface WorkflowGraphView {
 	activeAgents?: WorkflowGraphActiveAgentView[];
 	nodes: WorkflowGraphNodeView[];
 	edges: WorkflowGraphEdgeView[];
+	selectedRoutes?: WorkflowGraphSelectedRouteView[];
 	checkpoint?: WorkflowGraphCheckpointView;
 	lineage: WorkflowGraphLineageView[];
 	actions: string[];
@@ -76,6 +79,7 @@ export interface WorkflowGraphNodeView {
 	id: string;
 	kind: string;
 	status: WorkflowGraphNodeStatus;
+	verdict?: string;
 	summary?: string;
 	error?: string;
 	reason?: string;
@@ -83,6 +87,12 @@ export interface WorkflowGraphNodeView {
 }
 
 export interface WorkflowGraphEdgeView {
+	from: string;
+	to: string;
+	condition?: string;
+}
+
+export interface WorkflowGraphSelectedRouteView {
 	from: string;
 	to: string;
 	condition?: string;
@@ -168,6 +178,7 @@ export function buildWorkflowGraphView(
 				status: status.status,
 				focused: isFocusedWorkflowGraphNode(status.status),
 			};
+			if (status.verdict !== undefined) view.verdict = status.verdict;
 			if (status.summary !== undefined) view.summary = status.summary;
 			if (status.error !== undefined) view.error = status.error;
 			if (status.reason !== undefined) view.reason = status.reason;
@@ -179,6 +190,7 @@ export function buildWorkflowGraphView(
 			if (edge.condition?.source !== undefined) view.condition = edge.condition.source;
 			return view;
 		}) ?? [];
+	const selectedRoutes = buildWorkflowGraphSelectedRoutes(currentAttempt, edges);
 	const activeAgents = formatActiveWorkflowAgents(currentAttempt, currentFreeze?.definition.nodes ?? [], options);
 	const view: WorkflowGraphView = {
 		familyId: family.id,
@@ -188,6 +200,7 @@ export function buildWorkflowGraphView(
 		lineage: family.changeRequests.map(formatLineage),
 		actions: formatWorkflowGraphActions(family, currentAttempt, currentCheckpoint, options, activeAgents),
 	};
+	if (selectedRoutes.length > 0) view.selectedRoutes = selectedRoutes;
 	if (currentFreeze?.definition.subflows !== undefined) {
 		view.subflows = currentFreeze.definition.subflows.map(subflow => ({
 			alias: subflow.alias,
@@ -251,6 +264,10 @@ export function renderWorkflowGraphText(view: WorkflowGraphView, options: Workfl
 	}
 	lines.push("Diagram:");
 	lines.push(...renderWorkflowGraphDiagram(view, options));
+	if (view.selectedRoutes !== undefined && view.selectedRoutes.length > 0) {
+		lines.push("Selected routes:");
+		for (const route of view.selectedRoutes) lines.push(`- ${formatWorkflowSelectedRoute(route)}`);
+	}
 	if (view.checkpoint !== undefined) {
 		lines.push(`Checkpoint frontier: ${view.checkpoint.id} ${formatCheckpointFrontier(view.checkpoint)}`);
 		if ((view.checkpoint.omittedAbortedOutputs ?? 0) > 0) {
@@ -594,7 +611,10 @@ function renderWorkflowGraphBorderLine(
 
 function formatWorkflowNodeDetail(node: WorkflowGraphNodeView): string {
 	const parts: string[] = [];
-	if (node.summary) parts.push(formatSingleLineWorkflowDetail(formatWorkflowDisplayDetail(node.summary)));
+	if (node.verdict) parts.push(`verdict ${formatSingleLineWorkflowDetail(node.verdict)}`);
+	if (node.summary && node.summary.trim() !== node.verdict) {
+		parts.push(formatSingleLineWorkflowDetail(formatWorkflowDisplayDetail(node.summary)));
+	}
 	if (node.error) parts.push(`error: ${formatSingleLineWorkflowDetail(node.error)}`);
 	if (node.reason) parts.push(`reason: ${formatSingleLineWorkflowDetail(node.reason)}`);
 	return parts.join("; ");
@@ -664,6 +684,10 @@ function isWorkflowDisplayRecord(value: unknown): value is Record<string, unknow
 
 function formatEdgeTarget(edge: WorkflowGraphEdgeView): string {
 	return edge.condition === undefined ? edge.to : `${edge.to} when ${formatWorkflowConditionLabel(edge.condition)}`;
+}
+
+export function formatWorkflowSelectedRoute(route: WorkflowGraphSelectedRouteView): string {
+	return `${route.from} chose ${formatEdgeTarget(route)}`;
 }
 
 export function formatWorkflowConditionLabel(condition: string): string {
@@ -808,6 +832,7 @@ function buildWorkflowGraphNodeStatuses(
 			const nodeId = currentCheckpoint.sourceMapping[activation.nodeId] ?? activation.nodeId;
 			statuses.set(nodeId, {
 				status: "checkpointed",
+				verdict: workflowActivationOutputVerdict(activation.output),
 				summary: activation.output?.summary,
 				error: activation.error,
 				reason: activation.reason,
@@ -831,6 +856,7 @@ function buildWorkflowGraphNodeStatuses(
 					currentAttemptOwnsCheckpoint && checkpointedActivationIds.has(activation.id)
 						? "checkpointed"
 						: activation.status,
+				verdict: workflowActivationOutputVerdict(activation.output),
 				summary: activation.output?.summary,
 				error: activation.error,
 				reason: activation.reason,
@@ -842,9 +868,87 @@ function buildWorkflowGraphNodeStatuses(
 
 interface WorkflowGraphNodeStatusRecord {
 	status: WorkflowGraphNodeStatus;
+	verdict?: string;
 	summary?: string;
 	error?: string;
 	reason?: string;
+}
+
+function workflowActivationOutputVerdict(output: WorkflowActivationOutput | undefined): string | undefined {
+	const verdict = output?.data?.verdict;
+	return typeof verdict === "string" && verdict.length > 0 ? verdict : undefined;
+}
+
+function buildWorkflowGraphSelectedRoutes(
+	currentAttempt: WorkflowRunAttemptSnapshot | undefined,
+	edges: readonly WorkflowGraphEdgeView[],
+): WorkflowGraphSelectedRouteView[] {
+	if (currentAttempt === undefined || edges.length === 0) return [];
+	const outgoingEdgesByNode = groupWorkflowGraphEdgesBySource(edges);
+	const outputsByNode: Record<string, unknown> = {};
+	const state: Record<string, unknown> = {};
+	const selectedRoutes: WorkflowGraphSelectedRouteView[] = [];
+	for (const activation of currentAttempt.activations) {
+		if (activation.status !== "completed" || activation.output === undefined) continue;
+		applyWorkflowGraphActivationOutputContext(activation, state, outputsByNode);
+		const outgoingEdges = outgoingEdgesByNode.get(activation.nodeId);
+		if (outgoingEdges === undefined || !workflowGraphSourceHasRouteChoice(outgoingEdges)) continue;
+		for (const edge of outgoingEdges) {
+			if (!workflowGraphEdgeIsSelected(edge, state, outputsByNode)) continue;
+			selectedRoutes.push({
+				from: edge.from,
+				to: edge.to,
+				...(edge.condition !== undefined ? { condition: edge.condition } : {}),
+			});
+		}
+	}
+	return selectedRoutes;
+}
+
+function groupWorkflowGraphEdgesBySource(
+	edges: readonly WorkflowGraphEdgeView[],
+): Map<string, WorkflowGraphEdgeView[]> {
+	const edgesBySource = new Map<string, WorkflowGraphEdgeView[]>();
+	for (const edge of edges) {
+		const outgoing = edgesBySource.get(edge.from) ?? [];
+		outgoing.push(edge);
+		edgesBySource.set(edge.from, outgoing);
+	}
+	return edgesBySource;
+}
+
+function workflowGraphSourceHasRouteChoice(edges: readonly WorkflowGraphEdgeView[]): boolean {
+	return edges.length > 1 || edges.some(edge => edge.condition !== undefined);
+}
+
+function applyWorkflowGraphActivationOutputContext(
+	activation: WorkflowAttemptActivationRecord,
+	state: Record<string, unknown>,
+	outputsByNode: Record<string, unknown>,
+): void {
+	const output = activation.output;
+	if (output === undefined) return;
+	if (output.statePatch !== undefined) {
+		applyWorkflowStatePatch(state, output.statePatch);
+	}
+	if (output.data !== undefined) {
+		outputsByNode[activation.nodeId] = output.data;
+	} else {
+		delete outputsByNode[activation.nodeId];
+	}
+}
+
+function workflowGraphEdgeIsSelected(
+	edge: WorkflowGraphEdgeView,
+	state: Record<string, unknown>,
+	outputsByNode: Record<string, unknown>,
+): boolean {
+	if (edge.condition === undefined) return true;
+	try {
+		return evaluateWorkflowCondition(edge.condition, { state, outputs: outputsByNode });
+	} catch {
+		return false;
+	}
 }
 
 function mapWorkflowCheckpointFrontierNode(

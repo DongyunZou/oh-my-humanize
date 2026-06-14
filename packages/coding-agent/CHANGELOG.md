@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Fixed workflow graph review nodes so the TUI shows the parsed verdict and selected outgoing route separately from summary text.
 - Fixed failed workflow attempts so they create restartable checkpoints at failed nodes, allowing operators to recover through the workflow restart path instead of manually starting a later node.
 - Fixed workflow graph condition labels so common state/output verdict checks render as human-facing phrases instead of raw condition expressions in the TUI.
 - Fixed workflow graph node summaries so structured agent completion JSON is rendered as concise human-facing text instead of leaking runtime adapter fields into the TUI.

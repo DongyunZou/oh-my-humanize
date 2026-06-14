@@ -5,6 +5,7 @@ import {
 	formatActiveWorkflowAgentGeneration,
 	formatOmittedAbortedOutputs,
 	formatWorkflowActiveAgentGuidance,
+	formatWorkflowSelectedRoute,
 	formatWorkflowSubflow,
 	renderWorkflowGraphDiagram,
 	type WorkflowGraphActiveAgentView,
@@ -77,6 +78,9 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 						label: "diagram",
 						lines: colorWorkflowDiagram(renderWorkflowGraphDiagram(view, { width: safeWidth - 8 })),
 					},
+					...(view.selectedRoutes !== undefined && view.selectedRoutes.length > 0
+						? [{ label: "routes", lines: workflowGraphSelectedRouteLines(view) }]
+						: []),
 					{ label: "controls", lines: workflowGraphControlLines(view) },
 				],
 			},
@@ -156,6 +160,10 @@ function workflowGraphActiveAgentLines(view: WorkflowGraphView, width: number): 
 		lines.push(truncateToWidth(replaceTabs(line), Math.max(20, width)));
 	}
 	return lines;
+}
+
+function workflowGraphSelectedRouteLines(view: WorkflowGraphView): string[] {
+	return (view.selectedRoutes ?? []).map(route => formatWorkflowSelectedRoute(route));
 }
 
 function workflowAgentActivityText(agent: WorkflowGraphActiveAgentView, width: number): string {

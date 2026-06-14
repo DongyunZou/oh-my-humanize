@@ -582,6 +582,75 @@ describe("workflow graph view rendering", () => {
 		expect(diagram).not.toContain("outputs.reviewInvestigation.verdict");
 	});
 
+	it("surfaces parsed review verdicts and selected routes separately from summary text", () => {
+		const freeze = createFreeze({
+			name: "review-selected-route",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "retryBranch", type: "script" },
+				{ id: "reviewJsonSummary", type: "review" },
+				{ id: "doneBranch", type: "script" },
+			],
+			edges: [
+				{ from: "retryBranch", to: "reviewJsonSummary" },
+				{
+					from: "reviewJsonSummary",
+					to: "retryBranch",
+					condition: { source: 'outputs.reviewJsonSummary.verdict == "CONTINUE"' },
+				},
+				{
+					from: "reviewJsonSummary",
+					to: "doneBranch",
+					condition: { source: 'outputs.reviewJsonSummary.verdict != "CONTINUE"' },
+				},
+			],
+		});
+		const view = buildWorkflowGraphView({
+			id: "review-selected-route-family",
+			freezes: [freeze],
+			attempts: [
+				{
+					id: "attempt-1",
+					familyId: "review-selected-route-family",
+					freezeId: freeze.id,
+					startNodeId: "retryBranch",
+					status: "running",
+					runtimeBindingSnapshot: createBinding(),
+					activations: [
+						{
+							id: "activation-retry",
+							nodeId: "retryBranch",
+							parentActivationIds: [],
+							status: "completed",
+							output: { summary: "retry branch completed" },
+						},
+						{
+							id: "activation-review",
+							nodeId: "reviewJsonSummary",
+							parentActivationIds: ["activation-retry"],
+							status: "completed",
+							output: {
+								summary: "COMPLETE visually misleading summary text",
+								data: { verdict: "CONTINUE" },
+							},
+						},
+					],
+				},
+			],
+			checkpoints: [],
+			changeRequests: [],
+		});
+
+		const diagram = renderWorkflowGraphDiagram(view, { width: 96 }).join("\n");
+		const text = renderWorkflowGraphText(view);
+
+		expect(diagram).toContain("completed - verdict CONTINUE");
+		expect(text).toContain("Selected routes:");
+		expect(text).toContain("- reviewJsonSummary chose retryBranch when review json summary verdict is CONTINUE");
+		expect(text).not.toContain("reviewJsonSummary chose doneBranch");
+	});
+
 	it("keeps node boxes aligned when ids and summaries contain wide terminal glyphs", () => {
 		const view = createView({
 			name: "unicode-width",
@@ -1019,6 +1088,27 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain("● Builder · Build round live · round 3 - editing implementation");
 		expect(text).toContain("watch/intervene buildRound");
 		expect(text).not.toContain("activation-build");
+	});
+
+	it("renders selected workflow routes in the live TUI graph component", async () => {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("dark theme fixture is required");
+		setThemeInstance(theme);
+		const view = singleNodeView("completed");
+		view.selectedRoutes = [
+			{
+				from: "reviewJsonSummary",
+				to: "retryBranch",
+				condition: 'outputs.reviewJsonSummary.verdict == "CONTINUE"',
+			},
+		];
+		const component = new WorkflowGraphComponent(view, { refreshMs: 0 });
+
+		const text = stripAnsi(component.render(120).join("\n"));
+
+		expect(text).toContain("routes");
+		expect(text).toContain("reviewJsonSummary chose retryBranch when review json summary verdict is CONTINUE");
+		expect(text).not.toContain("outputs.reviewJsonSummary.verdict");
 	});
 
 	it("writes timestamped workflow monitor snapshots under the agent cache", async () => {
