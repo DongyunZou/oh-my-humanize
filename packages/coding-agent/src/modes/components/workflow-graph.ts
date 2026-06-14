@@ -5,8 +5,10 @@ import {
 	formatActiveWorkflowAgentGeneration,
 	formatOmittedAbortedOutputs,
 	formatWorkflowActiveAgentGuidance,
+	formatWorkflowOperatorFocus,
 	formatWorkflowSelectedRoute,
 	formatWorkflowSubflow,
+	formatWorkflowTopology,
 	renderWorkflowGraphDiagram,
 	type WorkflowGraphActiveAgentView,
 	type WorkflowGraphNodeStatus,
@@ -81,6 +83,7 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 					...(view.selectedRoutes !== undefined && view.selectedRoutes.length > 0
 						? [{ label: "routes", lines: workflowGraphSelectedRouteLines(view) }]
 						: []),
+					{ label: "cockpit", lines: workflowGraphCockpitLines(view) },
 					{ label: "controls", lines: workflowGraphControlLines(view) },
 				],
 			},
@@ -109,9 +112,14 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 
 function workflowGraphHeaderLines(view: WorkflowGraphView): string[] {
 	const lines = [
+		`topology ${formatWorkflowTopology(view.topology)}`,
+		`focus ${formatWorkflowOperatorFocus(view)}`,
 		`freeze ${view.latestFreezeId ?? "none"}`,
 		`changes ${view.changes.approved} approved / ${view.changes.proposed} proposed / ${view.changes.rejected} rejected`,
 	];
+	if (view.activeAgents !== undefined && view.activeAgents.length > 0) {
+		lines.push("Agent Hub: double-left or observe key; Enter to attach; Esc to return");
+	}
 	if (view.currentAttempt !== undefined) {
 		const checkpoint = view.currentAttempt.checkpointId ? ` from ${view.currentAttempt.checkpointId}` : "";
 		lines.unshift(`attempt ${view.currentAttempt.id} ${view.currentAttempt.status}${checkpoint}`);
@@ -124,6 +132,18 @@ function workflowGraphHeaderLines(view: WorkflowGraphView): string[] {
 		if ((view.checkpoint.omittedAbortedOutputs ?? 0) > 0) {
 			lines.push(`aborted work ${formatOmittedAbortedOutputs(view.checkpoint.omittedAbortedOutputs ?? 0)}`);
 		}
+	}
+	return lines.map(line => theme.fg("muted", line));
+}
+
+function workflowGraphCockpitLines(view: WorkflowGraphView): string[] {
+	const lines = [`topology ${formatWorkflowTopology(view.topology)}`, `focus ${formatWorkflowOperatorFocus(view)}`];
+	if (view.activeAgents !== undefined && view.activeAgents.length > 0) {
+		lines.push("Agent Hub: double-left or observe key; Enter to attach; Esc to return");
+	}
+	if (view.checkpoint !== undefined) {
+		const frontier = view.checkpoint.frontier.map(entry => `${entry.from} to ${entry.to}`).join(", ") || "none";
+		lines.push(`frontier ${frontier}`);
 	}
 	return lines.map(line => theme.fg("muted", line));
 }

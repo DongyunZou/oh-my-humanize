@@ -118,6 +118,51 @@ describe("workflow graph view rendering", () => {
 		expect(diagram).toContain("review back to build when verdict is retry");
 	});
 
+	it("summarizes branch, parallel, loop, join, and subflow topology for the operator cockpit", () => {
+		const view = createView({
+			name: "operator-topology",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			subflows: [
+				{
+					alias: "reviewLoop",
+					name: "review-loop",
+					version: 1,
+					namespace: "review__",
+					nodeIds: ["review__build", "review__judge"],
+					entryNodeIds: ["review__build"],
+					exitNodeIds: ["review__judge"],
+				},
+			],
+			nodes: [
+				{ id: "plan", type: "agent" },
+				{ id: "tryFast", type: "agent" },
+				{ id: "trySafe", type: "agent" },
+				{ id: "chooseBranch", type: "review" },
+				{ id: "polish", type: "agent" },
+			],
+			edges: [
+				{ from: "plan", to: "tryFast" },
+				{ from: "plan", to: "trySafe" },
+				{ from: "tryFast", to: "chooseBranch" },
+				{ from: "trySafe", to: "chooseBranch" },
+				{ from: "chooseBranch", to: "polish", condition: { source: 'outputs.chooseBranch.verdict == "COMPLETE"' } },
+				{ from: "chooseBranch", to: "plan", condition: { source: 'outputs.chooseBranch.verdict == "CONTINUE"' } },
+			],
+		});
+
+		expect(view.topology).toEqual({
+			branchPoints: 1,
+			joins: 1,
+			loops: 1,
+			parallelFanOuts: 1,
+			subflows: 1,
+		});
+		expect(renderWorkflowGraphText(view)).toContain(
+			"Topology: parallel fan-outs 1 / branch points 1 / joins 1 / loops 1 / subflows 1",
+		);
+	});
+
 	it("surfaces running workflow agents as operator-visible live work items", () => {
 		const freeze = createFreeze({
 			name: "agent-observability",
@@ -998,6 +1043,7 @@ describe("workflow graph view rendering", () => {
 					runtimeBindingId: "binding-1",
 				},
 				changes: { approved: 1, proposed: 0, rejected: 0 },
+				topology: { parallelFanOuts: 0, branchPoints: 0, joins: 0, loops: 0, subflows: 0 },
 				nodes: [
 					{ id: "planner", kind: "script", status: "checkpointed", focused: true },
 					{ id: "strongReview", kind: "review", status: "frontier", focused: true },
@@ -1088,6 +1134,55 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain("● Builder · Build round live · round 3 - editing implementation");
 		expect(text).toContain("watch/intervene buildRound");
 		expect(text).not.toContain("activation-build");
+	});
+
+	it("renders the live TUI graph as an operator cockpit before the diagram", async () => {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("dark theme fixture is required");
+		setThemeInstance(theme);
+		const view = createView({
+			name: "cockpit-topology-tui",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "buildRound", type: "agent", agent: "task" },
+				{ id: "reviewRound", type: "review", agent: "task" },
+				{ id: "ship", type: "script" },
+			],
+			edges: [
+				{ from: "buildRound", to: "reviewRound" },
+				{
+					from: "reviewRound",
+					to: "buildRound",
+					condition: { source: 'outputs.reviewRound.verdict == "CONTINUE"' },
+				},
+				{ from: "reviewRound", to: "ship", condition: { source: 'outputs.reviewRound.verdict != "CONTINUE"' } },
+			],
+		});
+		view.activeAgents = [
+			{
+				activationId: "activation-review",
+				focusAgentId: "reviewRound",
+				nodeId: "reviewRound",
+				label: "Review round",
+				role: "Reviewer",
+				status: "running",
+				activity: "checking the build loop exit criteria",
+			},
+		];
+		const component = new WorkflowGraphComponent(view, { refreshMs: 0 });
+
+		const text = stripAnsi(component.render(120).join("\n"));
+
+		expect(text).toContain("topology branch points 1 / loops 1");
+		expect(text).toContain("focus live Reviewer · Review round");
+		expect(text).toContain("Agent Hub: double-left or observe key; Enter to attach; Esc to return");
+		expect(text.indexOf("topology branch points 1 / loops 1")).toBeLessThan(text.indexOf("diagram"));
+		const cockpitSectionIndex = text.indexOf(" cockpit ");
+		expect(cockpitSectionIndex).toBeGreaterThan(text.indexOf("diagram"));
+		expect(cockpitSectionIndex).toBeLessThan(text.indexOf("controls"));
+		expect(text).not.toContain("agent:task");
+		expect(text).not.toContain("activation-review");
 	});
 
 	it("renders selected workflow routes in the live TUI graph component", async () => {
@@ -1202,6 +1297,7 @@ function singleNodeView(status: WorkflowGraphView["nodes"][number]["status"]): W
 			runtimeBindingId: "binding-live",
 		},
 		changes: { approved: 0, proposed: 0, rejected: 0 },
+		topology: { parallelFanOuts: 0, branchPoints: 0, joins: 0, loops: 0, subflows: 0 },
 		nodes: [{ id: "build", kind: "script", status, focused: true }],
 		edges: [],
 		lineage: [],

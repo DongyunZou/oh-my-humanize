@@ -3,6 +3,7 @@
 ## [Unreleased]
 ### Added
 
+- Added a workflow graph operator cockpit that summarizes topology, current focus, live-agent intervention hints, and checkpoint frontier near the controls section so long workflow graphs remain monitorable in the TUI.
 - Added active workflow-agent visibility to the TUI workflow graph and `/workflow manager`, including human-facing node roles, stable Agent Hub focus targets, and `agent-output://` workflow artifacts for live workflow nodes.
 - Added `--background` support to `/workflow restart` so long-running checkpoint resumes can keep the operator in the interactive TUI with the resident workflow monitor visible.
 

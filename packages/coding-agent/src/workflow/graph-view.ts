@@ -26,6 +26,7 @@ export interface WorkflowGraphView {
 	latestFreezeId?: string;
 	currentAttempt?: WorkflowGraphAttemptView;
 	changes: WorkflowGraphChangeCounts;
+	topology: WorkflowGraphTopologyView;
 	subflows?: WorkflowGraphSubflowView[];
 	activeAgents?: WorkflowGraphActiveAgentView[];
 	nodes: WorkflowGraphNodeView[];
@@ -47,6 +48,14 @@ export interface WorkflowGraphChangeCounts {
 	approved: number;
 	proposed: number;
 	rejected: number;
+}
+
+export interface WorkflowGraphTopologyView {
+	parallelFanOuts: number;
+	branchPoints: number;
+	joins: number;
+	loops: number;
+	subflows: number;
 }
 
 export interface WorkflowGraphSubflowView {
@@ -190,11 +199,13 @@ export function buildWorkflowGraphView(
 			if (edge.condition?.source !== undefined) view.condition = edge.condition.source;
 			return view;
 		}) ?? [];
+	const topology = buildWorkflowGraphTopology(nodes, edges, currentFreeze?.definition.subflows?.length ?? 0);
 	const selectedRoutes = buildWorkflowGraphSelectedRoutes(currentAttempt, edges);
 	const activeAgents = formatActiveWorkflowAgents(currentAttempt, currentFreeze?.definition.nodes ?? [], options);
 	const view: WorkflowGraphView = {
 		familyId: family.id,
 		changes: countWorkflowChangeRequests(family),
+		topology,
 		nodes,
 		edges,
 		lineage: family.changeRequests.map(formatLineage),
@@ -253,6 +264,8 @@ export function renderWorkflowGraphText(view: WorkflowGraphView, options: Workfl
 	lines.push(
 		`Changes: ${view.changes.approved} approved, ${view.changes.proposed} proposed, ${view.changes.rejected} rejected`,
 	);
+	lines.push(`Topology: ${formatWorkflowTopology(view.topology)}`);
+	lines.push(`Focus: ${formatWorkflowOperatorFocus(view)}`);
 	if (view.subflows !== undefined && view.subflows.length > 0) {
 		lines.push("Subflows:");
 		for (const subflow of view.subflows) lines.push(`- ${formatWorkflowSubflow(subflow)}`);
@@ -349,6 +362,39 @@ function layoutWorkflowGraph(view: WorkflowGraphView, width: number | undefined)
 		nodeWidth,
 		totalWidth: rankWidth(maxRankSize, nodeWidth),
 	};
+}
+
+function buildWorkflowGraphTopology(
+	nodes: readonly WorkflowGraphNodeView[],
+	edges: readonly WorkflowGraphEdgeView[],
+	subflows: number,
+): WorkflowGraphTopologyView {
+	const order = new Map(nodes.map((node, index) => [node.id, index]));
+	const outgoing = new Map<string, WorkflowGraphEdgeView[]>();
+	const incoming = new Map<string, WorkflowGraphEdgeView[]>();
+	for (const edge of edges) {
+		const outgoingEdges = outgoing.get(edge.from) ?? [];
+		outgoingEdges.push(edge);
+		outgoing.set(edge.from, outgoingEdges);
+		const incomingEdges = incoming.get(edge.to) ?? [];
+		incomingEdges.push(edge);
+		incoming.set(edge.to, incomingEdges);
+	}
+	let parallelFanOuts = 0;
+	let branchPoints = 0;
+	let joins = 0;
+	let loops = 0;
+	for (const node of nodes) {
+		const outgoingEdges = outgoing.get(node.id) ?? [];
+		const conditionalOutgoing = outgoingEdges.some(edge => edge.condition !== undefined);
+		if (outgoingEdges.length > 1 && !conditionalOutgoing) parallelFanOuts += 1;
+		if (conditionalOutgoing) branchPoints += 1;
+		if ((incoming.get(node.id) ?? []).length > 1) joins += 1;
+	}
+	for (const edge of edges) {
+		if (isWorkflowBackEdge(edge, order)) loops += 1;
+	}
+	return { parallelFanOuts, branchPoints, joins, loops, subflows };
 }
 
 function isWorkflowBackEdge(edge: WorkflowGraphEdgeView, order: Map<string, number>): boolean {
@@ -1238,6 +1284,43 @@ function formatCheckpointFrontier(checkpoint: WorkflowGraphCheckpointView): stri
 
 export function formatOmittedAbortedOutputs(count: number): string {
 	return `${count} ${count === 1 ? "activation output" : "activation outputs"} omitted`;
+}
+
+export function formatWorkflowTopology(topology: WorkflowGraphTopologyView): string {
+	const parts: string[] = [];
+	if (topology.parallelFanOuts > 0) {
+		parts.push(`parallel fan-outs ${topology.parallelFanOuts}`);
+	}
+	if (topology.branchPoints > 0) parts.push(`branch points ${topology.branchPoints}`);
+	if (topology.joins > 0) parts.push(`joins ${topology.joins}`);
+	if (topology.loops > 0) parts.push(`loops ${topology.loops}`);
+	if (topology.subflows > 0) parts.push(`subflows ${topology.subflows}`);
+	return parts.length === 0 ? "linear" : parts.join(" / ");
+}
+
+export function formatWorkflowOperatorFocus(view: WorkflowGraphView): string {
+	const activeAgents = view.activeAgents ?? [];
+	if (activeAgents.length > 0) {
+		return `live ${activeAgents.map(formatWorkflowOperatorAgentFocus).join(" / ")}`;
+	}
+	const failed = view.nodes
+		.filter(node => node.status === "failed")
+		.map(node => formatWorkflowNodeDisplayName(node.id));
+	if (failed.length > 0) return `failed ${failed.join(" / ")}`;
+	const running = view.nodes
+		.filter(node => node.status === "running")
+		.map(node => formatWorkflowNodeDisplayName(node.id));
+	if (running.length > 0) return `running ${running.join(" / ")}`;
+	const frontier = view.nodes
+		.filter(node => node.status === "frontier")
+		.map(node => formatWorkflowNodeDisplayName(node.id));
+	if (frontier.length > 0) return `frontier ${frontier.join(" / ")}`;
+	if (view.currentAttempt?.status === "completed") return "completed";
+	return "waiting";
+}
+
+function formatWorkflowOperatorAgentFocus(agent: WorkflowGraphActiveAgentView): string {
+	return `${agent.role} · ${agent.label}${formatActiveWorkflowAgentGeneration(agent)}`;
 }
 
 export function formatWorkflowSubflow(subflow: WorkflowGraphSubflowView): string {
