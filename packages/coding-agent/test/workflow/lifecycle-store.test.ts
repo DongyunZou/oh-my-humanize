@@ -471,7 +471,7 @@ describe("workflow lifecycle event store", () => {
 				state: {},
 				sourceMapping: { review: "review" },
 			}),
-		).toThrow("Workflow checkpoint requires a stop request before saving attempt: attempt-1 (running)");
+		).toThrow("Workflow checkpoint requires a stopped or failed attempt before saving: attempt-1 (running)");
 		requestWorkflowAttemptStop(host, { attemptId: "attempt-1", deadlineMs: 10 });
 		expect(() =>
 			createWorkflowCheckpoint(host, {

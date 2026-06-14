@@ -9,6 +9,8 @@
 
 ### Fixed
 
+- Fixed background workflow attempts so lifecycle checkpoints are flushed after activation-limit stops or completion, making printed restart checkpoints recoverable from later OMP sessions.
+- Fixed `/workflow restart` diagnostics so a checkpoint found in another local resumable session points the operator to `omp --resume <session-id>` instead of only reporting that the current session cannot find it.
 - Fixed workflow graph review nodes so the TUI shows the parsed verdict and selected outgoing route separately from summary text.
 - Fixed failed workflow attempts so they create restartable checkpoints at failed nodes, allowing operators to recover through the workflow restart path instead of manually starting a later node.
 - Fixed workflow graph condition labels so common state/output verdict checks render as human-facing phrases instead of raw condition expressions in the TUI.

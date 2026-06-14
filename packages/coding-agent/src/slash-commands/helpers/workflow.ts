@@ -4,6 +4,8 @@ import { Snowflake } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { formatModelString } from "../../config/model-resolver";
 import { PluginManager } from "../../extensibility/plugins/manager";
+import type { SessionInfo } from "../../session/session-listing";
+import { SessionManager } from "../../session/session-manager";
 import { parseCommandArgs } from "../../utils/command-args";
 import { workflowAgentTaskIdForNode } from "../../workflow/agent-task-id";
 import { evaluateWorkflowCondition } from "../../workflow/condition";
@@ -377,8 +379,9 @@ async function handleStartCommand(rest: string, runtime: SlashCommandRuntime): P
 			),
 		};
 		registerActiveWorkflowAttempt(runtime, active);
-		void active.finished.finally(() => unregisterActiveWorkflowAttempt(runtime, attemptId));
+		watchWorkflowAttemptCompletion(runtime, active);
 		if (parsed.background) {
+			await flushWorkflowLifecycle(runtime);
 			await runtime.output(`Workflow background attempt started: ${attemptId}`);
 			const family = reconstructWorkflowFamilies(runtime.sessionManager.getBranch()).find(
 				candidate => candidate.id === lifecycle.familyId,
@@ -828,7 +831,7 @@ async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime):
 	if ("error" in parsed) return usage(parsed.error, runtime);
 	const families = reconstructWorkflowFamilies(runtime.sessionManager.getBranch());
 	const located = findCheckpoint(families, parsed.checkpointId);
-	if (!located) return usage(`Workflow checkpoint not found: ${parsed.checkpointId}`, runtime);
+	if (!located) return usage(await formatWorkflowCheckpointNotFound(parsed.checkpointId, runtime), runtime);
 	const freeze =
 		parsed.freezeId !== undefined
 			? located.family.freezes.find(candidate => candidate.id === parsed.freezeId)
@@ -898,7 +901,7 @@ async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime):
 		),
 	};
 	registerActiveWorkflowAttempt(runtime, active);
-	void active.finished.finally(() => unregisterActiveWorkflowAttempt(runtime, attemptId));
+	watchWorkflowAttemptCompletion(runtime, active);
 	if (parsed.background) {
 		await flushWorkflowLifecycle(runtime);
 		await runtime.output(`Workflow background restart attempt started: ${attemptId}`);
@@ -1396,6 +1399,18 @@ function unregisterActiveWorkflowAttempt(runtime: SlashCommandRuntime, attemptId
 	activeWorkflowAttemptMap(runtime).delete(attemptId);
 }
 
+function watchWorkflowAttemptCompletion(runtime: SlashCommandRuntime, active: ActiveWorkflowAttempt): void {
+	void active.finished.finally(async () => {
+		try {
+			await flushWorkflowLifecycle(runtime);
+		} catch (error) {
+			await runtime.output(`Workflow attempt persistence failed: ${active.attemptId} - ${errorMessage(error)}`);
+		} finally {
+			unregisterActiveWorkflowAttempt(runtime, active.attemptId);
+		}
+	});
+}
+
 function findActiveWorkflowAttempt(runtime: SlashCommandRuntime, attemptId: string): ActiveWorkflowAttempt | undefined {
 	return activeWorkflowAttemptMap(runtime).get(attemptId);
 }
@@ -1810,6 +1825,65 @@ function findCheckpoint(
 		if (checkpoint) return { family, checkpoint };
 	}
 	return undefined;
+}
+
+interface WorkflowCheckpointSessionMatch {
+	sessionId: string;
+	familyId: string;
+	checkpointId: string;
+}
+
+async function formatWorkflowCheckpointNotFound(checkpointId: string, runtime: SlashCommandRuntime): Promise<string> {
+	const match = await findWorkflowCheckpointInPersistedSessions(checkpointId, runtime);
+	if (match === undefined) return `Workflow checkpoint not found: ${checkpointId}`;
+	return [
+		`Workflow checkpoint not found in current session: ${checkpointId}`,
+		`Checkpoint exists in session ${match.sessionId}.`,
+		`Resume that session first: omp --resume ${match.sessionId}`,
+		`Then run: /workflow restart ${match.checkpointId}`,
+		`Family: ${match.familyId}`,
+	].join("\n");
+}
+
+async function findWorkflowCheckpointInPersistedSessions(
+	checkpointId: string,
+	runtime: SlashCommandRuntime,
+): Promise<WorkflowCheckpointSessionMatch | undefined> {
+	const sessionAccess = persistedWorkflowSessionAccess(runtime.sessionManager);
+	if (sessionAccess === undefined) return undefined;
+	let sessions: SessionInfo[];
+	try {
+		sessions = await SessionManager.list(runtime.cwd, sessionAccess.sessionDir);
+	} catch {
+		return undefined;
+	}
+	for (const session of sessions.slice(0, 128)) {
+		if (session.id === sessionAccess.currentSessionId) continue;
+		let manager: SessionManager | undefined;
+		try {
+			manager = await SessionManager.open(session.path, sessionAccess.sessionDir);
+			const located = findCheckpoint(reconstructWorkflowFamilies(manager.getBranch()), checkpointId);
+			if (located !== undefined) {
+				return { sessionId: session.id, familyId: located.family.id, checkpointId };
+			}
+		} catch {
+			// Ignore unreadable or stale session files on the diagnostic path.
+		} finally {
+			await manager?.close();
+		}
+	}
+	return undefined;
+}
+
+function persistedWorkflowSessionAccess(
+	sessionManager: SlashCommandRuntime["sessionManager"],
+): { sessionDir: string; currentSessionId?: string } | undefined {
+	const candidate = sessionManager as Partial<Pick<SessionManager, "getSessionDir" | "getSessionId">>;
+	if (typeof candidate.getSessionDir !== "function") return undefined;
+	const sessionDir = candidate.getSessionDir();
+	if (sessionDir.length === 0) return undefined;
+	const currentSessionId = typeof candidate.getSessionId === "function" ? candidate.getSessionId() : undefined;
+	return currentSessionId === undefined ? { sessionDir } : { sessionDir, currentSessionId };
 }
 
 function findWorkflowFamilyByChangeRequest(

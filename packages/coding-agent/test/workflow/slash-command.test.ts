@@ -93,6 +93,30 @@ async function createTempDir(): Promise<string> {
 	return dir;
 }
 
+async function waitForPersistedWorkflowCheckpoint(
+	sessionId: string,
+	cwd: string,
+	sessionDir: string,
+	checkpointId: string,
+) {
+	for (let attempt = 0; attempt < 50; attempt++) {
+		const match = await resolveResumableSession(sessionId, cwd, sessionDir);
+		if (match !== undefined) {
+			const manager = await SessionManager.open(match.session.path, sessionDir);
+			try {
+				const families = reconstructWorkflowFamilies(manager.getBranch());
+				if (families.some(family => family.checkpoints.some(checkpoint => checkpoint.id === checkpointId))) {
+					return match;
+				}
+			} finally {
+				await manager.close();
+			}
+		}
+		await Bun.sleep(10);
+	}
+	return undefined;
+}
+
 afterEach(async () => {
 	vi.restoreAllMocks();
 	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
@@ -2398,6 +2422,195 @@ edges: []
 		}
 	});
 
+	it("persists background workflow checkpoints after the activation limit settles", async () => {
+		const cwd = await createTempDir();
+		const sessionDir = path.join(cwd, "sessions");
+		const manager = SessionManager.create(cwd, sessionDir);
+		const flowPath = path.join(cwd, "background-limit.omhflow");
+		try {
+			await fs.mkdir(path.join(cwd, "background-limit"), { recursive: true });
+			await Bun.write(
+				flowPath,
+				`---
+name: background-limit-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Background Limit Demo
+
+\`\`\`yaml workflow
+nodes:
+  build:
+    type: script
+    script:
+      inline: |
+        return { summary: "built" };
+    writes:
+      - /build
+  review:
+    type: script
+    script:
+      inline: |
+        return { summary: "reviewed" };
+edges:
+  - from: build
+    to: review
+\`\`\`
+`,
+			);
+			const output: string[] = [];
+			const runtimeHost: WorkflowNodeRuntimeHost = {
+				runScriptNode: async input => ({
+					summary: `ran ${input.node.id}`,
+					...(input.node.id === "build"
+						? { statePatch: [{ op: "set" as const, path: "/build/status", value: "built" }] }
+						: {}),
+				}),
+			};
+			const runtime = {
+				session: {} as AgentSession,
+				sessionManager: manager,
+				settings: Settings.isolated(),
+				cwd,
+				output: (text: string) => {
+					output.push(text);
+				},
+				createWorkflowRuntimeHost: () => runtimeHost,
+				refreshCommands: () => {},
+				reloadPlugins: async () => {},
+			};
+
+			expect(
+				await executeAcpBuiltinSlashCommand(
+					`/workflow start ${flowPath} --run-id background-limit --family-id family-background-limit --max-activations 1 --background`,
+					runtime,
+				),
+			).toEqual({ consumed: true });
+			expect(
+				output.some(entry => entry.includes("Workflow background attempt started: background-limit:attempt-1")),
+			).toBeTrue();
+
+			const match = await waitForPersistedWorkflowCheckpoint(
+				manager.getSessionId(),
+				cwd,
+				sessionDir,
+				"background-limit:attempt-1:checkpoint-1",
+			);
+			expect(match?.session.id).toBe(manager.getSessionId());
+			if (!match) throw new Error("Expected background workflow session to be resumable");
+
+			const reopened = await SessionManager.open(match.session.path, sessionDir);
+			try {
+				const families = reconstructWorkflowFamilies(reopened.getBranch());
+				expect(families[0]?.checkpoints[0]).toMatchObject({
+					id: "background-limit:attempt-1:checkpoint-1",
+					completedActivationIds: ["activation-1"],
+					abortedActivationIds: [],
+					frontierNodeIds: ["review"],
+					state: { build: { status: "built" } },
+					sourceMapping: { review: "review" },
+				});
+			} finally {
+				await reopened.close();
+			}
+		} finally {
+			await manager.close();
+		}
+	});
+
+	it("explains when a restart checkpoint exists in another resumable session", async () => {
+		const cwd = await createTempDir();
+		const sessionDir = path.join(cwd, "sessions");
+		const origin = SessionManager.create(cwd, sessionDir);
+		let originClosed = false;
+		const checkpointId = "attempt-cross-session:checkpoint-1";
+		try {
+			const freeze = createFreeze("flowfreeze:cross-session", ["build", "review"]);
+			startWorkflowFamily(origin, { familyId: "family-cross-session" });
+			recordWorkflowFreeze(origin, freeze, { familyId: "family-cross-session" });
+			startWorkflowAttempt(origin, {
+				familyId: "family-cross-session",
+				attemptId: "attempt-cross-session",
+				freezeId: freeze.id,
+				startNodeId: "build",
+				runtimeBindingSnapshot: binding("binding-cross-session"),
+			});
+			appendWorkflowAttemptActivationStarted(origin, {
+				attemptId: "attempt-cross-session",
+				activationId: "activation-build",
+				nodeId: "build",
+				parentActivationIds: [],
+			});
+			appendWorkflowAttemptActivationCompleted(origin, {
+				attemptId: "attempt-cross-session",
+				activationId: "activation-build",
+				output: { summary: "built" },
+			});
+			appendWorkflowAttemptActivationStarted(origin, {
+				attemptId: "attempt-cross-session",
+				activationId: "activation-review",
+				nodeId: "review",
+				parentActivationIds: ["activation-build"],
+			});
+
+			const stopOutput: string[] = [];
+			const stopRuntime = {
+				session: {} as AgentSession,
+				sessionManager: origin,
+				settings: Settings.isolated(),
+				cwd,
+				output: (text: string) => {
+					stopOutput.push(text);
+				},
+				refreshCommands: () => {},
+				reloadPlugins: async () => {},
+			};
+
+			expect(
+				await executeAcpBuiltinSlashCommand("/workflow stop attempt-cross-session --deadline-ms 1", stopRuntime),
+			).toEqual({
+				consumed: true,
+			});
+			expect(stopOutput.some(entry => entry.includes(`Workflow checkpoint: ${checkpointId}`))).toBeTrue();
+			await origin.close();
+			originClosed = true;
+
+			const fresh = SessionManager.create(cwd, sessionDir);
+			try {
+				const output: string[] = [];
+				const restartRuntime = {
+					session: {} as AgentSession,
+					sessionManager: fresh,
+					settings: Settings.isolated(),
+					cwd,
+					output: (text: string) => {
+						output.push(text);
+					},
+					refreshCommands: () => {},
+					reloadPlugins: async () => {},
+				};
+
+				expect(await executeAcpBuiltinSlashCommand(`/workflow restart ${checkpointId}`, restartRuntime)).toEqual({
+					consumed: true,
+				});
+
+				const rendered = output.join("\n");
+				expect(rendered).toContain(`Workflow checkpoint not found in current session: ${checkpointId}`);
+				expect(rendered).toContain(`Checkpoint exists in session ${origin.getSessionId()}.`);
+				expect(rendered).toContain(`Resume that session first: omp --resume ${origin.getSessionId()}`);
+			} finally {
+				await fresh.close();
+			}
+		} finally {
+			if (!originClosed) await origin.close();
+		}
+	});
+
 	it("restarts from the checkpoint attempt when activation ids were reused by older attempts", async () => {
 		const entries: CapturedEntry[] = [];
 		const definition = parseWorkflowDefinition(
@@ -2855,7 +3068,7 @@ edges:
 		);
 
 		expect(capturedSignal?.aborted).toBe(true);
-		expect(flush).toHaveBeenCalledTimes(1);
+		expect(flush.mock.calls.length).toBeGreaterThanOrEqual(1);
 		expect(calls).toEqual(["build"]);
 		const family = reconstructWorkflowFamilies(entries)[0];
 		expect(
