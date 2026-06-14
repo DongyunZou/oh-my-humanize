@@ -1209,6 +1209,25 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"paste.largeMenuThreshold": {
+		type: "number",
+		default: 100,
+		ui: {
+			tab: "interaction",
+			group: "Input",
+			label: "Large Paste Menu",
+			description:
+				"When a paste reaches this many lines, offer a menu to wrap it in a code block, wrap it in XML tags, or save it to a file. 0 disables the menu (large pastes still collapse to a [Paste] marker).",
+			options: [
+				{ value: "0", label: "Off" },
+				{ value: "100", label: "100 lines" },
+				{ value: "250", label: "250 lines" },
+				{ value: "500", label: "500 lines" },
+				{ value: "1000", label: "1000 lines" },
+			],
+		},
+	},
+
 	"startup.quiet": {
 		type: "boolean",
 		default: false,
@@ -1769,6 +1788,18 @@ export const SETTINGS_SCHEMA = {
 					value: "8on16-bw",
 					label: "8x13 on 16px pitch, black",
 					description: "8x13 glyphs on an 8x16 cell (extra leading), black ink.",
+				},
+				{
+					value: "8on22-bw",
+					label: "8x13 on 22px pitch (leading), black",
+					description:
+						"8x13 glyphs on an 8x22 cell — extra line spacing so rows don't crowd. Default for OpenAI/Google.",
+				},
+				{
+					value: "11on16-bw",
+					label: "8x13 on 11px advance (tracking), black",
+					description:
+						"8x13 glyphs on an 11x16 cell — extra letter spacing so characters don't merge. Default for Anthropic.",
 				},
 				{
 					value: "doc-8on16-bw",
@@ -3150,19 +3181,21 @@ export const SETTINGS_SCHEMA = {
 
 	"async.pollWaitDuration": {
 		type: "enum",
-		values: ["5s", "10s", "30s", "1m", "5m"] as const,
-		default: "30s",
+		values: ["5s", "10s", "30s", "1m", "5m", "smart"] as const,
+		default: "smart",
 		ui: {
 			tab: "tools",
 			group: "Execution",
-			label: "Poll Wait Duration",
-			description: "How long the poll tool waits for background job updates before returning the current state",
+			label: "Max Poll Time",
+			description:
+				"How long the poll tool waits for background job updates before returning the current state. A fixed value waits that exact duration every time. `smart` adapts: it starts at 5s and lengthens with each back-to-back poll (up to 5m), then resets to 5s after about a minute without polling.",
 			options: [
 				{ value: "5s", label: "5 seconds" },
 				{ value: "10s", label: "10 seconds" },
-				{ value: "30s", label: "30 seconds", description: "Default" },
+				{ value: "30s", label: "30 seconds" },
 				{ value: "1m", label: "1 minute" },
 				{ value: "5m", label: "5 minutes" },
+				{ value: "smart", label: "Smart", description: "Default — adaptive 5s→5m, resets when you stop polling" },
 			],
 		},
 	},

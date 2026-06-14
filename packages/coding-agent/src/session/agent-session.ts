@@ -2142,8 +2142,13 @@ export class AgentSession {
 	 * and fire-and-forget `agent.continue()` may still be streaming after
 	 * the TTSR resume gate resolves.
 	 */
-	async #waitForPostPromptRecovery(): Promise<void> {
+	async #waitForPostPromptRecovery(generation?: number): Promise<void> {
 		while (true) {
+			// An abort bumps #promptGeneration. When this wait runs on behalf of a
+			// specific prompt turn, stop as soon as that turn has been superseded:
+			// its promise must resolve on the abort, not block on a queued
+			// steer/follow-up that the post-abort drain starts as a fresh turn.
+			if (generation !== undefined && this.#promptGeneration !== generation) return;
 			if (this.#retryPromise) {
 				await this.#retryPromise;
 				continue;
@@ -4909,7 +4914,7 @@ export class AgentSession {
 			const agentPromptOptions = options?.toolChoice ? { toolChoice: options.toolChoice } : undefined;
 			await this.#promptAgentWithIdleRetry(messages, agentPromptOptions);
 			if (!options?.skipPostPromptRecoveryWait) {
-				await this.#waitForPostPromptRecovery();
+				await this.#waitForPostPromptRecovery(generation);
 			}
 		} finally {
 			this.#endInFlight();

@@ -48,7 +48,7 @@ import { AssistantMessageComponent } from "./assistant-message";
 import { BashExecutionComponent } from "./bash-execution";
 import { BranchSummaryMessageComponent } from "./branch-summary-message";
 import { CollabPromptMessageComponent } from "./collab-prompt-message";
-import { CompactionSummaryMessageComponent } from "./compaction-summary-message";
+import { CompactionSummaryMessageComponent, createHandoffSummaryMessageComponent } from "./compaction-summary-message";
 import { CustomMessageComponent } from "./custom-message";
 import { DynamicBorder } from "./dynamic-border";
 import { EvalExecutionComponent } from "./eval-execution";
@@ -265,6 +265,15 @@ export class AgentHubOverlayComponent extends Container {
 
 		if (!this.#remote) registerPersistedSubagents(this.#registry, deps.sessionFile);
 		this.#refreshRows();
+	}
+
+	/**
+	 * Whether the table view has no agents to show (every registered agent except
+	 * Main, after the persisted-subagent scan in the constructor). The double-←
+	 * gesture reads this to stay inert when there is nothing to open.
+	 */
+	get isEmpty(): boolean {
+		return this.#rows.length === 0;
 	}
 
 	/** Tear down every subscription and timer. Called by the overlay owner on close. */
@@ -1204,6 +1213,15 @@ export class AgentHubOverlayComponent extends Container {
 				theme,
 			);
 			this.#chatLog.addChild(card);
+			return;
+		}
+		const handoffComponent = createHandoffSummaryMessageComponent(
+			message as CustomMessage<unknown>,
+			this.#chatExpanded,
+		);
+		if (handoffComponent) {
+			this.#trackExpandable(handoffComponent);
+			this.#chatLog.addChild(handoffComponent);
 			return;
 		}
 		const component = new CustomMessageComponent(
