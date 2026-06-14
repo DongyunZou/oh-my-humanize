@@ -481,7 +481,7 @@ function renderWorkflowGraphConnector(rankIndex: number, layout: WorkflowGraphLa
 	});
 	if (routedEdges.length === 0) return [];
 	const directEdges: RoutedWorkflowGraphEdge[] = [];
-	const skippedEdges: WorkflowGraphEdgeView[] = [];
+	const skippedEdges: SkippedWorkflowGraphEdge[] = [];
 	for (const edge of routedEdges) {
 		const source = nodeCenter(edge.from, rankIndex, layout);
 		const targetRank = layout.rankByNodeId.get(edge.to);
@@ -489,7 +489,7 @@ function renderWorkflowGraphConnector(rankIndex: number, layout: WorkflowGraphLa
 		const target = nodeCenter(edge.to, targetRank, layout);
 		if (target === undefined) continue;
 		if (targetRank === nextRankIndex) directEdges.push({ edge, source, target });
-		else skippedEdges.push(edge);
+		else skippedEdges.push({ edge, source });
 	}
 	const rows = renderWorkflowGraphConnectorRows(directEdges, layout.totalWidth);
 	const directLabels = directEdges
@@ -501,11 +501,9 @@ function renderWorkflowGraphConnector(rankIndex: number, layout: WorkflowGraphLa
 				`when ${formatWorkflowConditionLabel(routed.edge.condition!)}`,
 			),
 		);
-	const skippedLabels = skippedEdges.flatMap(edge => {
-		const source = nodeCenter(edge.from, rankIndex, layout);
-		if (source === undefined) return [];
-		return [renderWorkflowGraphConnectorLabel(source, layout.labelWidth, `to ${formatEdgeTarget(edge)}`)];
-	});
+	const skippedLabels = skippedEdges.map(routed =>
+		renderWorkflowGraphConnectorLabel(routed.source, layout.labelWidth, `to ${formatEdgeTarget(routed.edge)}`),
+	);
 	if (directLabels.length === 0) return [...rows, ...skippedLabels];
 	const labelInsertionIndex = rows.length <= 1 ? rows.length : rows.length - 1;
 	return [
@@ -520,6 +518,11 @@ interface RoutedWorkflowGraphEdge {
 	edge: WorkflowGraphEdgeView;
 	source: number;
 	target: number;
+}
+
+interface SkippedWorkflowGraphEdge {
+	edge: WorkflowGraphEdgeView;
+	source: number;
 }
 
 function renderWorkflowGraphConnectorRows(edges: RoutedWorkflowGraphEdge[], width: number): string[] {
@@ -578,7 +581,7 @@ function renderWorkflowGraphLoopbackRails(
 	const maxWidth = Math.max(0, ...lines.map(line => visibleWidth(line)));
 	const rendered = [...lines];
 	const labelsByLine = new Map<number, string[]>();
-	const labelColumn = maxWidth + LOOP_RAIL_GAP_WIDTH + backEdges.length * LOOP_RAIL_STEP_WIDTH + 1;
+	const labelColumn = workflowGraphLoopRailLabelColumn(maxWidth, backEdges.length);
 	for (let index = 0; index < backEdges.length; index += 1) {
 		const edge = backEdges[index]!;
 		const sourceLine = nodeLineById.get(edge.from);
@@ -586,10 +589,13 @@ function renderWorkflowGraphLoopbackRails(
 		if (sourceLine === undefined || targetLine === undefined) continue;
 		const topLine = Math.min(sourceLine, targetLine);
 		const bottomLine = Math.max(sourceLine, targetLine);
-		const column = maxWidth + LOOP_RAIL_GAP_WIDTH + index * LOOP_RAIL_STEP_WIDTH;
+		const column = workflowGraphLoopRailColumn(maxWidth, index);
 		for (let lineIndex = topLine; lineIndex <= bottomLine; lineIndex += 1) {
-			const glyph = lineIndex === topLine ? "╭─" : lineIndex === bottomLine ? "╰─" : "│";
-			rendered[lineIndex] = putWorkflowGraphTextAtColumn(rendered[lineIndex] ?? "", column, glyph);
+			rendered[lineIndex] = putWorkflowGraphTextAtColumn(
+				rendered[lineIndex] ?? "",
+				column,
+				workflowGraphLoopRailGlyph(lineIndex, topLine, bottomLine),
+			);
 		}
 		const labels = labelsByLine.get(bottomLine) ?? [];
 		labels.push(`${edge.from} back to ${formatEdgeTarget(edge)}`);
@@ -599,6 +605,20 @@ function renderWorkflowGraphLoopbackRails(
 		rendered[lineIndex] = putWorkflowGraphTextAtColumn(rendered[lineIndex] ?? "", labelColumn, labels.join("; "));
 	}
 	return rendered;
+}
+
+function workflowGraphLoopRailColumn(maxWidth: number, index: number): number {
+	return maxWidth + LOOP_RAIL_GAP_WIDTH + index * LOOP_RAIL_STEP_WIDTH;
+}
+
+function workflowGraphLoopRailLabelColumn(maxWidth: number, railCount: number): number {
+	return workflowGraphLoopRailColumn(maxWidth, railCount) + 1;
+}
+
+function workflowGraphLoopRailGlyph(lineIndex: number, topLine: number, bottomLine: number): string {
+	if (lineIndex === topLine) return "╭─";
+	if (lineIndex === bottomLine) return "╰─";
+	return "│";
 }
 
 function putWorkflowGraphTextAtColumn(line: string, column: number, text: string): string {
@@ -1414,21 +1434,6 @@ export function formatWorkflowOnFlightLines(view: WorkflowGraphView): string[] {
 	if (lines.length > 0) return lines;
 	const runningNodes = view.nodes.filter(node => node.status === "running");
 	return runningNodes.map(node => `${formatWorkflowNodeDisplayName(node.id)} running`);
-}
-
-export function formatWorkflowRecentOutputLines(view: WorkflowGraphView): string[] {
-	const lines: string[] = [];
-	for (const agent of view.activeAgents ?? []) {
-		for (const output of agent.recentOutput ?? []) {
-			lines.push(`${agent.role} · ${agent.label} stdout: ${output}`);
-		}
-	}
-	for (const node of view.nodes) {
-		if (node.status === "failed" && node.error !== undefined) {
-			lines.push(`${formatWorkflowNodeDisplayName(node.id)} stderr: ${formatSingleLineWorkflowDetail(node.error)}`);
-		}
-	}
-	return lines.slice(0, WORKFLOW_RECENT_OUTPUT_LINES);
 }
 
 export function formatWorkflowRecentActivityLines(view: WorkflowGraphView): string[] {
