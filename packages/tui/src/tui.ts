@@ -16,6 +16,7 @@ import { $flag, getDebugLogPath } from "@oh-my-pi/pi-utils";
 import { DEFAULT_MAX_INLINE_IMAGES, ImageBudget } from "./components/image";
 import { planDeccaraFills } from "./deccara";
 import { isKeyRelease, matchesKey } from "./keys";
+import { LoopWatchdog } from "./loop-watchdog";
 import { isConPTYHosted, setAltScreenActive, type Terminal } from "./terminal";
 import {
 	encodeKittyDeleteImage,
@@ -776,6 +777,10 @@ export class TUI extends Container {
 	// the lifetime of the drag. Exposed for tests/diagnostics.
 	#resizeViewportPaintCount = 0;
 	#stopped = false;
+	// Always-on event-loop lag probe. The high default threshold keeps it quiet;
+	// it only logs `ui.loop-blocked` (with the current loop phase) when a frame
+	// budget is genuinely starved. Armed in start(), disarmed in stop().
+	#watchdog: LoopWatchdog;
 
 	// Transient alternate-screen state for a fullscreen overlay. While active, the
 	// engine paints only the modal on the alt buffer and leaves every
@@ -840,6 +845,7 @@ export class TUI extends Container {
 		this.terminal = terminal;
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
+		this.#watchdog = new LoopWatchdog();
 	}
 
 	override render(width: number): readonly string[] {
@@ -1186,6 +1192,7 @@ export class TUI extends Container {
 
 	start(options?: TUIStartOptions): void {
 		this.#stopped = false;
+		this.#watchdog.start();
 		this.#ghosttyInitialImageDelayDone = false;
 		this.#ghosttyImageReadyAtMs = this.#renderScheduler.now() + TUI.#GHOSTTY_INITIAL_IMAGE_DELAY_MS;
 		// A DECRQM report for mode 2026 is authoritative: enable synchronized
@@ -1428,6 +1435,7 @@ export class TUI extends Container {
 		}
 		this.#clearSixelProbeState();
 		this.#stopped = true;
+		this.#watchdog.stop();
 		if (this.#renderTimer) {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
@@ -1881,7 +1889,7 @@ export class TUI extends Container {
 		overlayHeight: number,
 		termWidth: number,
 		termHeight: number,
-	): { width: number; row: number; col: number; maxHeight: number | undefined } {
+	): { width: number; row: number; col: number; maxHeight: number } {
 		const opt = options ?? {};
 
 		// Parse margin (clamp to non-negative)
@@ -1908,14 +1916,12 @@ export class TUI extends Container {
 		width = Math.max(1, Math.min(width, availWidth));
 
 		// === Resolve maxHeight ===
-		let maxHeight = parseSizeValue(opt.maxHeight, termHeight);
-		// Clamp to available space
-		if (maxHeight !== undefined) {
-			maxHeight = Math.max(1, Math.min(maxHeight, availHeight));
-		}
+		let maxHeight = parseSizeValue(opt.maxHeight, termHeight) ?? availHeight;
+		maxHeight = Math.max(1, Math.min(maxHeight, availHeight));
 
-		// Effective overlay height (may be clamped by maxHeight)
-		const effectiveHeight = maxHeight !== undefined ? Math.min(overlayHeight, maxHeight) : overlayHeight;
+		// Effective overlay height: maxHeight is always resolved (defaults to
+		// availHeight above), so the overlay is unconditionally clamped to fit.
+		const effectiveHeight = Math.min(overlayHeight, maxHeight);
 
 		// === Resolve position ===
 		let row: number;
@@ -2026,7 +2032,7 @@ export class TUI extends Container {
 			// (width and maxHeight don't depend on overlay height).
 			const { width, maxHeight } = this.#resolveOverlayLayout(options, 0, termWidth, termHeight);
 			let overlayLines = component.render(width);
-			if (maxHeight !== undefined && overlayLines.length > maxHeight) {
+			if (overlayLines.length > maxHeight) {
 				overlayLines = overlayLines.slice(0, maxHeight);
 			}
 			const { row, col } = this.#resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);

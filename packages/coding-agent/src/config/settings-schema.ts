@@ -998,6 +998,32 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	fastModeScope: {
+		type: "enum",
+		values: ["both", "openai", "claude"] as const,
+		default: "both",
+		ui: {
+			tab: "model",
+			group: "Sampling",
+			label: "Fast Mode Scope",
+			description:
+				'Which providers `/fast on` (and the fast-mode toggle) target. "both" = priority on every supported provider; "openai"/"claude" scope it to one family (mirrors serviceTier openai-only/claude-only).',
+			options: [
+				{ value: "both", label: "Both", description: "Priority on every supported provider" },
+				{
+					value: "openai",
+					label: "OpenAI only",
+					description: "Priority on OpenAI/OpenAI-Codex requests; ignored elsewhere",
+				},
+				{
+					value: "claude",
+					label: "Claude only",
+					description: "Anthropic fast mode on direct Claude requests; ignored elsewhere",
+				},
+			],
+		},
+	},
+
 	// Retries
 	"retry.enabled": { type: "boolean", default: true },
 
@@ -1894,6 +1920,31 @@ export const SETTINGS_SCHEMA = {
 			condition: "mnemopiActive",
 		},
 	},
+	"mnemopi.embeddingVariant": {
+		type: "enum",
+		values: ["en", "multilingual"] as const,
+		default: "en",
+		ui: {
+			tab: "memory",
+			group: "Mnemopi",
+			label: "Embedding variant",
+			description:
+				"Local embedding model family. en = stronger English model; multilingual = cross-language model. Changing this rebuilds existing memory embeddings on next start.",
+			options: [
+				{
+					value: "en",
+					label: "English (bge-base-en-v1.5)",
+					description: "BAAI/bge-base-en-v1.5 (768d), English-only",
+				},
+				{
+					value: "multilingual",
+					label: "Multilingual (multilingual-e5-large)",
+					description: "intfloat/multilingual-e5-large (1024d), cross-language recall",
+				},
+			],
+			condition: "mnemopiActive",
+		},
+	},
 	"mnemopi.autoRecall": {
 		type: "boolean",
 		default: true,
@@ -1956,7 +2007,8 @@ export const SETTINGS_SCHEMA = {
 			tab: "memory",
 			group: "Mnemopi",
 			label: "Mnemopi Embedding Model",
-			description: "Optional embedding model override passed to Mnemopi",
+			description:
+				"Advanced: explicit embedding model id that overrides the variant. Leave empty to use mnemopi.embeddingVariant.",
 			condition: "mnemopiActive",
 		},
 	},

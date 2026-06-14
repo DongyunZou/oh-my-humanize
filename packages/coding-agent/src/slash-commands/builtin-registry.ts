@@ -117,6 +117,19 @@ function workflowAgentProgressByIdFromObservedSessions(
 	return progressById;
 }
 
+/** `/fast status` label: "off", "on", or scope-qualified "on (… only)". */
+function formatFastModeStatus(session: AgentSession): string {
+	if (!session.isFastModeEnabled()) return "off";
+	switch (session.serviceTier) {
+		case "openai-only":
+			return "on (OpenAI only)";
+		case "claude-only":
+			return "on (Claude only)";
+		default:
+			return "on";
+	}
+}
+
 /** Scheme-less display form of a browser deep link: accent + underline, OSC-8 linked to the full URL. */
 function collabWebLinkClickable(webLink: string): string {
 	const display = theme.fg("accent", `\x1b[4m${webLink.replace(/^https?:\/\//, "")}\x1b[24m`);
@@ -340,6 +353,16 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		handle: handleWorkflowAcp,
 	},
 	{
+		name: "guided-goal",
+		description: "Interview and refine a goal before enabling goal mode",
+		inlineHint: "[rough objective]",
+		allowArgs: true,
+		handleTui: async (command, runtime) => {
+			await runtime.ctx.handleGuidedGoalCommand(command.args || undefined);
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
 		name: "loop",
 		description:
 			"Toggle loop mode. While enabled, the next prompt you send re-submits after every yield. Esc cancels the current iteration; /loop again to disable.",
@@ -427,7 +450,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				return commandConsumed();
 			}
 			if (arg === "status") {
-				await runtime.output(`Fast mode is ${runtime.session.isFastModeEnabled() ? "on" : "off"}.`);
+				await runtime.output(`Fast mode is ${formatFastModeStatus(runtime.session)}.`);
 				return commandConsumed();
 			}
 			return usage("Usage: /fast [on|off|status]", runtime);
@@ -456,8 +479,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				return;
 			}
 			if (arg === "status") {
-				const enabled = runtime.ctx.session.isFastModeEnabled();
-				runtime.ctx.showStatus(`Fast mode is ${enabled ? "on" : "off"}.`);
+				runtime.ctx.showStatus(`Fast mode is ${formatFastModeStatus(runtime.ctx.session)}.`);
 				runtime.ctx.editor.setText("");
 				return;
 			}
