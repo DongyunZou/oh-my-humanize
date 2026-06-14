@@ -6,7 +6,7 @@ const WORKFLOW_SHELL_TIMEOUT_MS = 60 * 60 * 1000;
 
 export function createShellScriptRunner(toolSession: ToolSession): WorkflowShellScriptRunner {
 	return async request => {
-		const result = await executeBash(request.code, {
+		const result = await executeBash(workflowShellCommand(request.code), {
 			cwd: toolSession.cwd,
 			timeout: WORKFLOW_SHELL_TIMEOUT_MS,
 			signal: request.signal,
@@ -33,7 +33,20 @@ export function createShellScriptRunner(toolSession: ToolSession): WorkflowShell
 	};
 }
 
+export function workflowShellCommand(code: string): string {
+	const delimiter = workflowShellHeredocDelimiter(code);
+	return `sh <<'${delimiter}'\n${code}\n${delimiter}`;
+}
+
 function workflowShellSessionKey(toolSession: ToolSession, activationId: string): string {
 	const sessionId = toolSession.getSessionId?.() ?? "session";
 	return `${sessionId}:workflow:${activationId}`;
+}
+
+function workflowShellHeredocDelimiter(code: string): string {
+	let index = 0;
+	while (code.includes(`__OMP_WORKFLOW_SH_${index}__`)) {
+		index++;
+	}
+	return `__OMP_WORKFLOW_SH_${index}__`;
 }

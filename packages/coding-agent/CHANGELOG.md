@@ -15,6 +15,7 @@
 - Fixed workflow graph checkpoint summaries so stopped attempts show when aborted activation outputs were intentionally omitted from the checkpoint.
 - Fixed workflow monitor active-agent rows so they can show live model, current tool, recent activity, and lightweight runtime stats from the existing Agent Hub observer stream.
 - Fixed workflow runtime binding diagnostics so shell workflow nodes and declared `bash` capabilities render as `bash` and no longer appear as unavailable unknown tools when the active runtime can execute script nodes.
+- Fixed workflow `sh` script nodes so they execute with `sh` semantics instead of inheriting zsh/bash user-shell semantics, preventing user-shell reserved variables from breaking otherwise valid workflow scripts.
 - Fixed workflow joins so a loop edge returning from outside a join's `waitFor` set re-activates the join with the triggering activation as a parent, allowing long-running build/review loops to re-run validation after a fix round.
 - Fixed focused workflow-agent views so slash commands still execute in the main TUI session instead of being blocked as subagent steering text.
 - Fixed workflow live-agent intervention so `/workflow interrupt` can checkpoint one selected running agent while sibling agents continue, and the TUI graph/manager expose per-agent interrupt actions separately from whole-attempt stop.
