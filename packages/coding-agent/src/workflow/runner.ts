@@ -164,6 +164,21 @@ function finishLifecycleAttempt(options: WorkflowRunnerOptions, scheduler: Workf
 			attemptId: lifecycle.attemptId,
 			error: failed.error ?? `workflow activation ${failed.id} failed`,
 		});
+		const failedFrontierNodeIds = failedWorkflowFrontierNodeIds(scheduler);
+		createWorkflowCheckpoint(options.host, {
+			checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
+			familyId: lifecycle.familyId,
+			attemptId: lifecycle.attemptId,
+			completedActivationIds: scheduler.activations
+				.filter(activation => activation.status === "completed")
+				.map(activation => activation.id),
+			abortedActivationIds: scheduler.activations
+				.filter(activation => activation.status === "aborted")
+				.map(activation => activation.id),
+			frontierNodeIds: failedFrontierNodeIds,
+			state: scheduler.state,
+			sourceMapping: lifecycleCheckpointSourceMapping(options, failedFrontierNodeIds),
+		});
 		return;
 	}
 	const checkpointReason = workflowCheckpointReason(options, scheduler);
@@ -206,6 +221,17 @@ function workflowCheckpointReason(
 	if (typeof reason === "string" && reason.length > 0) return reason;
 	if (reason !== undefined && reason !== null) return String(reason);
 	return "workflow stopped";
+}
+
+function failedWorkflowFrontierNodeIds(scheduler: WorkflowSchedulerResult): string[] {
+	const seen = new Set<string>();
+	const nodeIds: string[] = [];
+	for (const activation of scheduler.activations) {
+		if (activation.status !== "failed" || seen.has(activation.nodeId)) continue;
+		seen.add(activation.nodeId);
+		nodeIds.push(activation.nodeId);
+	}
+	return nodeIds;
 }
 
 function lifecycleCheckpointSourceMapping(

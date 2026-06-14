@@ -647,9 +647,9 @@ export function createWorkflowCheckpoint(
 		}
 		throw new WorkflowLifecycleError(`Workflow checkpoint attempt not found: ${options.attemptId}`);
 	}
-	if (attempt.status !== "stop_requested" && attempt.status !== "stopped") {
+	if (attempt.status !== "stop_requested" && attempt.status !== "stopped" && attempt.status !== "failed") {
 		throw new WorkflowLifecycleError(
-			`Workflow checkpoint requires a stop request before saving attempt: ${attempt.id} (${attempt.status})`,
+			`Workflow checkpoint requires a stopped or failed attempt before saving: ${attempt.id} (${attempt.status})`,
 		);
 	}
 	const runningActivations = attempt.activations
@@ -903,9 +903,9 @@ function assertWorkflowRestartAllowed(host: WorkflowLifecycleStoreHost, options:
 	if (checkpointAttempt === undefined) {
 		throw new WorkflowLifecycleError(`Workflow checkpoint attempt not found for restart: ${checkpoint.attemptId}`);
 	}
-	if (checkpointAttempt.status !== "stopped") {
+	if (checkpointAttempt.status !== "stopped" && checkpointAttempt.status !== "failed") {
 		throw new WorkflowLifecycleError(
-			`Workflow checkpoint attempt is not stopped for restart: ${checkpointAttempt.id} (${checkpointAttempt.status})`,
+			`Workflow checkpoint attempt is not stopped or failed for restart: ${checkpointAttempt.id} (${checkpointAttempt.status})`,
 		);
 	}
 	const freeze = family.freezes.find(candidate => candidate.id === options.freezeId);
