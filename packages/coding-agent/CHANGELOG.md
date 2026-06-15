@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Fixed workflow graph condition labels for Humanize RLCR long-running gates so
+  loop diagrams show `long-running floor pending` instead of exposing the
+  internal `humanize.operatorGate.minimumSatisfied` state path.
 - Fixed the built-in `humanize-rlcr` operator gate so the default human
   approval response `Approve` is treated as `proceed`, and explicit eight-hour
   or five-day task contracts in `task.md` preserve long-running RLCR loops even

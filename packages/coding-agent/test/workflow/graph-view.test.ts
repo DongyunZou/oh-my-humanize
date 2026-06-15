@@ -935,12 +935,11 @@ describe("workflow graph view rendering", () => {
 			'outputs.codexSummaryReview.verdict != "COMPLETE" || state.humanize.operatorGate.minimumSatisfied == false',
 		);
 
-		expect(label).toBe(
-			"codex summary review verdict is not COMPLETE or humanize operator gate minimum satisfied is false",
-		);
+		expect(label).toBe("codex summary review verdict is not COMPLETE or long-running floor pending");
 		expect(label).not.toContain("outputs.");
 		expect(label).not.toContain("state.");
 		expect(label).not.toContain("||");
+		expect(label).not.toContain("humanize operator gate");
 	});
 
 	it("surfaces parsed review verdicts and selected routes separately from summary text", () => {

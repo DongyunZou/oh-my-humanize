@@ -1134,10 +1134,31 @@ function formatWorkflowComparisonCondition(
 	condition: WorkflowComparisonCondition,
 	mode: WorkflowConditionLabelMode = "default",
 ): string {
+	const knownLabel = formatKnownWorkflowComparisonCondition(condition);
+	if (knownLabel !== undefined) return knownLabel;
 	const subject = formatWorkflowConditionSubjectPath(condition.leftPath, mode);
 	const relation = formatWorkflowComparisonRelation(condition.operator, mode);
 	const value = formatWorkflowConditionLiteral(condition.right);
 	return `${subject} ${relation} ${value}`;
+}
+
+function formatKnownWorkflowComparisonCondition(condition: WorkflowComparisonCondition): string | undefined {
+	if (
+		condition.leftPath.length === 4 &&
+		condition.leftPath[0] === "state" &&
+		condition.leftPath[1] === "humanize" &&
+		condition.leftPath[2] === "operatorGate" &&
+		condition.leftPath[3] === "minimumSatisfied" &&
+		typeof condition.right === "boolean"
+	) {
+		const satisfied =
+			(condition.operator === "==" && condition.right) || (condition.operator === "!=" && !condition.right);
+		const pending =
+			(condition.operator === "==" && !condition.right) || (condition.operator === "!=" && condition.right);
+		if (satisfied) return "long-running floor satisfied";
+		if (pending) return "long-running floor pending";
+	}
+	return undefined;
 }
 
 function formatWorkflowComparisonRelation(
