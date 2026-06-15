@@ -1546,6 +1546,120 @@ describe("workflow graph view rendering", () => {
 		expect(text).not.toContain("activation-review");
 	});
 
+	it("compacts the live TUI graph to the terminal height budget", async () => {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("dark theme fixture is required");
+		setThemeInstance(theme);
+		const view = createView({
+			name: "height-aware-cockpit",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "plan", type: "agent" },
+				{ id: "inspect", type: "script" },
+				{ id: "build", type: "agent" },
+				{ id: "summaryReview", type: "review" },
+				{ id: "fixIssues", type: "agent" },
+				{ id: "codeReview", type: "review" },
+				{ id: "archive", type: "script" },
+			],
+			edges: [
+				{ from: "plan", to: "inspect" },
+				{ from: "inspect", to: "build" },
+				{ from: "build", to: "summaryReview" },
+				{
+					from: "summaryReview",
+					to: "fixIssues",
+					condition: { source: 'outputs.summaryReview.verdict != "COMPLETE"' },
+				},
+				{
+					from: "summaryReview",
+					to: "codeReview",
+					condition: { source: 'outputs.summaryReview.verdict == "COMPLETE"' },
+				},
+				{ from: "fixIssues", to: "codeReview" },
+				{ from: "codeReview", to: "fixIssues", condition: { source: 'outputs.codeReview.verdict == "ISSUES"' } },
+				{ from: "codeReview", to: "archive", condition: { source: 'outputs.codeReview.verdict != "ISSUES"' } },
+			],
+		});
+		view.activeAgents = [
+			{
+				activationId: "activation-build",
+				focusAgentId: "build-4",
+				generation: 4,
+				nodeId: "build",
+				label: "Build",
+				role: "Builder",
+				status: "running",
+				model: "rust.cat/gpt-5.5",
+				tool: "bash bun test",
+				stats: "9m12s · 12 tools · 41% ctx",
+				activity: "tightening the retry loop after review feedback",
+				recentOutput: ["patched graph view", "running focused tests"],
+			},
+		];
+		view.focus = {
+			nodeId: "build",
+			label: "Build",
+			role: "Builder",
+			status: "running",
+			focusAgentId: "build-4",
+			generation: 4,
+			model: "rust.cat/gpt-5.5",
+			tool: "bash bun test",
+			stats: "9m12s · 12 tools · 41% ctx",
+			activity: "tightening the retry loop after review feedback",
+			recentOutput: ["patched graph view", "running focused tests"],
+			controls: [
+				"Watch: Agent Hub build-4",
+				"Interrupt: /workflow interrupt height-aware-cockpit:attempt-1 build-4 --deadline-ms 30000",
+			],
+		};
+		view.actions = [
+			"Refresh: /workflow graph --family-id height-aware-cockpit",
+			"Stop attempt: /workflow stop height-aware-cockpit:attempt-1 --deadline-ms 30000",
+			"Interrupt Builder · Build: /workflow interrupt height-aware-cockpit:attempt-1 build-4 --deadline-ms 30000",
+			"Propose change: /workflow request-change <file> --family-id height-aware-cockpit",
+		];
+		const component = new WorkflowGraphComponent(view, { refreshMs: 0, heightProvider: () => 24 });
+
+		const lines = component.render(96);
+		const text = stripAnsi(lines.join("\n"));
+
+		expect(lines.length).toBeLessThanOrEqual(24);
+		expect(text).toContain("Workflow graph");
+		expect(text).toContain("Flow: branch points 2 / joins 2 / loops 1");
+		expect(text).toContain("focused node");
+		expect(text).toContain("on-flight");
+		expect(text).toContain("diagram");
+		expect(text).toContain("controls");
+		expect(text).toContain("diagram rows hidden");
+		expect(text).toContain("9m12s");
+		expect(text).toContain("Refresh");
+		expect(text).not.toContain("gpt-5.5");
+		expect(text).not.toContain("rust.cat/gpt-5.5");
+		expect(text).not.toContain("bash");
+		expect(text).not.toContain("ctx");
+		expect(text).not.toContain("--deadline-ms");
+
+		const mediumLines = new WorkflowGraphComponent(view, { refreshMs: 0, heightProvider: () => 40 }).render(96);
+		const mediumText = stripAnsi(mediumLines.join("\n"));
+
+		expect(mediumLines.length).toBeLessThanOrEqual(40);
+		expect(mediumText).not.toContain("workflow graph rows hidden");
+		expect(mediumText).toContain("diagram rows hidden");
+		expect(mediumText).toContain("Map: plan -> inspect -> [build] -> summaryReview");
+
+		const tinyLines = new WorkflowGraphComponent(view, { refreshMs: 0, heightProvider: () => 10 }).render(96);
+		const tinyText = stripAnsi(tinyLines.join("\n"));
+
+		expect(tinyLines.length).toBeLessThanOrEqual(10);
+		expect(tinyText).toContain("Workflow graph");
+		expect(tinyText).toContain("Flow: branch points 2 / joins 2 / loops 1");
+		expect(tinyText).toContain("diagram");
+		expect(tinyText).not.toContain("workflow graph rows hidden");
+	});
+
 	it("renders selected workflow routes in the live TUI graph component", async () => {
 		const theme = await getThemeByName("dark");
 		if (!theme) throw new Error("dark theme fixture is required");

@@ -2257,6 +2257,7 @@ export async function executeBuiltinSlashCommand(
 				const monitorSnapshots = createWorkflowMonitorSnapshotWriter(ctx.workflowMonitorSnapshotAgentDir);
 				await monitorSnapshots.write(view);
 				const component = new WorkflowGraphComponent(view, {
+					heightProvider: () => Math.max(6, ctx.ui.terminal.rows - 6),
 					viewProvider: () => {
 						const family = reconstructWorkflowFamilies(ctx.sessionManager.getBranch()).find(
 							candidate => candidate.id === view.familyId,
