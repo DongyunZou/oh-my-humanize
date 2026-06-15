@@ -53,6 +53,10 @@ resources:
     kind: script
   - path: scripts/write-round-summary.js
     kind: script
+  - path: scripts/long-running-hold.sh
+    kind: script
+  - path: scripts/long-running-hold-check.js
+    kind: script
   - path: scripts/enter-review-phase.js
     kind: script
   - path: scripts/finalize.js
@@ -64,158 +68,195 @@ capabilities:
   tools:
     - ask
     - eval
+    - shell
 migrations:
   - from: implementation-loop
     to: review-loop
     frontierMapping:
       codexSummaryReview: enterReviewPhase
-sequence:
-  - node:
-      id: planCompliancePrecheck
-      type: script
-      script:
-        language: js
-        file: scripts/plan-compliance-precheck.js
-      writes:
-        - /humanize
-  - node:
-      id: planUnderstandingQuiz
-      type: human
-      prompt:
-        template:
-          file: prompts/plan-understanding-quiz.md
-          bindings:
-            humanize:
-              state: /humanize
-      reads:
-        - /humanize
-  - node:
-      id: recordOperatorGate
-      type: script
-      script:
-        language: js
-        file: scripts/record-operator-gate.js
-      reads:
-        - /humanize
-      writes:
-        - /humanize
-  - node:
-      id: initializeGoalTracker
-      type: script
-      script:
-        language: js
-        file: scripts/init-goal-tracker.js
-      writes:
-        - /humanize
-  - template:
-      kind: retry_until
-      body:
-        sequence:
-          - node:
-              id: implementRound
-              type: agent
-              agent: task
-              model:
-                role: builder
-              prompt:
-                template:
-                  file: prompts/implementation-round.md
-                  bindings:
-                    humanize:
-                      state: /humanize
-              reads:
-                - /humanize
-          - node:
-              id: writeRoundSummary
-              type: script
-              script:
-                language: js
-                file: scripts/write-round-summary.js
-              writes:
-                - /humanize
-      review:
-        id: codexSummaryReview
-        type: review
-        agent: reviewer
-        model:
-          role: reviewer
-        prompt:
-          template:
-            file: prompts/codex-summary-review.md
-            bindings:
-              humanize:
-                state: /humanize
-        reads:
-          - /humanize
-        gates:
-          - CONTINUE
-          - COMPLETE
-        fallbackVerdict: CONTINUE
-      retryWhen: outputs.codexSummaryReview.verdict != "COMPLETE" || state.humanize.operatorGate.minimumSatisfied == false
-  - node:
-      id: enterReviewPhase
-      type: script
-      script:
-        language: js
-        file: scripts/enter-review-phase.js
-      writes:
-        - /humanize
-  - template:
-      kind: retry_until
-      body:
-        id: fixReviewIssues
-        type: agent
-        agent: task
-        model:
-          role: builder
-        prompt:
-          template:
-            file: prompts/code-review-fix.md
-            bindings:
-              humanize:
-                state: /humanize
-        reads:
-          - /humanize
-      review:
-        id: codexCodeReview
-        type: review
-        agent: reviewer
-        model:
-          role: reviewer
-        prompt:
-          template:
-            file: prompts/codex-code-review.md
-            bindings:
-              humanize:
-                state: /humanize
-        reads:
-          - /humanize
-        gates:
-          - ISSUES
-          - CLEAN
-      retryWhen: outputs.codexCodeReview.verdict == "ISSUES"
-  - node:
-      id: finalAlignmentCheck
-      type: review
-      agent: reviewer
-      model:
-        role: reviewer
-      prompt:
-        template:
-          file: prompts/final-alignment-check.md
-          bindings:
-            humanize:
-              state: /humanize
-      reads:
-        - /humanize
-      gates:
-        - finish
-  - node:
-      id: finalize
-      type: script
-      script:
-        language: js
-        file: scripts/finalize.js
-      writes:
-        - /humanize
+nodes:
+  - id: planCompliancePrecheck
+    type: script
+    script:
+      language: js
+      file: scripts/plan-compliance-precheck.js
+    writes:
+      - /humanize
+  - id: planUnderstandingQuiz
+    type: human
+    prompt:
+      template:
+        file: prompts/plan-understanding-quiz.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+  - id: recordOperatorGate
+    type: script
+    script:
+      language: js
+      file: scripts/record-operator-gate.js
+    reads:
+      - /humanize
+    writes:
+      - /humanize
+  - id: initializeGoalTracker
+    type: script
+    script:
+      language: js
+      file: scripts/init-goal-tracker.js
+    writes:
+      - /humanize
+  - id: implementRound
+    type: agent
+    agent: task
+    model:
+      role: builder
+    prompt:
+      template:
+        file: prompts/implementation-round.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+  - id: writeRoundSummary
+    type: script
+    script:
+      language: js
+      file: scripts/write-round-summary.js
+    writes:
+      - /humanize
+  - id: codexSummaryReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    prompt:
+      template:
+        file: prompts/codex-summary-review.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+    gates:
+      - CONTINUE
+      - COMPLETE
+    fallbackVerdict: CONTINUE
+  - id: longRunningHold
+    type: script
+    script:
+      language: sh
+      file: scripts/long-running-hold.sh
+  - id: longRunningHoldCheck
+    type: script
+    script:
+      language: js
+      file: scripts/long-running-hold-check.js
+    reads:
+      - /humanize
+    writes:
+      - /humanize
+  - id: enterReviewPhase
+    type: script
+    script:
+      language: js
+      file: scripts/enter-review-phase.js
+    writes:
+      - /humanize
+  - id: fixReviewIssues
+    type: agent
+    agent: task
+    model:
+      role: builder
+    prompt:
+      template:
+        file: prompts/code-review-fix.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+  - id: codexCodeReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    prompt:
+      template:
+        file: prompts/codex-code-review.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+    gates:
+      - ISSUES
+      - CLEAN
+  - id: finalAlignmentCheck
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    prompt:
+      template:
+        file: prompts/final-alignment-check.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+    gates:
+      - finish
+  - id: finalize
+    type: script
+    script:
+      language: js
+      file: scripts/finalize.js
+    writes:
+      - /humanize
+edges:
+  - from: planCompliancePrecheck
+    to: planUnderstandingQuiz
+  - from: planUnderstandingQuiz
+    to: recordOperatorGate
+  - from: recordOperatorGate
+    to: initializeGoalTracker
+  - from: initializeGoalTracker
+    to: implementRound
+  - from: implementRound
+    to: writeRoundSummary
+  - from: writeRoundSummary
+    to: codexSummaryReview
+  - from: codexSummaryReview
+    to: implementRound
+    when: outputs.codexSummaryReview.verdict != "COMPLETE"
+  - from: codexSummaryReview
+    to: longRunningHold
+    when: outputs.codexSummaryReview.verdict == "COMPLETE" && state.humanize.operatorGate.minimumSatisfied == false
+  - from: codexSummaryReview
+    to: enterReviewPhase
+    when: outputs.codexSummaryReview.verdict == "COMPLETE" && state.humanize.operatorGate.minimumSatisfied != false
+  - from: longRunningHold
+    to: longRunningHoldCheck
+  - from: longRunningHoldCheck
+    to: longRunningHold
+    when: state.humanize.operatorGate.minimumSatisfied == false
+  - from: longRunningHoldCheck
+    to: enterReviewPhase
+    when: state.humanize.operatorGate.minimumSatisfied != false
+  - from: enterReviewPhase
+    to: fixReviewIssues
+  - from: fixReviewIssues
+    to: codexCodeReview
+  - from: codexCodeReview
+    to: fixReviewIssues
+    when: outputs.codexCodeReview.verdict == "ISSUES"
+  - from: codexCodeReview
+    to: finalAlignmentCheck
+    when: outputs.codexCodeReview.verdict != "ISSUES"
+  - from: finalAlignmentCheck
+    to: finalize
 ```

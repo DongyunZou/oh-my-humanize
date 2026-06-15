@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Fixed the built-in `humanize-rlcr` long-running path so a reviewer-complete
+  implementation waits in an interruptible hold/check loop instead of adding
+  implementation rounds solely to satisfy the runtime floor.
 - Fixed workflow graph condition labels for Humanize RLCR long-running gates so
   loop diagrams show `long-running floor pending` instead of exposing the
   internal `humanize.operatorGate.minimumSatisfied` state path.

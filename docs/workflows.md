@@ -111,9 +111,12 @@ must remain active for more than eight hours to count as long-running. Shorter
 runs are useful smoke evidence, but they are not long-running validation.
 
 In the demo graph, expect the implementation loop to revisit the build and
-summary-review nodes until the reviewer returns `COMPLETE`, then the code-review
-loop runs until the reviewer returns `CLEAN`. Node badges show how many times
-each node has fired, which is the useful signal for long-running RLCR work.
+summary-review nodes until the reviewer returns `COMPLETE`. If long-running
+evidence was requested and the eight-hour floor is still pending, the flow moves
+to a lightweight hold/check loop instead of asking the builder to keep expanding
+the patch. Once the floor is satisfied, the code-review loop runs until the
+reviewer returns `CLEAN`. Node badges show how many times each node has fired,
+which is the useful signal for long-running RLCR work.
 
 For a bounded smoke run without opening the TUI, stop after the first script
 activation so the headless command verifies resolution, freeze, and runtime

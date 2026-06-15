@@ -14,10 +14,12 @@ import { loadWorkflowArtifact } from "../../src/workflow/package-loader";
 import { DEFAULT_WORKFLOW_MAX_PROMPT_BYTES } from "../../src/workflow/prompt-source";
 import { reconstructWorkflowRuns, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
 import { runWorkflow } from "../../src/workflow/runner";
+import { workflowScriptEnvironment } from "../../src/workflow/script-runtime-env";
 import {
 	createSessionWorkflowRuntimeHost,
 	type WorkflowScriptEvalRequest,
 	type WorkflowScriptEvalResult,
+	type WorkflowShellScriptRequest,
 } from "../../src/workflow/session-runtime";
 
 const tempDirs: string[] = [];
@@ -206,7 +208,7 @@ describe("workflow artifact registry", () => {
 		expect(expectRecord(humanize.final, "humanize final").rounds).toBe(2);
 	});
 
-	it("keeps bundled Humanize RLCR in the implementation loop until the long-running gate is satisfied", async () => {
+	it("routes bundled Humanize RLCR through a hold loop after implementation completes before the long-running gate is satisfied", async () => {
 		const spec = await resolveWorkflowFlowSpec("humanize-rlcr", { cwd: process.cwd(), flowDirs: [] });
 		const artifact = await loadWorkflowArtifact(spec.path);
 		const freeze = await freezeWorkflowArtifact(artifact);
@@ -223,55 +225,68 @@ describe("workflow artifact registry", () => {
 		const host = createRunHost();
 		let implementationRound = 0;
 		const summaryReviewAssignments: string[] = [];
+		const previousHoldSeconds = Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS;
+		Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS = "0";
 
-		const result = await runWorkflow({
-			host,
-			definition: freeze.definition,
-			runId: "humanize-long-running-gate",
-			startNodeId: "planCompliancePrecheck",
-			runtimeHost: createSessionWorkflowRuntimeHost({
-				cwd: taskDir,
-				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
-				runHumanInput: async () => ({
-					response:
-						"proceed: this is intended as long-running validation with an eight hour minimum and five day maximum.",
+		try {
+			const result = await runWorkflow({
+				host,
+				definition: freeze.definition,
+				runId: "humanize-long-running-gate",
+				startNodeId: "planCompliancePrecheck",
+				runtimeHost: createSessionWorkflowRuntimeHost({
+					cwd: taskDir,
+					runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+					runShellScript: request => runShellWorkflowScript(taskDir, request),
+					runHumanInput: async () => ({
+						response:
+							"proceed: this is intended as long-running validation with an eight hour minimum and five day maximum.",
+					}),
+					runAgentTask: async request => {
+						if (request.nodeId === "implementRound") {
+							implementationRound++;
+							return {
+								exitCode: 0,
+								output: `round ${implementationRound} implementation evidence with verification notes`,
+							};
+						}
+						if (request.nodeId === "codexSummaryReview") {
+							summaryReviewAssignments.push(request.task.assignment);
+							return {
+								exitCode: 0,
+								output: "COMPLETE\nAcceptance evidence is present, but the runtime floor is not met.",
+							};
+						}
+						return { exitCode: 0, output: `completed ${request.nodeId}` };
+					},
 				}),
-				runAgentTask: async request => {
-					if (request.nodeId === "implementRound") {
-						implementationRound++;
-						return {
-							exitCode: 0,
-							output: `round ${implementationRound} implementation evidence with verification notes`,
-						};
-					}
-					if (request.nodeId === "codexSummaryReview") {
-						summaryReviewAssignments.push(request.task.assignment);
-						return {
-							exitCode: 0,
-							output: "COMPLETE\nAcceptance evidence is present, but the runtime floor is not met.",
-						};
-					}
-					return { exitCode: 0, output: `completed ${request.nodeId}` };
-				},
-			}),
-			packageRoot: artifact.resourceDir,
-			frozenResources: freeze.resourceSnapshots,
-			maxActivations: 12,
-		});
+				packageRoot: artifact.resourceDir,
+				frozenResources: freeze.resourceSnapshots,
+				maxActivations: 9,
+			});
 
-		const nodeIds = result.scheduler.activations.map(activation => activation.nodeId);
-		expect(nodeIds.filter(nodeId => nodeId === "implementRound")).toHaveLength(3);
-		expect(nodeIds.filter(nodeId => nodeId === "codexSummaryReview")).toHaveLength(2);
-		expect(nodeIds).not.toContain("enterReviewPhase");
-		expect(result.scheduler.frontierNodeIds).toEqual(["codexSummaryReview"]);
-		const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
-		const operatorGate = expectRecord(humanize.operatorGate, "humanize operator gate");
-		expect(operatorGate.longRunningRequested).toBe(true);
-		expect(operatorGate.minimumSatisfied).toBe(false);
-		const runtime = expectRecord(humanize.runtime, "humanize runtime");
-		const longRunning = expectRecord(runtime.longRunning, "humanize long-running runtime");
-		expect(longRunning.minimumSatisfied).toBe(false);
-		expect(summaryReviewAssignments.at(-1) ?? "").toContain('"minimumSatisfied":false');
+			const nodeIds = result.scheduler.activations.map(activation => activation.nodeId);
+			expect(nodeIds.filter(nodeId => nodeId === "implementRound")).toHaveLength(1);
+			expect(nodeIds.filter(nodeId => nodeId === "codexSummaryReview")).toHaveLength(1);
+			expect(nodeIds.filter(nodeId => nodeId === "longRunningHold")).toHaveLength(1);
+			expect(nodeIds.filter(nodeId => nodeId === "longRunningHoldCheck")).toHaveLength(1);
+			expect(nodeIds).not.toContain("enterReviewPhase");
+			expect(result.scheduler.frontierNodeIds).toEqual(["longRunningHold"]);
+			const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
+			const operatorGate = expectRecord(humanize.operatorGate, "humanize operator gate");
+			expect(operatorGate.longRunningRequested).toBe(true);
+			expect(operatorGate.minimumSatisfied).toBe(false);
+			const runtime = expectRecord(humanize.runtime, "humanize runtime");
+			const longRunning = expectRecord(runtime.longRunning, "humanize long-running runtime");
+			expect(longRunning.minimumSatisfied).toBe(false);
+			expect(summaryReviewAssignments.at(-1) ?? "").toContain('"minimumSatisfied":false');
+		} finally {
+			if (previousHoldSeconds === undefined) {
+				delete Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS;
+			} else {
+				Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS = previousHoldSeconds;
+			}
+		}
 	});
 
 	it("derives bundled Humanize RLCR long-running intent from default approval and task contract", async () => {
@@ -320,10 +335,10 @@ describe("workflow artifact registry", () => {
 		expect(operatorGate.decision).toBe("proceed");
 		expect(operatorGate.longRunningRequested).toBe(true);
 		expect(operatorGate.minimumSatisfied).toBe(false);
-		expect(result.scheduler.frontierNodeIds).toEqual(["implementRound"]);
+		expect(result.scheduler.frontierNodeIds).toEqual(["longRunningHold"]);
 	});
 
-	it("keeps bundled Humanize RLCR reviewer prompts bounded across long-running implementation loops", async () => {
+	it("keeps bundled Humanize RLCR in a hold loop without growing implementation prompts", async () => {
 		const spec = await resolveWorkflowFlowSpec("humanize-rlcr", { cwd: process.cwd(), flowDirs: [] });
 		const artifact = await loadWorkflowArtifact(spec.path);
 		const freeze = await freezeWorkflowArtifact(artifact);
@@ -341,58 +356,71 @@ describe("workflow artifact registry", () => {
 		const promptEncoder = new TextEncoder();
 		let implementationRound = 0;
 		const summaryReviewPromptBytes: number[] = [];
+		const previousHoldSeconds = Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS;
+		Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS = "0";
 
-		const result = await runWorkflow({
-			host,
-			definition: freeze.definition,
-			runId: "humanize-long-loop-prompt-budget",
-			startNodeId: "planCompliancePrecheck",
-			runtimeHost: createSessionWorkflowRuntimeHost({
-				cwd: taskDir,
-				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
-				runHumanInput: async () => ({
-					response:
-						"proceed: this is intended as long-running validation with an eight hour minimum and five day maximum.",
+		try {
+			const result = await runWorkflow({
+				host,
+				definition: freeze.definition,
+				runId: "humanize-long-loop-prompt-budget",
+				startNodeId: "planCompliancePrecheck",
+				runtimeHost: createSessionWorkflowRuntimeHost({
+					cwd: taskDir,
+					runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+					runShellScript: request => runShellWorkflowScript(taskDir, request),
+					runHumanInput: async () => ({
+						response:
+							"proceed: this is intended as long-running validation with an eight hour minimum and five day maximum.",
+					}),
+					runAgentTask: async request => {
+						if (request.nodeId === "implementRound") {
+							implementationRound++;
+							return {
+								exitCode: 0,
+								output: [
+									`round ${implementationRound} implementation evidence with verification notes`,
+									`evidence payload: ${"x".repeat(1_850)}`,
+								].join("\n"),
+							};
+						}
+						if (request.nodeId === "codexSummaryReview") {
+							summaryReviewPromptBytes.push(promptEncoder.encode(request.task.assignment).byteLength);
+							return {
+								exitCode: 0,
+								output: "COMPLETE\nAcceptance evidence is present, but the long-running floor is not met.",
+							};
+						}
+						return { exitCode: 0, output: `completed ${request.nodeId}` };
+					},
 				}),
-				runAgentTask: async request => {
-					if (request.nodeId === "implementRound") {
-						implementationRound++;
-						return {
-							exitCode: 0,
-							output: [
-								`round ${implementationRound} implementation evidence with verification notes`,
-								`evidence payload: ${"x".repeat(1_850)}`,
-							].join("\n"),
-						};
-					}
-					if (request.nodeId === "codexSummaryReview") {
-						summaryReviewPromptBytes.push(promptEncoder.encode(request.task.assignment).byteLength);
-						return {
-							exitCode: 0,
-							output: "COMPLETE\nAcceptance evidence is present, but the long-running floor is not met.",
-						};
-					}
-					return { exitCode: 0, output: `completed ${request.nodeId}` };
-				},
-			}),
-			packageRoot: artifact.resourceDir,
-			frozenResources: freeze.resourceSnapshots,
-			maxActivations: 52,
-		});
+				packageRoot: artifact.resourceDir,
+				frozenResources: freeze.resourceSnapshots,
+				maxActivations: 52,
+			});
 
-		const failed = result.scheduler.activations.filter(activation => activation.status === "failed");
-		expect(failed).toEqual([]);
-		const nodeIds = result.scheduler.activations.map(activation => activation.nodeId);
-		expect(nodeIds.filter(nodeId => nodeId === "implementRound")).toHaveLength(16);
-		expect(nodeIds.filter(nodeId => nodeId === "codexSummaryReview")).toHaveLength(16);
-		expect(summaryReviewPromptBytes).toHaveLength(16);
-		expect(summaryReviewPromptBytes.find(bytes => bytes > DEFAULT_WORKFLOW_MAX_PROMPT_BYTES)).toBeUndefined();
-		const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
-		const ledger = expectRecord(humanize.ledger, "humanize ledger");
-		expect(ledger.currentRound).toBe(16);
-		expect(expectNumber(ledger.archivedRoundCount, "humanize archived round count")).toBeGreaterThan(0);
-		expect(expectArray(ledger.rounds, "humanize ledger rounds").length).toBeLessThanOrEqual(6);
-		expect(result.scheduler.frontierNodeIds).toEqual(["implementRound"]);
+			const failed = result.scheduler.activations.filter(activation => activation.status === "failed");
+			expect(failed).toEqual([]);
+			const nodeIds = result.scheduler.activations.map(activation => activation.nodeId);
+			expect(nodeIds.filter(nodeId => nodeId === "implementRound")).toHaveLength(1);
+			expect(nodeIds.filter(nodeId => nodeId === "codexSummaryReview")).toHaveLength(1);
+			expect(nodeIds.filter(nodeId => nodeId === "longRunningHold").length).toBeGreaterThan(0);
+			expect(nodeIds.filter(nodeId => nodeId === "longRunningHoldCheck").length).toBeGreaterThan(0);
+			expect(summaryReviewPromptBytes).toHaveLength(1);
+			expect(summaryReviewPromptBytes.find(bytes => bytes > DEFAULT_WORKFLOW_MAX_PROMPT_BYTES)).toBeUndefined();
+			const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
+			const ledger = expectRecord(humanize.ledger, "humanize ledger");
+			expect(ledger.currentRound).toBe(1);
+			expect(expectNumber(ledger.archivedRoundCount, "humanize archived round count")).toBe(0);
+			expect(expectArray(ledger.rounds, "humanize ledger rounds")).toHaveLength(1);
+			expect(result.scheduler.frontierNodeIds).toEqual(["longRunningHoldCheck"]);
+		} finally {
+			if (previousHoldSeconds === undefined) {
+				delete Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS;
+			} else {
+				Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS = previousHoldSeconds;
+			}
+		}
 	});
 
 	it("treats explicit paths as paths even when the basename matches an installed flow name", async () => {
@@ -555,6 +583,33 @@ async function runBunFunctionWorkflowScript(
 		cwd,
 		stdout: "pipe",
 		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return {
+		exitCode,
+		output: [stdout, stderr]
+			.filter(text => text.trim().length > 0)
+			.join("\n")
+			.trim(),
+		language: request.language,
+		...(exitCode === 0 ? {} : { error: stderr.trim() || stdout.trim() || `exit code ${exitCode}` }),
+	};
+}
+
+async function runShellWorkflowScript(
+	cwd: string,
+	request: WorkflowShellScriptRequest,
+): Promise<WorkflowScriptEvalResult> {
+	const proc = Bun.spawn(["sh", "-c", request.code], {
+		cwd,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: workflowScriptEnvironment(request, Bun.env),
+		signal: request.signal,
 	});
 	const [stdout, stderr, exitCode] = await Promise.all([
 		new Response(proc.stdout).text(),
