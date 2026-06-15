@@ -51,7 +51,8 @@ human-in-the-loop, and dynamic workflow orchestration. Each promoted flow was
 validated under `temp/playground` before being packaged as a built-in.
 The three primitive flows are intentionally closer to executable language
 examples than project templates; use them to study and compose branch, loop, and
-join behavior.
+join behavior. They run against a generic task directory and do not require a
+particular GitHub project checkout or project-specific binary.
 
 List available flows:
 
@@ -63,6 +64,10 @@ Built-in flows are packaged workflow artifacts, not infrastructure
 dependencies. The workflow runtime, freeze checker, resolver, and CLI must also
 work with any valid standalone `.omhflow + same-name directory` artifact supplied
 by path or through `OMHFLOW_DIR`.
+
+The demos below use the normal `omp` model, provider, auth, and tool settings.
+The flow artifact can name portable defaults, but it does not carry API keys and
+does not introduce a second model/tool configuration layer.
 
 ## Humanize RLCR Demo
 
@@ -81,26 +86,40 @@ Acceptance: implementation notes, tests or command output, and final summary.
 EOF
 ```
 
-Start it interactively so the operator can observe the graph, answer the human
-gate, interrupt agents, or approve changes:
+Launch the TUI from the project directory:
+
+```sh
+omp
+```
+
+Start the flow interactively so the operator can observe the graph, answer the
+human gate, interrupt agents, or approve changes:
 
 ```text
 /workflow start humanize-rlcr --family-id demo-humanize --background
+/workflow graph --family-id demo-humanize
 /workflow manager --family-id demo-humanize
 ```
 
-For a bounded smoke run without opening the TUI:
+In the demo graph, expect the implementation loop to revisit the build and
+summary-review nodes until the reviewer returns `COMPLETE`, then the code-review
+loop runs until the reviewer returns `CLEAN`. Node badges show how many times
+each node has fired, which is the useful signal for long-running RLCR work.
+
+For a bounded smoke run without opening the TUI, stop after the first script
+activation so the headless command verifies resolution, freeze, and runtime
+wiring without trying to answer the human gate:
 
 ```sh
 omp workflow start humanize-rlcr \
   --cwd "$PWD" \
   --run-id demo-humanize-smoke \
-  --max-activations 3 \
+  --max-activations 1 \
   --json
 ```
 
-The headless path is useful for freeze/runtime checks, but human nodes and
-operator steering are TUI-first.
+The headless path is useful for freeze/runtime checks. Human nodes, active-agent
+steering, and workflow mutation are TUI-first.
 
 ## KDA Demo
 
@@ -119,6 +138,12 @@ iterate, then record evidence for promotion.
 EOF
 ```
 
+Launch the TUI from the project directory:
+
+```sh
+omp
+```
+
 Run it in the TUI:
 
 ```text
@@ -129,15 +154,16 @@ Run it in the TUI:
 
 The resident graph should show the imported Humanize subflow as a function-like
 call boundary, while diagnostics keep source mapping and namespace details
-available for inspection. For non-interactive validation:
+available for inspection. The operator first supplies the task contract, then
+the outer KDA flow inspects the workspace, drafts a plan, enters the imported
+Humanize loop, validates the candidate, and records promotion evidence.
+
+For non-interactive validation, freeze the packaged artifact. A full headless
+start is intentionally not the KDA demo path because the first node asks the
+human operator to define the task contract:
 
 ```sh
 omp workflow freeze kda-humanize-reference --json
-omp workflow start kda-humanize-reference \
-  --cwd "$PWD" \
-  --run-id demo-kda-smoke \
-  --max-activations 5 \
-  --json
 ```
 
 ## Interactive Use

@@ -50,8 +50,9 @@ Inside the TUI:
 /workflow manager
 ```
 
-See [docs/workflows.md](docs/workflows.md) for artifact layout, non-interactive
-usage, install/uninstall, and lifecycle commands.
+See [docs/workflows.md](docs/workflows.md) for artifact layout,
+`humanize-rlcr` and KDA demo walkthroughs, non-interactive usage,
+install/uninstall, and lifecycle commands.
 
 ## Install
 

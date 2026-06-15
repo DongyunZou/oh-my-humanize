@@ -12,7 +12,7 @@ const report = [
   "",
   "## Objective",
   "",
-  task.split("## Objective")[1]?.split("##")[0]?.trim() ?? "Validate a route-selected ripgrep task.",
+	task.split("## Objective")[1]?.split("##")[0]?.trim() ?? "Validate a route-selected task.",
   "",
   "## Selected Route",
   "",
@@ -22,9 +22,9 @@ const report = [
   "## Work Completed",
   "",
   route.route === "fast"
-    ? `- Ran \`${branchResult.command.join(" ")}\`.`
-    : "- Ran the safe fallback route.",
-  route.route === "fast" ? `- Passing test count detected: ${branchResult.passed}.` : "- No cargo test was required.",
+    ? `- Fast branch processed ${branchResult.wordCount} task words.`
+    : `- Safe branch recorded ${branchResult.lineCount} task lines.`,
+  `- Route evidence: ${branchResult.routeEvidence ?? branchResult.reason}.`,
   "",
   "## Result",
   "",

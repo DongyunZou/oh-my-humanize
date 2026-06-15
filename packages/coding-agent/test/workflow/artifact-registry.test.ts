@@ -11,8 +11,21 @@ import {
 } from "../../src/workflow/artifact-registry";
 import { freezeWorkflowArtifact } from "../../src/workflow/freeze";
 import { loadWorkflowArtifact } from "../../src/workflow/package-loader";
+import { reconstructWorkflowRuns, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
+import { runWorkflow } from "../../src/workflow/runner";
+import {
+	createSessionWorkflowRuntimeHost,
+	type WorkflowScriptEvalRequest,
+	type WorkflowScriptEvalResult,
+} from "../../src/workflow/session-runtime";
 
 const tempDirs: string[] = [];
+
+interface CapturedEntry {
+	type: "custom";
+	customType: string;
+	data?: unknown;
+}
 
 async function createTempDir(): Promise<string> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-registry-"));
@@ -50,6 +63,47 @@ describe("workflow artifact registry", () => {
 			await expect(freezeWorkflowArtifact(await loadWorkflowArtifact(spec.path))).resolves.toMatchObject({
 				definition: { name },
 			});
+		}
+	});
+
+	it("runs bundled control-flow primitive artifacts in a generic workspace", async () => {
+		for (const name of ["branch-conditional", "loop-until-done", "parallel-join"]) {
+			const spec = await resolveWorkflowFlowSpec(name, { cwd: process.cwd(), flowDirs: [] });
+			const artifact = await loadWorkflowArtifact(spec.path);
+			const freeze = await freezeWorkflowArtifact(artifact);
+			const taskDir = await createTempDir();
+			await Bun.write(
+				path.join(taskDir, "task.md"),
+				[
+					"# Primitive built-in smoke",
+					"",
+					"## Objective",
+					"",
+					`Run ${name} in a generic workspace with no project-specific binaries.`,
+				].join("\n"),
+			);
+			const host = createRunHost();
+
+			const result = await runWorkflow({
+				host,
+				definition: freeze.definition,
+				runId: `${name}-generic`,
+				startNodeId: freeze.definition.nodes[0]?.id ?? "",
+				runtimeHost: createSessionWorkflowRuntimeHost({
+					cwd: taskDir,
+					runEvalScript: request => runBunWorkflowScript(taskDir, request),
+				}),
+				packageRoot: artifact.resourceDir,
+				frozenResources: freeze.resourceSnapshots,
+				maxActivations: 16,
+			});
+
+			expect(result.scheduler.activations.every(activation => activation.status === "completed")).toBe(true);
+			expect(result.scheduler.frontierNodeIds).toEqual([]);
+			expect(reconstructWorkflowRuns(host.getBranch())[0]?.state).toBeDefined();
+			await expect(Bun.file(path.join(taskDir, "workflow-output", "task-report.md")).text()).resolves.toContain(
+				"Status: passed",
+			);
 		}
 	});
 
@@ -149,6 +203,45 @@ describe("workflow artifact registry", () => {
 		);
 	});
 });
+
+function createRunHost(): WorkflowRunStoreHost & { entries: CapturedEntry[] } {
+	const entries: CapturedEntry[] = [];
+	return {
+		entries,
+		appendCustomEntry: (customType, data) => {
+			entries.push({ type: "custom", customType, data });
+			return `entry-${entries.length}`;
+		},
+		getBranch: () => entries,
+	};
+}
+
+async function runBunWorkflowScript(
+	cwd: string,
+	request: WorkflowScriptEvalRequest,
+): Promise<WorkflowScriptEvalResult> {
+	const scriptPath = path.join(cwd, `.workflow-${request.activationId}.js`);
+	await Bun.write(scriptPath, request.code);
+	const proc = Bun.spawn([process.execPath, scriptPath], {
+		cwd,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return {
+		exitCode,
+		output: [stdout, stderr]
+			.filter(text => text.trim().length > 0)
+			.join("\n")
+			.trim(),
+		language: request.language,
+		...(exitCode === 0 ? {} : { error: stderr.trim() || stdout.trim() || `exit code ${exitCode}` }),
+	};
+}
 
 async function writeFlowArtifact(
 	root: string,
