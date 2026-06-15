@@ -11,6 +11,7 @@ import {
 } from "../../src/workflow/artifact-registry";
 import { freezeWorkflowArtifact } from "../../src/workflow/freeze";
 import { loadWorkflowArtifact } from "../../src/workflow/package-loader";
+import { DEFAULT_WORKFLOW_MAX_PROMPT_BYTES } from "../../src/workflow/prompt-source";
 import { reconstructWorkflowRuns, type WorkflowRunStoreHost } from "../../src/workflow/run-store";
 import { runWorkflow } from "../../src/workflow/runner";
 import {
@@ -273,6 +274,78 @@ describe("workflow artifact registry", () => {
 		expect(summaryReviewAssignments.at(-1) ?? "").toContain('"minimumSatisfied":false');
 	});
 
+	it("keeps bundled Humanize RLCR reviewer prompts bounded across long-running implementation loops", async () => {
+		const spec = await resolveWorkflowFlowSpec("humanize-rlcr", { cwd: process.cwd(), flowDirs: [] });
+		const artifact = await loadWorkflowArtifact(spec.path);
+		const freeze = await freezeWorkflowArtifact(artifact);
+		const taskDir = await createTempDir();
+		await Bun.write(
+			path.join(taskDir, "task.md"),
+			[
+				"# Long-running RLCR prompt budget regression",
+				"",
+				"Goal: keep iterating through many reviewer-controlled rounds without unbounded prompt growth.",
+				"Acceptance: review prompts stay below the default workflow prompt budget while durable round counters advance.",
+			].join("\n"),
+		);
+		const host = createRunHost();
+		const promptEncoder = new TextEncoder();
+		let implementationRound = 0;
+		const summaryReviewPromptBytes: number[] = [];
+
+		const result = await runWorkflow({
+			host,
+			definition: freeze.definition,
+			runId: "humanize-long-loop-prompt-budget",
+			startNodeId: "planCompliancePrecheck",
+			runtimeHost: createSessionWorkflowRuntimeHost({
+				cwd: taskDir,
+				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+				runHumanInput: async () => ({
+					response:
+						"proceed: this is intended as long-running validation with an eight hour minimum and five day maximum.",
+				}),
+				runAgentTask: async request => {
+					if (request.nodeId === "implementRound") {
+						implementationRound++;
+						return {
+							exitCode: 0,
+							output: [
+								`round ${implementationRound} implementation evidence with verification notes`,
+								`evidence payload: ${"x".repeat(1_850)}`,
+							].join("\n"),
+						};
+					}
+					if (request.nodeId === "codexSummaryReview") {
+						summaryReviewPromptBytes.push(promptEncoder.encode(request.task.assignment).byteLength);
+						return {
+							exitCode: 0,
+							output: "COMPLETE\nAcceptance evidence is present, but the long-running floor is not met.",
+						};
+					}
+					return { exitCode: 0, output: `completed ${request.nodeId}` };
+				},
+			}),
+			packageRoot: artifact.resourceDir,
+			frozenResources: freeze.resourceSnapshots,
+			maxActivations: 52,
+		});
+
+		const failed = result.scheduler.activations.filter(activation => activation.status === "failed");
+		expect(failed).toEqual([]);
+		const nodeIds = result.scheduler.activations.map(activation => activation.nodeId);
+		expect(nodeIds.filter(nodeId => nodeId === "implementRound")).toHaveLength(16);
+		expect(nodeIds.filter(nodeId => nodeId === "codexSummaryReview")).toHaveLength(16);
+		expect(summaryReviewPromptBytes).toHaveLength(16);
+		expect(summaryReviewPromptBytes.find(bytes => bytes > DEFAULT_WORKFLOW_MAX_PROMPT_BYTES)).toBeUndefined();
+		const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
+		const ledger = expectRecord(humanize.ledger, "humanize ledger");
+		expect(ledger.currentRound).toBe(16);
+		expect(expectNumber(ledger.archivedRoundCount, "humanize archived round count")).toBeGreaterThan(0);
+		expect(expectArray(ledger.rounds, "humanize ledger rounds").length).toBeLessThanOrEqual(6);
+		expect(result.scheduler.frontierNodeIds).toEqual(["implementRound"]);
+	});
+
 	it("treats explicit paths as paths even when the basename matches an installed flow name", async () => {
 		const dir = await createTempDir();
 		const flowPath = await writeFlowArtifact(dir, "humanize-rlcr");
@@ -460,6 +533,11 @@ function expectRecord(value: unknown, label: string): Record<string, unknown> {
 function expectArray(value: unknown, label: string): unknown[] {
 	if (Array.isArray(value)) return value;
 	throw new Error(`Expected ${label} to be an array`);
+}
+
+function expectNumber(value: unknown, label: string): number {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	throw new Error(`Expected ${label} to be a finite number`);
 }
 
 async function writeFlowArtifact(

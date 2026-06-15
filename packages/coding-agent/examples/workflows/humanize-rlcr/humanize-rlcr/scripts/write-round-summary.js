@@ -9,6 +9,10 @@ const elapsedMs = Math.max(0, Date.now() - startedAtMs);
 const longRunningRequested = operatorGate.longRunningRequested === true;
 const minimumSatisfied = !longRunningRequested || elapsedMs >= minimumRuntimeMs;
 const rounds = Array.isArray(ledger.rounds) ? ledger.rounds : [];
+const retainedRoundLimit = 6;
+const implementationSummaryLimit = 1200;
+const currentRound = Number.isFinite(ledger.currentRound) ? ledger.currentRound : rounds.length;
+const archivedRoundCount = Number.isFinite(ledger.archivedRoundCount) ? ledger.archivedRoundCount : 0;
 const parents = workflowContext.activation.parentActivationIds;
 const parentOutputs = workflowContext.completedActivations
 	.filter(activation => parents.includes(activation.id))
@@ -17,13 +21,14 @@ const parentOutputs = workflowContext.completedActivations
 const implementationOutput = parentOutputs.at(-1) ?? {};
 const implementationSummary =
 	typeof implementationOutput.summary === "string" ? implementationOutput.summary : "implementation round completed";
-const roundNumber = rounds.length + 1;
+const boundedImplementationSummary = implementationSummary.slice(0, implementationSummaryLimit);
+const roundNumber = currentRound + 1;
 const entry = {
 	round: roundNumber,
 	status: "ready-for-summary-review",
 	summaryActivationId: workflowContext.activation.id,
 	implementationActivationIds: parents,
-	implementationSummary: implementationSummary.slice(0, 2000),
+	implementationSummary: boundedImplementationSummary,
 	evidence: {
 		negativeTests: "required-before-complete",
 		verification: "required-before-complete",
@@ -31,17 +36,26 @@ const entry = {
 		longRunningMinimum: longRunningRequested ? (minimumSatisfied ? "satisfied" : "not-yet-satisfied") : "not-requested",
 	},
 };
+const nextRounds = [...rounds, entry];
+const retainedRounds = nextRounds.slice(-retainedRoundLimit);
+const archivedThisRound = Math.max(0, nextRounds.length - retainedRounds.length);
 const nextLedger = {
 	...ledger,
 	currentRound: roundNumber,
-	rounds: [...rounds, entry],
+	archivedRoundCount: archivedRoundCount + archivedThisRound,
+	retainedRoundLimit,
+	oldestRetainedRound: retainedRounds[0]?.round ?? roundNumber,
+	latestRetainedRound: retainedRounds.at(-1)?.round ?? roundNumber,
+	rounds: retainedRounds,
 };
 const summary = {
 	round: roundNumber,
 	status: "ready-for-summary-review",
-	implementationSummary: implementationSummary.slice(0, 2000),
+	implementationSummary: boundedImplementationSummary,
 	openIssueCount: Array.isArray(nextLedger.openIssues) ? nextLedger.openIssues.length : 0,
 	queuedIssueCount: Array.isArray(nextLedger.queuedIssues) ? nextLedger.queuedIssues.length : 0,
+	archivedRoundCount: nextLedger.archivedRoundCount,
+	retainedRoundCount: retainedRounds.length,
 	longRunningMinimumSatisfied: minimumSatisfied,
 	elapsedMs,
 };

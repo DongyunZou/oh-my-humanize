@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the built-in `humanize-rlcr` flow so long-running implementation loops
+  retain a bounded recent-round ledger instead of growing reviewer prompts until
+  they exceed the workflow prompt budget.
+
 ## [15.13.1] - 2026-06-15
 
 ### Added

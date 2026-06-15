@@ -11,6 +11,10 @@ try {
 const immutableGoal = taskText.trim().slice(0, 4000) || "Follow the operator-provided task brief and acceptance criteria.";
 const ledger = {
 	currentRound: 0,
+	archivedRoundCount: 0,
+	retainedRoundLimit: 6,
+	oldestRetainedRound: 0,
+	latestRetainedRound: 0,
 	rounds: [],
 	openIssues: [],
 	queuedIssues: [],
