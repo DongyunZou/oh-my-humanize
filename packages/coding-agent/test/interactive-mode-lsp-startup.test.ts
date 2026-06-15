@@ -128,12 +128,15 @@ describe("InteractiveMode LSP startup welcome banner", () => {
 		expect(before).toContain("Welcome back!");
 		expect(before).toContain("rust-analyzer");
 
+		const requestRenderSpy = vi.spyOn(mode.ui, "requestRender");
+		requestRenderSpy.mockClear();
 		mode.showWorkflowGraphMonitor(new Text("Workflow cockpit: live graph", 1, 0));
 
 		const after = Bun.stripANSI(mode.ui.render(120).join("\n"));
 		expect(after).toContain("Workflow cockpit: live graph");
 		expect(after).not.toContain("Welcome back!");
 		expect(after).not.toContain("rust-analyzer");
+		expect(requestRenderSpy).toHaveBeenCalledWith(true, { clearScrollback: true });
 	});
 
 	it("does not render LSP startup warnings when startup.quiet is enabled", () => {

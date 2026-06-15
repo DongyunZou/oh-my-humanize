@@ -3097,14 +3097,18 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	showWorkflowGraphMonitor(component: Component): void {
-		this.#collapseOnboardingForWorkflowMonitor();
+		const collapsedOnboarding = this.#collapseOnboardingForWorkflowMonitor();
 		disposeWorkflowMonitorComponent(this.#workflowMonitorComponent);
 		this.workflowMonitorContainer.clear();
 		this.#workflowMonitorComponent = component;
 		if (this.#workflowMonitorVisible) {
 			this.workflowMonitorContainer.addChild(component);
 		}
-		this.ui.requestRender();
+		if (collapsedOnboarding) {
+			this.ui.requestRender(true, { clearScrollback: true });
+		} else {
+			this.ui.requestRender();
+		}
 	}
 
 	setWorkflowGraphMonitorVisible(visible: boolean): void {
@@ -3117,14 +3121,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.requestRender();
 	}
 
-	#collapseOnboardingForWorkflowMonitor(): void {
+	#collapseOnboardingForWorkflowMonitor(): boolean {
 		if (!this.#onboardingContainer || this.#onboardingContainer.children.length === 0) {
 			this.#welcomeComponent = undefined;
-			return;
+			return false;
 		}
 		this.#onboardingContainer.dispose();
 		this.#onboardingContainer.clear();
 		this.#welcomeComponent = undefined;
+		return true;
 	}
 
 	#mountChatChild(item: Component): void {

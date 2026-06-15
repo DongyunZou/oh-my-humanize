@@ -6,6 +6,10 @@
 
 - Changed the workflow graph TUI dashboard to use a progress summary, a wide-terminal inspector pane, compact loop/branch flow-map hints, and anchored graph layouts so long-running workflow runs are easier to monitor and intervene in.
 
+### Fixed
+
+- Fixed workflow monitor activation in the TUI so the welcome/onboarding panel is removed from the current viewport when a workflow dashboard becomes active.
+
 ## [16.0.0] - 2026-06-15
 
 ### Breaking Changes
