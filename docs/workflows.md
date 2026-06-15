@@ -247,6 +247,11 @@ or as `<dir>/<name>/<name>.omhflow` plus `<dir>/<name>/<name>/`.
   shell scripts receive the same JSON as `OMP_WORKFLOW_CONTEXT`. Use it for
   durable flow state such as round ledgers, issue queues, and checkpointable
   progress summaries.
+- Shell script nodes can read frozen workflow resources from
+  `OMP_WORKFLOW_RESOURCE_DIR`. Declare every prompt, script, fixture, seed file,
+  or other data file under `resources`; production runs materialize those frozen
+  snapshots into that directory so scripts do not depend on the mutable source
+  artifact path.
 - Freeze a flow before treating it as production-safe:
 
 ```sh
