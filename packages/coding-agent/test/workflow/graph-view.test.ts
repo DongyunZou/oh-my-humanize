@@ -1744,7 +1744,7 @@ describe("workflow graph view rendering", () => {
 			status: "running",
 			focusAgentId: "build-3",
 			generation: 3,
-			activity: "implementing the next review fix",
+			activity: "tightening dashboard spacing after visual review",
 			stats: "6m12s · 8 tools",
 			recentOutput: ["patched parser", "rerunning tests"],
 			controls: ["Watch: Agent Hub build-3", "Interrupt: /workflow interrupt attempt-1 build-3 --deadline-ms 30000"],
@@ -1758,7 +1758,7 @@ describe("workflow graph view rendering", () => {
 				role: "Builder",
 				status: "running",
 				generation: 3,
-				activity: "implementing the next review fix",
+				activity: "tightening dashboard spacing after visual review",
 				stats: "6m12s · 8 tools",
 				recentOutput: ["patched parser", "rerunning tests"],
 			},
@@ -1784,13 +1784,18 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain("On-flight");
 		expect(text).toContain("Recent output");
 		expect(text).toContain("Controls");
-		expect(text).toContain("implementing the next review fix");
+		expect(text).toContain("tightening dashboard spacing after visual review");
 		expect(text).not.toContain("watch: Agent Hub build-3");
 		expect(text).not.toContain("interrupt: selected live agent");
 		expect(text).not.toContain(" focused node ");
 		expect(text).not.toContain(" on-flight ");
 		expect(text).not.toContain("--deadline-ms");
 		expect(lines.map(line => visibleWidth(stripAnsi(line))).every(width => width <= 180)).toBeTrue();
+
+		const ultrawideText = stripAnsi(component.render(240).join("\n"));
+		expect(ultrawideText).toContain(
+			"Builder: Build live · round 3 · 6m12s · tightening dashboard spacing after visual review",
+		);
 	});
 
 	it("renders active workflow agents as switchable transcript monitor tabs before on-flight details", async () => {

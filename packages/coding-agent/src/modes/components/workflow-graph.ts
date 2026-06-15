@@ -114,7 +114,7 @@ const WORKFLOW_GRAPH_MIN_HEIGHT_BUDGET = 6;
 const WORKFLOW_GRAPH_WORKBENCH_MIN_WIDTH = 118;
 const WORKFLOW_GRAPH_WORKBENCH_MIN_PANE_WIDTH = 38;
 const WORKFLOW_GRAPH_WORKBENCH_MAX_PANE_WIDTH = 72;
-const WORKFLOW_GRAPH_WORKBENCH_ULTRAWIDE_MAX_PANE_WIDTH = 96;
+const WORKFLOW_GRAPH_WORKBENCH_ULTRAWIDE_MAX_PANE_WIDTH = 112;
 const WORKFLOW_GRAPH_PANE_GAP_WIDTH = 3;
 const WORKFLOW_GRAPH_FRAME_CHROME_WIDTH = 4;
 const WORKFLOW_GRAPH_FLOW_MAP_HINT_MIN_WIDTH = 93;
@@ -252,7 +252,7 @@ function workflowGraphDashboardLayout(
 	if (density === "compact" && (heightBudget ?? 0) <= 20) return { kind: "stacked" };
 	const maximumWorkbenchWidth =
 		width >= 220 ? WORKFLOW_GRAPH_WORKBENCH_ULTRAWIDE_MAX_PANE_WIDTH : WORKFLOW_GRAPH_WORKBENCH_MAX_PANE_WIDTH;
-	const preferredWorkbenchRatio = width >= 220 ? 0.32 : 0.34;
+	const preferredWorkbenchRatio = width >= 220 ? 0.45 : 0.34;
 	const workbenchWidth = Math.max(
 		WORKFLOW_GRAPH_WORKBENCH_MIN_PANE_WIDTH,
 		Math.min(maximumWorkbenchWidth, Math.floor(width * preferredWorkbenchRatio)),
