@@ -1133,7 +1133,7 @@ export function formatWorkflowConditionLabel(condition: string): string {
 	try {
 		return formatWorkflowConditionAst(parseWorkflowCondition(trimmed).ast);
 	} catch {
-		return trimmed;
+		return formatWorkflowConditionFallback(trimmed, "default");
 	}
 }
 
@@ -1142,8 +1142,17 @@ function formatWorkflowGraphLoopbackConditionLabel(condition: string): string {
 	try {
 		return formatWorkflowConditionAst(parseWorkflowCondition(trimmed).ast, "loopback");
 	} catch {
-		return formatWorkflowConditionLabel(trimmed);
+		return formatWorkflowConditionFallback(trimmed, "loopback");
 	}
+}
+
+function formatWorkflowConditionFallback(condition: string, mode: WorkflowConditionLabelMode): string {
+	const barePath = condition.match(/^(state|outputs)(?:\.[A-Za-z0-9_-]+)+$/u);
+	if (barePath !== null) {
+		const subject = formatWorkflowConditionSubjectPath(condition.split("."), mode);
+		return mode === "loopback" ? subject : `${subject} is present`;
+	}
+	return condition;
 }
 
 function formatWorkflowConditionAst(ast: WorkflowConditionAst, mode: WorkflowConditionLabelMode = "default"): string {

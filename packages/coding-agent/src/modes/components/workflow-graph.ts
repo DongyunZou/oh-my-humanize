@@ -113,6 +113,7 @@ const WORKFLOW_GRAPH_MIN_HEIGHT_BUDGET = 6;
 const WORKFLOW_GRAPH_WORKBENCH_MIN_WIDTH = 118;
 const WORKFLOW_GRAPH_WORKBENCH_MIN_PANE_WIDTH = 38;
 const WORKFLOW_GRAPH_WORKBENCH_MAX_PANE_WIDTH = 72;
+const WORKFLOW_GRAPH_WORKBENCH_ULTRAWIDE_MAX_PANE_WIDTH = 112;
 const WORKFLOW_GRAPH_PANE_GAP_WIDTH = 3;
 const WORKFLOW_GRAPH_FRAME_CHROME_WIDTH = 4;
 const WORKFLOW_GRAPH_FLOW_MAP_HINT_MIN_WIDTH = 93;
@@ -192,9 +193,12 @@ function workflowGraphDashboardLayout(
 ): WorkflowGraphDashboardLayout {
 	if (width < WORKFLOW_GRAPH_WORKBENCH_MIN_WIDTH) return { kind: "stacked" };
 	if (density === "compact" && (heightBudget ?? 0) <= 20) return { kind: "stacked" };
+	const maximumWorkbenchWidth =
+		width >= 220 ? WORKFLOW_GRAPH_WORKBENCH_ULTRAWIDE_MAX_PANE_WIDTH : WORKFLOW_GRAPH_WORKBENCH_MAX_PANE_WIDTH;
+	const preferredWorkbenchRatio = width >= 220 ? 0.38 : 0.34;
 	const workbenchWidth = Math.max(
 		WORKFLOW_GRAPH_WORKBENCH_MIN_PANE_WIDTH,
-		Math.min(WORKFLOW_GRAPH_WORKBENCH_MAX_PANE_WIDTH, Math.floor(width * 0.34)),
+		Math.min(maximumWorkbenchWidth, Math.floor(width * preferredWorkbenchRatio)),
 	);
 	const graphWidth = Math.max(48, width - workbenchWidth - WORKFLOW_GRAPH_PANE_GAP_WIDTH);
 	return { kind: "wide", graphWidth, workbenchWidth };
@@ -208,26 +212,30 @@ function workflowGraphDashboardWideBodyLines(
 	profile: WorkflowGraphCompactProfile,
 ): string[] {
 	const flowLensProfile = workflowGraphWideFlowLensProfile(profile, density, heightBudget);
+	const workbenchProfile = workflowGraphWideWorkbenchProfile(profile, density, heightBudget);
+	const graphContentLines = workflowGraphFlowLensLines(
+		view,
+		layout.graphWidth - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH,
+		density,
+		heightBudget,
+		flowLensProfile,
+	);
+	const workbenchContentLines = workflowGraphLiveWorkbenchLines(
+		view,
+		layout.workbenchWidth - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH,
+		density,
+		workbenchProfile,
+	);
+	const panelContentRows = Math.max(graphContentLines.length, workbenchContentLines.length);
 	const graphLines = renderWorkflowGraphDashboardPanel(
-		"Flow Lens",
+		"Flow Lens · Canvas",
 		layout.graphWidth,
-		workflowGraphFlowLensLines(
-			view,
-			layout.graphWidth - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH,
-			density,
-			heightBudget,
-			flowLensProfile,
-		),
+		padWorkflowGraphPanelContentLines(graphContentLines, panelContentRows),
 	);
 	const workbenchLines = renderWorkflowGraphDashboardPanel(
-		"Live Workbench",
+		"Live Workbench · Operator Deck",
 		layout.workbenchWidth,
-		workflowGraphLiveWorkbenchLines(
-			view,
-			layout.workbenchWidth - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH,
-			density,
-			profile,
-		),
+		padWorkflowGraphPanelContentLines(workbenchContentLines, panelContentRows),
 		workflowGraphLiveWorkbenchAccent(view),
 	);
 	const rowCount = Math.max(graphLines.length, workbenchLines.length);
@@ -244,6 +252,11 @@ function workflowGraphDashboardWideBodyLines(
 	return rows;
 }
 
+function padWorkflowGraphPanelContentLines(lines: readonly string[], targetRows: number): string[] {
+	if (lines.length >= targetRows) return [...lines];
+	return [...lines, ...Array.from({ length: targetRows - lines.length }, () => "")];
+}
+
 function workflowGraphWideFlowLensProfile(
 	profile: WorkflowGraphCompactProfile,
 	density: WorkflowGraphDensity,
@@ -253,7 +266,25 @@ function workflowGraphWideFlowLensProfile(
 	if (heightBudget < 32) return profile;
 	return {
 		...profile,
-		diagramChromeRows: Math.min(profile.diagramChromeRows, 14),
+		diagramChromeRows:
+			heightBudget >= 42 ? Math.max(profile.diagramChromeRows, 16) : Math.min(profile.diagramChromeRows, 14),
+	};
+}
+
+function workflowGraphWideWorkbenchProfile(
+	profile: WorkflowGraphCompactProfile,
+	density: WorkflowGraphDensity,
+	heightBudget: number | undefined,
+): WorkflowGraphCompactProfile {
+	if (density === "full" || heightBudget === undefined) return profile;
+	if (heightBudget < 32) return profile;
+	const roomy = heightBudget >= 44;
+	return {
+		...profile,
+		focusLines: Math.max(profile.focusLines, roomy ? 5 : 3),
+		onFlightLines: Math.max(profile.onFlightLines, roomy ? 5 : 3),
+		recentActivityLines: Math.max(profile.recentActivityLines, roomy ? 6 : 4),
+		controlLines: Math.max(profile.controlLines, roomy ? 5 : 4),
 	};
 }
 
@@ -266,20 +297,20 @@ function workflowGraphDashboardStackedBodyLines(
 ): string[] {
 	if (density === "compact" && (heightBudget ?? 0) <= 14) {
 		return renderWorkflowGraphDashboardPanel(
-			"Flow Lens",
+			"Flow Lens · Canvas",
 			width,
 			workflowGraphFlowLensLines(view, width - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH, density, heightBudget, profile),
 		);
 	}
 	return [
 		...renderWorkflowGraphDashboardPanel(
-			"Flow Lens",
+			"Flow Lens · Canvas",
 			width,
 			workflowGraphFlowLensLines(view, width - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH, density, heightBudget, profile),
 		),
 		"",
 		...renderWorkflowGraphDashboardPanel(
-			"Live Workbench",
+			"Live Workbench · Operator Deck",
 			width,
 			workflowGraphLiveWorkbenchLines(view, width - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH, density, profile),
 			workflowGraphLiveWorkbenchAccent(view),
@@ -299,10 +330,14 @@ function workflowGraphFlowLensLines(
 	const diagramLines = workflowGraphDiagramLines(view, width, density, heightBudget, profile.diagramChromeRows);
 	const lines: string[] = [];
 	if (flowMapLines.length > 0) {
-		lines.push(workflowGraphDashboardSubsectionLabel("Path"));
+		lines.push(workflowGraphDashboardSubsectionLabel("Path map"));
 		lines.push(...colorWorkflowDiagram(flowMapLines));
 	}
-	lines.push(workflowGraphDashboardSubsectionLabel("diagram"));
+	const legend = workflowGraphLegendLine(width);
+	if (legend !== undefined && (density === "full" || (width >= 90 && (heightBudget ?? 0) >= 42))) {
+		lines.push(colorWorkflowStatusLine(legend));
+	}
+	lines.push(workflowGraphDashboardSubsectionLabel("diagram · focus viewport"));
 	lines.push(...colorWorkflowDiagram(diagramLines));
 	return lines.map(line => truncateToWidth(line, width));
 }
@@ -385,9 +420,12 @@ function workflowGraphWorkbenchFocusLines(
 ): string[] {
 	const lines = workflowGraphFocusLines(view, width, "compact");
 	const sourceLines = lines.length > 0 ? lines : workflowGraphOnFlightLines(view, width, "compact").slice(0, 1);
-	return sourceLines.map(line => {
+	const status = view.focus?.status ?? view.activeAgents?.[0]?.status ?? "pending";
+	return sourceLines.map((line, index) => {
 		const compact = compactWorkflowGraphFocusControlLine(compactWorkflowGraphStatusLine(line, density));
-		return truncateToWidth(replaceTabs(compact), Math.max(20, width));
+		const prefix =
+			index === 0 ? `${theme.fg(workflowGraphStatusColor(status), workflowGraphStatusGlyph(status))} ` : "  ";
+		return truncateToWidth(replaceTabs(`${prefix}${compact}`), Math.max(20, width));
 	});
 }
 
@@ -422,7 +460,7 @@ function workflowGraphStatusFromRunLine(line: string): WorkflowGraphNodeStatus {
 }
 
 function workflowGraphDashboardSubsectionLabel(label: string): string {
-	return `${theme.fg("borderMuted", "╭─")} ${theme.fg("muted", label)}`;
+	return `${theme.fg("borderMuted", "╭─")} ${theme.fg("muted", theme.bold(label))}`;
 }
 
 function renderWorkflowGraphDashboardPanel(
@@ -606,7 +644,7 @@ function workflowGraphCompactProfile(
 			onFlightLines: 1,
 			recentActivityLines: 0,
 			controlLines: 2,
-			diagramChromeRows: 27,
+			diagramChromeRows: 24,
 			pathLine: false,
 		};
 	}
@@ -755,13 +793,36 @@ function limitWorkflowGraphOverviewLines(lines: string[], maxLines: number, path
 	const runLine = lines[0];
 	const flowLine = lines.find(line => line.startsWith("Flow:"));
 	const focusLine = lines.find(line => line.startsWith("Focus:"));
-	const priorityLines = [runLine, flowLine, focusLine, pathLine].filter((line): line is string => line !== undefined);
+	const progressLine = lines.find(line => line.startsWith("Progress:"));
+	const operationsLine = workflowGraphOperationsLine(lines);
+	const priorityLines = [runLine, flowLine, focusLine, progressLine, operationsLine, pathLine].filter(
+		(line): line is string => line !== undefined,
+	);
 	if (maxLines <= priorityLines.length) return priorityLines.slice(0, maxLines);
 	if (maxLines <= 3) return [...priorityLines, `+${lines.length - priorityLines.length} overview hidden`];
 	const remaining = sourceLines.filter(line => !priorityLines.includes(line));
 	const visibleRemaining = remaining.slice(0, maxLines - priorityLines.length - 1);
 	const hidden = sourceLines.length - priorityLines.length - visibleRemaining.length;
 	return [...priorityLines, ...visibleRemaining, `+${hidden} overview hidden`];
+}
+
+function workflowGraphOperationsLine(lines: readonly string[]): string | undefined {
+	const onFlight = workflowGraphOverviewValue(lines, "On-flight:");
+	const changes = workflowGraphOverviewValue(lines, "Changes:");
+	if (onFlight === undefined && changes === undefined) return undefined;
+	const parts = [
+		onFlight === undefined ? undefined : `on-flight ${onFlight}`,
+		changes === undefined ? undefined : `changes ${changes}`,
+	].filter((part): part is string => part !== undefined);
+	if (parts.length === 0) return undefined;
+	return `Ops: ${parts.join(" · ")}`;
+}
+
+function workflowGraphOverviewValue(lines: readonly string[], prefix: string): string | undefined {
+	const line = lines.find(candidate => candidate.startsWith(prefix));
+	if (line === undefined) return undefined;
+	const value = line.slice(prefix.length).trim();
+	return value.length === 0 ? undefined : value;
 }
 
 function workflowGraphCompactPathLine(view: WorkflowGraphView, width: number): string | undefined {
@@ -857,6 +918,12 @@ function workflowGraphFlowMapHintLine(label: string, hints: readonly string[], w
 	const hidden = hints.length - visibleHints.length;
 	const suffix = hidden > 0 ? `  +${hidden}` : "";
 	return `${label}: ${visibleHints.join("  ·  ")}${suffix}`;
+}
+
+function workflowGraphLegendLine(width: number): string | undefined {
+	if (width < 70) return undefined;
+	const legend = "Legend: ● live · ◇ ready · ✓ done · ! failed · × aborted · ↺ loop · ┬▶ branch";
+	return truncateToWidth(legend, width);
 }
 
 function workflowGraphIsBackEdge(edge: { from: string; to: string }, order: ReadonlyMap<string, number>): boolean {

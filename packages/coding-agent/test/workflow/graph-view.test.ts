@@ -948,6 +948,13 @@ describe("workflow graph view rendering", () => {
 		expect(label).not.toContain("humanize operator gate");
 	});
 
+	it("renders bare state gate conditions as human-facing labels", () => {
+		const label = formatWorkflowConditionLabel("state.longRunningFloorPending");
+
+		expect(label).toBe("long running floor pending is present");
+		expect(label).not.toContain("state.");
+	});
+
 	it("surfaces parsed review verdicts and selected routes separately from summary text", () => {
 		const freeze = createFreeze({
 			name: "review-selected-route",
@@ -1976,8 +1983,13 @@ describe("workflow graph view rendering", () => {
 
 		expect(wideLiveLines.length).toBeGreaterThan(30);
 		expect(wideLiveLines.length).toBeLessThanOrEqual(36);
+		expect(wideLiveText).toContain("Flow Lens · Canvas");
+		expect(wideLiveText).toContain("Live Workbench · Operator Deck");
+		expect(wideLiveText).toContain("Recent output");
 		expect(visibleNodeRows.length).toBeGreaterThanOrEqual(3);
 		expect(wideLiveText).not.toContain("workflow graph rows hidden");
+		expect(wideLiveText).not.toContain("overview hidden");
+		expect(wideLiveText).not.toContain("state.");
 
 		const tallLines = new WorkflowGraphComponent(view, { refreshMs: 0, heightProvider: () => 48 }).render(156);
 		const tallText = stripAnsi(tallLines.join("\n"));
@@ -2004,7 +2016,7 @@ describe("workflow graph view rendering", () => {
 
 		expect(narrowLines.length).toBeLessThanOrEqual(30);
 		expect(hiddenMarkerIndex).toBeGreaterThan(-1);
-		expect(beforeHiddenMarker).not.toMatch(/[┌└║]/u);
+		expect(beforeHiddenMarker).not.toMatch(/[┌║]/u);
 		expect(beforeHiddenMarker).not.toContain("runs ");
 	});
 

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Changed the workflow dashboard into a wider operator flight deck with equal-height Flow Lens/Operator Deck panels, richer live-agent context, human-facing gate labels, and responsive wide-screen workbench sizing.
 - Changed the workflow dashboard wide layout to spend more of the available terminal height on focused graph context, so long loop workflows show neighboring nodes instead of collapsing to a single-node lens.
 - Changed the workflow dashboard to render Flow Lens and Live Workbench as responsive TUI panels, tightened default node boxes, and added loopback direction arrows so long-running workflow structure is easier to read at a glance.
 - Changed the workflow graph TUI dashboard to use a progress summary, a wide-terminal inspector pane, compact loop/branch flow-map hints, and anchored graph layouts so long-running workflow runs are easier to monitor and intervene in.
