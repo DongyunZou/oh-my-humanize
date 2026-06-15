@@ -8,7 +8,7 @@
   as activation data, allowing the built-in `humanize-rlcr` summary reviewer to
   see concrete verification and negative-test evidence instead of placeholder
   fields.
-- Fixed the built-in `humanize-rlcr` round ledger so common snake_case
+- Fixed the built-in `humanize-rlcr` round ledger so semantically named
   implementation yield fields for changed files, verification commands,
   negative/regression evidence, and acceptance evidence are normalized into
   reviewer evidence instead of falling back to placeholder values, with

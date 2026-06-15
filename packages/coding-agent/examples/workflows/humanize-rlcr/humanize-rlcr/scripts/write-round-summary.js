@@ -37,16 +37,11 @@ const boundedEvidenceValue = (value, fallback) => {
 		preview: serialized.slice(0, evidenceValueLimit),
 	};
 };
-const firstEvidenceValue = keys => {
-	for (const key of keys) {
-		if (implementationData[key] !== undefined) return implementationData[key];
-	}
-	return undefined;
-};
-const evidenceValues = keys => {
+const normalizedEvidenceKey = key => key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+const evidenceValues = acceptsKey => {
 	const values = [];
-	for (const key of keys) {
-		const value = implementationData[key];
+	for (const [key, value] of Object.entries(implementationData)) {
+		if (!acceptsKey(normalizedEvidenceKey(key))) continue;
 		if (value === undefined) continue;
 		if (Array.isArray(value)) {
 			values.push(...value);
@@ -57,23 +52,10 @@ const evidenceValues = keys => {
 	if (values.length === 0) return undefined;
 	return values.length === 1 ? values[0] : values;
 };
-const acceptanceEvidence = evidenceValues([
-	"acceptanceCriteriaEvidence",
-	"acceptance_criteria_evidence",
-	"acceptance_evidence",
-	"acceptanceEvidence",
-]);
-const verificationEvidence =
-	evidenceValues(["verification", "verification_commands", "verificationCommands", "verificationEvidence"]) ??
-	acceptanceEvidence;
-const negativeEvidence = evidenceValues([
-	"negativeAndRegressionRiskScenarios",
-	"negativeAndRegressionScenarios",
-	"negative_tests_or_regression_risks",
-	"negative_test_evidence",
-	"regression_risk_scenarios",
-	"negativeTests",
-]);
+const changedFiles = evidenceValues(key => key === "changedfiles");
+const acceptanceEvidence = evidenceValues(key => key.includes("acceptance"));
+const verificationEvidence = evidenceValues(key => key.includes("verification")) ?? acceptanceEvidence;
+const negativeEvidence = evidenceValues(key => key.includes("negative") || key.includes("regression"));
 const roundNumber = currentRound + 1;
 const entry = {
 	round: roundNumber,
@@ -83,7 +65,7 @@ const entry = {
 	implementationSummary: boundedImplementationSummary,
 	evidence: {
 		status: boundedEvidenceValue(implementationData.status, "not-reported"),
-		changedFiles: boundedEvidenceValue(firstEvidenceValue(["changedFiles", "changed_files"]), "not-reported"),
+		changedFiles: boundedEvidenceValue(changedFiles, "not-reported"),
 		negativeTests: boundedEvidenceValue(negativeEvidence, "required-before-complete"),
 		verification: boundedEvidenceValue(verificationEvidence, "required-before-complete"),
 		acceptanceDelta: boundedEvidenceValue(acceptanceEvidence, "reviewer-must-check"),

@@ -245,14 +245,14 @@ describe("workflow artifact registry", () => {
 								summary: "implemented evaluator and tests",
 								changedFiles: ["src/evaluator.ts", "test/evaluator.test.ts"],
 								acceptanceEvidence: ["Post-fix focused test passed: bun test"],
-								negativeAndRegressionScenarios: ["division by zero throws", "invalid parser state is reported"],
+								negativeRegressionScenarios: ["division by zero throws", "invalid parser state is reported"],
 							}),
 							data: {
 								status: "implementation_verified_not_long_running_final",
 								summary: "implemented evaluator and tests",
 								changedFiles: ["src/evaluator.ts", "test/evaluator.test.ts"],
 								acceptanceEvidence: ["Post-fix focused test passed: bun test"],
-								negativeAndRegressionScenarios: ["division by zero throws", "invalid parser state is reported"],
+								negativeRegressionScenarios: ["division by zero throws", "invalid parser state is reported"],
 							},
 						};
 					}
