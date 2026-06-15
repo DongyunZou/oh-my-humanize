@@ -14,6 +14,7 @@
 ### Fixed
 
 - Fixed workflow dashboard monitor targeting so stale focused-agent ids without a matching active workflow agent no longer advertise Agent Hub, hub, or steer controls.
+- Fixed workflow dashboard on-flight wording so running program or human work is labeled as live work instead of live agents when no Agent Hub target exists.
 - Fixed bundled practical workflow artifacts that still declared the non-canonical `shell` tool capability, so runtime binding diagnostics use the canonical `bash` capability that the workflow host can resolve.
 - Fixed workflow dashboard height clipping so the hidden-rows marker preserves the outer TUI frame and renders as a dashboard divider instead of looking like broken nested panel content.
 - Fixed workflow monitor activation in the TUI so the welcome/onboarding panel is removed from the current viewport when a workflow dashboard becomes active.

@@ -1648,6 +1648,28 @@ describe("workflow graph view rendering", () => {
 		expect(text).not.toContain("↵ steer");
 	});
 
+	it("labels running non-agent work without implying an Agent Hub target", async () => {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("dark theme fixture is required");
+		setThemeInstance(theme);
+		const view = singleNodeView("running");
+		view.focus = {
+			nodeId: "build",
+			label: "Build",
+			role: "Program",
+			status: "running",
+			summary: "waiting for long-running floor",
+		};
+
+		const text = stripAnsi(new WorkflowGraphComponent(view, { refreshMs: 0 }).render(120).join("\n"));
+
+		expect(text).toContain("On-flight: live work");
+		expect(text).not.toContain("On-flight: live agents");
+		expect(text).toContain("Build running");
+		expect(text).not.toContain("◆ hub");
+		expect(text).not.toContain("↵ steer");
+	});
+
 	it("renders the live TUI graph as a resident workflow dashboard before the diagram", async () => {
 		const theme = await getThemeByName("dark");
 		if (!theme) throw new Error("dark theme fixture is required");

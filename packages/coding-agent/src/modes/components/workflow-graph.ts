@@ -487,7 +487,9 @@ function workflowGraphLiveWorkbenchLines(
 	if (maxControls > 0)
 		lines.push(...workflowGraphWorkbenchGroup("Controls: operator actions", controlLines, width, maxControls));
 	if (maxOnFlight > 0)
-		lines.push(...workflowGraphWorkbenchGroup("On-flight: live agents", onFlightLines, width, maxOnFlight));
+		lines.push(
+			...workflowGraphWorkbenchGroup(workflowGraphOnFlightGroupLabel(view), onFlightLines, width, maxOnFlight),
+		);
 	if (recentLines.length > 0 && maxRecent > 0) {
 		lines.push(...workflowGraphWorkbenchGroup("Recent output: tail", recentLines, width, maxRecent));
 	}
@@ -509,6 +511,13 @@ function workflowGraphLiveWorkbenchLines(
 		);
 	}
 	return lines.map(line => truncateToWidth(line, width));
+}
+
+function workflowGraphOnFlightGroupLabel(view: WorkflowGraphView): string {
+	const agents = view.activeAgents ?? [];
+	const agentNodeIds = new Set(agents.map(agent => agent.nodeId));
+	const hasNonAgentLiveWork = view.nodes.some(node => node.status === "running" && !agentNodeIds.has(node.id));
+	return hasNonAgentLiveWork || agents.length === 0 ? "On-flight: live work" : "On-flight: live agents";
 }
 
 function workflowGraphOperatorRailLines(
