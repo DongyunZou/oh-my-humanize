@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Fixed workflow graph loop labels so constrained TUI diagrams prioritize the
+  loop condition and avoid repeating the source node id before the operator can
+  see the branch decision value.
 - Fixed workflow graph condition labels so compound long-running loop gates such
   as reviewer verdict plus minimum-runtime checks render as human-facing text
   instead of leaking raw workflow DSL into the TUI diagram.

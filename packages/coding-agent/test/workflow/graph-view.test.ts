@@ -115,7 +115,7 @@ describe("workflow graph view rendering", () => {
 
 		const diagram = renderWorkflowGraphDiagram(view, { width: 80 });
 		const rendered = diagram.join("\n");
-		const loopCloseIndex = diagram.findIndex(line => line.includes("review back to build"));
+		const loopCloseIndex = diagram.findIndex(line => line.includes("back to build"));
 		const loopColumn = visibleColumnsOf(diagram[loopCloseIndex] ?? "", "╯")[0];
 		const loopLineIndex = diagram.findIndex(
 			(line, index) => index < loopCloseIndex && charAtVisibleColumn(line, loopColumn ?? -1) === "╮",
@@ -127,7 +127,8 @@ describe("workflow graph view rendering", () => {
 		for (let index = loopLineIndex + 1; index < loopCloseIndex; index += 1) {
 			expect(charAtVisibleColumn(diagram[index]!, loopColumn!)).toBe("│");
 		}
-		expect(rendered).toContain("review back to build when verdict is");
+		expect(rendered).toContain("when verdict is retry; back to build");
+		expect(rendered).not.toContain("review back to build");
 		expect(rendered).not.toContain("loopbacks");
 	});
 
@@ -169,7 +170,39 @@ describe("workflow graph view rendering", () => {
 		expect(sourceRailColumn! - sourceJointColumn!).toBeLessThanOrEqual(8);
 		expect(targetLine).toContain("├──");
 		expect(sourceLine).toContain("├──");
-		expect(sourceLine).toContain("review back to build when verdict is");
+		expect(sourceLine).toContain("when verdict is retry; back to build");
+		expect(sourceLine).not.toContain("review back to build");
+	});
+
+	it("prioritizes loop conditions over repeated source ids in narrow labels", () => {
+		const view = createView({
+			name: "long-loop-label",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "implementRound", type: "agent" },
+				{ id: "writeRoundSummary", type: "script" },
+				{ id: "codexSummaryReview", type: "review" },
+			],
+			edges: [
+				{ from: "implementRound", to: "writeRoundSummary" },
+				{ from: "writeRoundSummary", to: "codexSummaryReview" },
+				{
+					from: "codexSummaryReview",
+					to: "implementRound",
+					condition: { source: 'outputs.codexSummaryReview.verdict != "COMPLETE"' },
+				},
+			],
+		});
+
+		const diagram = renderWorkflowGraphDiagram(view, { width: 96 });
+		const loopLabelLine = diagram.find(line => line.includes("when codex summary review"));
+
+		expect(loopLabelLine).toBeDefined();
+		expect(loopLabelLine).toContain("codex summary review");
+		expect(loopLabelLine).toContain("not COMPLETE");
+		expect(loopLabelLine).not.toContain("codexSummaryReview back");
+		expect(visibleWidth(loopLabelLine!)).toBeLessThanOrEqual(96);
 	});
 
 	it("keeps loop diagrams inside the requested terminal width at common sizes", () => {
@@ -258,8 +291,8 @@ describe("workflow graph view rendering", () => {
 			...visibleColumnsOf(implementRunsLine ?? "", "┬"),
 			...visibleColumnsOf(implementRunsLine ?? "", "╮"),
 		];
-		const summaryLabelLine = diagram.find(line => line.includes("summaryReview back to implement"));
-		const codeLabelLine = diagram.find(line => line.includes("codeReview back to implement"));
+		const summaryLabelLine = diagram.find(line => line.includes("when summary verdict is CONTINUE"));
+		const codeLabelLine = diagram.find(line => line.includes("when code verdict is CONTINUE"));
 
 		expect(loopColumns).toHaveLength(2);
 		expect(charAtVisibleColumn(summaryLabelLine ?? "", loopColumns[0]!)).toBe("╯");
@@ -827,7 +860,8 @@ describe("workflow graph view rendering", () => {
 		const diagram = renderWorkflowGraphDiagram(view, { width: 80 }).join("\n");
 
 		expect(diagram).toContain("when verdict is finish");
-		expect(diagram).toContain("review back to build when verdict is");
+		expect(diagram).toContain("when verdict is retry; back to build");
+		expect(diagram).not.toContain("review back to build");
 		expect(diagram).not.toContain('state.verdict == "finish"');
 		expect(diagram).not.toContain('state.verdict == "retry"');
 		expect(diagram).not.toContain("edge review to ship");
@@ -885,11 +919,15 @@ describe("workflow graph view rendering", () => {
 			],
 		});
 
-		const diagram = renderWorkflowGraphDiagram(view, { width: 96 }).join("\n");
+		const diagram = renderWorkflowGraphDiagram(view, { width: 96 });
+		const rendered = diagram.join("\n");
+		const loopLabelLine = diagram.find(line => line.includes("╯"));
 
-		expect(diagram).toContain("reviewInvestigation back to writeInves");
-		expect(diagram).toContain("when review investigation verdict is not CONTINUE");
-		expect(diagram).not.toContain("outputs.reviewInvestigation.verdict");
+		expect(loopLabelLine).toBeDefined();
+		expect(loopLabelLine).toContain("when review investigation is");
+		expect(loopLabelLine).not.toContain("reviewInvestigation back");
+		expect(rendered).toContain("when review investigation verdict is not CONTINUE");
+		expect(rendered).not.toContain("outputs.reviewInvestigation.verdict");
 	});
 
 	it("renders compound long-running loop conditions as human-facing labels", () => {

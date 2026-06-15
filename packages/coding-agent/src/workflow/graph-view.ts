@@ -608,7 +608,7 @@ function renderWorkflowGraphLoopbackRails(
 			railColumn: column,
 		});
 		const labels = labelsByLine.get(sourceLine) ?? [];
-		labels.push(`${edge.from} back to ${formatEdgeTarget(edge)}`);
+		labels.push(formatWorkflowGraphLoopbackLabel(edge));
 		labelsByLine.set(sourceLine, labels);
 	}
 	for (const [lineIndex, labels] of labelsByLine) {
@@ -635,6 +635,11 @@ function formatWorkflowGraphLoopbackLabels(labels: readonly string[], labelColum
 	const suffixWidth = Math.max(0, Math.floor(width) - labelColumn);
 	if (suffixWidth <= 0) return "";
 	return truncateToWidth(labels.join("; "), suffixWidth, Ellipsis.Ascii);
+}
+
+function formatWorkflowGraphLoopbackLabel(edge: WorkflowGraphEdgeView): string {
+	if (edge.condition === undefined) return `back to ${edge.to}`;
+	return `when ${formatWorkflowGraphLoopbackConditionLabel(edge.condition)}; back to ${edge.to}`;
 }
 
 interface WorkflowGraphLoopbackPath {
@@ -879,6 +884,7 @@ interface ConnectorCell {
 
 type ConnectorDirection = "up" | "down" | "left" | "right";
 type ConnectorGrid = ConnectorCell[][];
+type WorkflowConditionLabelMode = "default" | "loopback";
 
 function createConnectorGrid(rows: number, width: number): ConnectorGrid {
 	return Array.from({ length: rows }, () =>
@@ -1089,50 +1095,68 @@ export function formatWorkflowConditionLabel(condition: string): string {
 	}
 }
 
-function formatWorkflowConditionAst(ast: WorkflowConditionAst): string {
+function formatWorkflowGraphLoopbackConditionLabel(condition: string): string {
+	const trimmed = condition.trim();
+	try {
+		return formatWorkflowConditionAst(parseWorkflowCondition(trimmed).ast, "loopback");
+	} catch {
+		return formatWorkflowConditionLabel(trimmed);
+	}
+}
+
+function formatWorkflowConditionAst(ast: WorkflowConditionAst, mode: WorkflowConditionLabelMode = "default"): string {
 	switch (ast.kind) {
 		case "comparison":
-			return formatWorkflowComparisonCondition(ast);
+			return formatWorkflowComparisonCondition(ast, mode);
 		case "exists":
 			return `${formatWorkflowConditionSubjectPath(ast.path)} is present`;
 		case "and":
 		case "or":
-			return `${formatWorkflowConditionAst(ast.left)} ${ast.kind} ${formatWorkflowConditionAst(ast.right)}`;
+			return `${formatWorkflowConditionAst(ast.left, mode)} ${ast.kind} ${formatWorkflowConditionAst(ast.right, mode)}`;
 		case "not":
 			if (ast.expression.kind === "comparison") {
-				return formatWorkflowComparisonCondition({
-					...ast.expression,
-					operator: invertWorkflowComparisonOperator(ast.expression.operator),
-				});
+				return formatWorkflowComparisonCondition(
+					{
+						...ast.expression,
+						operator: invertWorkflowComparisonOperator(ast.expression.operator),
+					},
+					mode,
+				);
 			}
 			if (ast.expression.kind === "exists") {
 				return `${formatWorkflowConditionSubjectPath(ast.expression.path)} is absent`;
 			}
-			return `not (${formatWorkflowConditionAst(ast.expression)})`;
+			return `not (${formatWorkflowConditionAst(ast.expression, mode)})`;
 	}
 }
 
-function formatWorkflowComparisonCondition(condition: WorkflowComparisonCondition): string {
-	const subject = formatWorkflowConditionSubjectPath(condition.leftPath);
-	const relation = formatWorkflowComparisonRelation(condition.operator);
+function formatWorkflowComparisonCondition(
+	condition: WorkflowComparisonCondition,
+	mode: WorkflowConditionLabelMode = "default",
+): string {
+	const subject = formatWorkflowConditionSubjectPath(condition.leftPath, mode);
+	const relation = formatWorkflowComparisonRelation(condition.operator, mode);
 	const value = formatWorkflowConditionLiteral(condition.right);
 	return `${subject} ${relation} ${value}`;
 }
 
-function formatWorkflowComparisonRelation(operator: WorkflowConditionOperator): string {
+function formatWorkflowComparisonRelation(
+	operator: WorkflowConditionOperator,
+	mode: WorkflowConditionLabelMode = "default",
+): string {
 	switch (operator) {
 		case "==":
 			return "is";
 		case "!=":
-			return "is not";
+			return mode === "loopback" ? "not" : "is not";
 		case ">":
-			return "is greater than";
+			return mode === "loopback" ? ">" : "is greater than";
 		case ">=":
-			return "is at least";
+			return mode === "loopback" ? ">=" : "is at least";
 		case "<":
-			return "is less than";
+			return mode === "loopback" ? "<" : "is less than";
 		case "<=":
-			return "is at most";
+			return mode === "loopback" ? "<=" : "is at most";
 	}
 }
 
@@ -1157,7 +1181,13 @@ function formatWorkflowConditionLiteral(value: WorkflowConditionLiteral): string
 	return value === null ? "null" : String(value);
 }
 
-function formatWorkflowConditionSubjectPath(path: readonly string[]): string {
+function formatWorkflowConditionSubjectPath(
+	path: readonly string[],
+	mode: WorkflowConditionLabelMode = "default",
+): string {
+	if (mode === "loopback" && path[0] === "outputs" && path.at(-1) === "verdict") {
+		return formatWorkflowConditionPath(path.slice(1, -1));
+	}
 	const [root, outputNodeId, ...outputFields] = path;
 	if (root === "state") return formatWorkflowConditionPath(path.slice(1));
 	if (root === "outputs") return formatWorkflowConditionPath([outputNodeId ?? "", ...outputFields]);
