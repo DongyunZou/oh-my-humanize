@@ -183,6 +183,83 @@ describe("advisor", () => {
 			expect(promptInputs[1]).toContain("second");
 		});
 
+		it("budgets only the batch sent after async context maintenance", async () => {
+			const promptInputs: string[] = [];
+			const { promise: firstMaintainStarted, resolve: startFirstMaintain } = Promise.withResolvers<void>();
+			const { promise: finishFirstMaintain, resolve: releaseFirstMaintain } = Promise.withResolvers<boolean>();
+			const { promise: firstPromptStarted, resolve: startFirstPrompt } = Promise.withResolvers<void>();
+			const { promise: secondPromptStarted, resolve: startSecondPrompt } = Promise.withResolvers<void>();
+			const { promise: finishFirstPrompt, resolve: releaseFirstPrompt } = Promise.withResolvers<void>();
+			let maintainCalls = 0;
+			let promptCalls = 0;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					promptCalls++;
+					if (promptCalls === 1) {
+						startFirstPrompt();
+						await finishFirstPrompt;
+					} else if (promptCalls === 2) {
+						startSecondPrompt();
+					}
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "first", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				maintainContext: async () => {
+					maintainCalls++;
+					if (maintainCalls === 1) {
+						startFirstMaintain();
+						return await finishFirstMaintain;
+					}
+					return false;
+				},
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await firstMaintainStarted;
+			messages.push({ role: "user", content: "second", timestamp: 2 } as AgentMessage);
+			runtime.onTurnEnd();
+
+			releaseFirstMaintain(false);
+			await firstPromptStarted;
+			expect(promptInputs).toHaveLength(1);
+			expect(promptInputs[0]).toContain("first");
+			expect(promptInputs[0]).not.toContain("second");
+
+			releaseFirstPrompt();
+			await secondPromptStarted;
+			expect(promptInputs).toHaveLength(2);
+			expect(promptInputs[1]).toContain("second");
+		});
+
+		it("sends the batch when context maintenance fails", async () => {
+			const promptInputs: string[] = [];
+			const agent = makeAgent(promptInputs);
+			const messages: AgentMessage[] = [{ role: "user", content: "first", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+				maintainContext: async () => {
+					throw new Error("maintenance failed");
+				},
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			runtime.onTurnEnd();
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(promptInputs).toHaveLength(1);
+			expect(promptInputs[0]).toContain("first");
+		});
+
 		it("excludes advisor custom messages from the rendered delta", () => {
 			const promptInputs: string[] = [];
 			const agent = makeAgent(promptInputs);
@@ -249,7 +326,17 @@ describe("advisor", () => {
 
 		it("triggers a re-prime and full replay when maintainContext returns true", async () => {
 			const promptInputs: string[] = [];
-			const agent = makeAgent(promptInputs);
+			let resetCount = 0;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+				},
+				abort: () => {},
+				reset: () => {
+					resetCount++;
+				},
+				state: { messages: [] },
+			};
 			const messages: AgentMessage[] = [{ role: "user", content: "aaa", timestamp: 1 } as AgentMessage];
 			let shouldRePrime = false;
 			const host: AdvisorRuntimeHost = {
@@ -263,15 +350,16 @@ describe("advisor", () => {
 			const runtime = new AdvisorRuntime(agent, host);
 
 			// First turn: normal incremental prompt
-			runtime.onTurnEnd();
+			runtime.onTurnEnd(messages);
 			await Promise.resolve();
 			expect(promptInputs).toHaveLength(1);
 			expect(promptInputs[0]).toContain("aaa");
+			expect(resetCount).toBe(0);
 
 			// Second turn: maintainContext resolves true, triggering a re-prime
 			shouldRePrime = true;
 			messages.push({ role: "user", content: "bbb", timestamp: 2 } as AgentMessage);
-			runtime.onTurnEnd();
+			runtime.onTurnEnd(messages);
 			await Promise.resolve();
 			await Promise.resolve();
 
@@ -279,6 +367,158 @@ describe("advisor", () => {
 			expect(promptInputs).toHaveLength(2);
 			expect(promptInputs[1]).toContain("aaa");
 			expect(promptInputs[1]).toContain("bbb");
+			expect(resetCount).toBe(1);
+		});
+		it("tracks backlog and blocks until caught up", async () => {
+			const promptInputs: string[] = [];
+			const { promise: promptStarted, resolve: startPrompt } = Promise.withResolvers<void>();
+			const { promise: promptFinish, resolve: finishPrompt } = Promise.withResolvers<void>();
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					startPrompt();
+					await promptFinish;
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "aaa", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+
+			// First turn starts advisor drain (which is now busy).
+			runtime.onTurnEnd(messages);
+			await promptStarted;
+
+			// Second turn completes. Backlog is now 2 (1 in-flight, 1 pending).
+			messages.push({ role: "user", content: "bbb", timestamp: 2 } as AgentMessage);
+			runtime.onTurnEnd(messages);
+
+			// waitForCatchup with threshold=2 should resolve immediately (backlog 2 is < threshold 2? No, backlog 2 is not < 2, so it waits. Wait, threshold=3 should resolve immediately since backlog 2 < 3).
+			// Let's verify: backlog=2.
+			// threshold=3 -> backlog < 3 is true -> resolves immediately.
+			let threshold3Resolved = false;
+			void runtime.waitForCatchup(100, 3).then(() => {
+				threshold3Resolved = true;
+			});
+			await Promise.resolve();
+			expect(threshold3Resolved).toBe(true);
+
+			// threshold=2 -> backlog < 2 is false -> should wait.
+			let threshold2Resolved = false;
+			const catchupPromise = runtime.waitForCatchup(1000, 2).then(() => {
+				threshold2Resolved = true;
+			});
+
+			await Promise.resolve();
+			expect(threshold2Resolved).toBe(false);
+
+			// Complete the first prompt. Backlog should drop to 1 (prompt finishes, decrements by 1).
+			// Wait, the popped entries had turns = 1. So backlog drops to 1.
+			// Since 1 < 2, the threshold=2 waiter should resolve.
+			finishPrompt();
+			await catchupPromise;
+			expect(threshold2Resolved).toBe(true);
+		});
+
+		it("cancels catch-up waits when the run aborts", async () => {
+			const { promise: promptStarted, resolve: startPrompt } = Promise.withResolvers<void>();
+			const { promise: promptFinish, resolve: finishPrompt } = Promise.withResolvers<void>();
+			const agent: AdvisorAgent = {
+				prompt: async () => {
+					startPrompt();
+					await promptFinish;
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "aaa", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host);
+			const controller = new AbortController();
+
+			runtime.onTurnEnd(messages);
+			await promptStarted;
+
+			let resolved = false;
+			const wait = runtime.waitForCatchup(30000, 1, controller.signal).then(() => {
+				resolved = true;
+			});
+
+			await Promise.resolve();
+			expect(resolved).toBe(false);
+
+			controller.abort();
+			await wait;
+			expect(resolved).toBe(true);
+
+			finishPrompt();
+			await Promise.resolve();
+		});
+
+		it("retries failed prompts and only decrements backlog on success", async () => {
+			const promptInputs: string[] = [];
+			let fail = true;
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					if (fail) {
+						fail = false;
+						throw new Error("fail");
+					}
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "aaa", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host, 0);
+
+			runtime.onTurnEnd(messages);
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+
+			expect(promptInputs).toHaveLength(2);
+			expect(runtime.backlog).toBe(0);
+		});
+
+		it("drops backlog after 3 consecutive failures to prevent permanent stall", async () => {
+			const promptInputs: string[] = [];
+			const agent: AdvisorAgent = {
+				prompt: async input => {
+					promptInputs.push(input);
+					throw new Error("fail");
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "aaa", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				enqueueAdvice: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host, 0);
+
+			runtime.onTurnEnd(messages);
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+
+			expect(promptInputs).toHaveLength(3);
+			expect(runtime.backlog).toBe(0);
 		});
 	});
 
@@ -329,6 +569,16 @@ describe("advisor", () => {
 			const note =
 				"This is a very long advisor note that will definitely exceed the restricted width constraint of thirty characters and should therefore wrap across multiple lines rather than getting truncated.";
 			const card = createAdvisorMessageCard({ notes: [{ note, severity: "concern" }] }, () => true, uiTheme);
+			const text = strip(card.render(30));
+			expect(text).toContain("truncated.");
+		});
+
+		it("wraps long notes even when the message card is collapsed", async () => {
+			const uiTheme = await getThemeByName("dark");
+			if (!uiTheme) throw new Error("theme unavailable");
+			const note =
+				"This is a very long advisor note that will definitely exceed the restricted width constraint of thirty characters and should therefore wrap across multiple lines rather than getting truncated.";
+			const card = createAdvisorMessageCard({ notes: [{ note, severity: "concern" }] }, () => false, uiTheme);
 			const text = strip(card.render(30));
 			expect(text).toContain("truncated.");
 		});
