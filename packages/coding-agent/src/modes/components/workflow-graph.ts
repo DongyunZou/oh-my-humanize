@@ -207,6 +207,7 @@ function workflowGraphDashboardWideBodyLines(
 	heightBudget: number | undefined,
 	profile: WorkflowGraphCompactProfile,
 ): string[] {
+	const flowLensProfile = workflowGraphWideFlowLensProfile(profile, density, heightBudget);
 	const graphLines = renderWorkflowGraphDashboardPanel(
 		"Flow Lens",
 		layout.graphWidth,
@@ -215,7 +216,7 @@ function workflowGraphDashboardWideBodyLines(
 			layout.graphWidth - WORKFLOW_GRAPH_FRAME_CHROME_WIDTH,
 			density,
 			heightBudget,
-			profile,
+			flowLensProfile,
 		),
 	);
 	const workbenchLines = renderWorkflowGraphDashboardPanel(
@@ -241,6 +242,19 @@ function workflowGraphDashboardWideBodyLines(
 		rows.push(`${graphLine}${gap}${padWorkflowGraphLine(workbenchLine, layout.workbenchWidth)}`.trimEnd());
 	}
 	return rows;
+}
+
+function workflowGraphWideFlowLensProfile(
+	profile: WorkflowGraphCompactProfile,
+	density: WorkflowGraphDensity,
+	heightBudget: number | undefined,
+): WorkflowGraphCompactProfile {
+	if (density === "full" || heightBudget === undefined) return profile;
+	if (heightBudget < 32) return profile;
+	return {
+		...profile,
+		diagramChromeRows: Math.min(profile.diagramChromeRows, 14),
+	};
 }
 
 function workflowGraphDashboardStackedBodyLines(

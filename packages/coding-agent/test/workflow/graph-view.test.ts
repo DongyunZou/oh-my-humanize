@@ -1880,6 +1880,105 @@ describe("workflow graph view rendering", () => {
 		expect(mediumText).toContain("Flow Lens");
 		expect(mediumText).toContain("[○ plan] ─▶ [○ inspect] ─▶ [○ build]");
 
+		const wideLiveView = createView({
+			name: "wide-height-rlcr",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "planCompliancePrecheck", type: "review" },
+				{ id: "planUnderstandingQuiz", type: "human" },
+				{ id: "recordOperatorGate", type: "script" },
+				{ id: "initializeGoalTracker", type: "script" },
+				{ id: "implementRound", type: "agent", agent: "task" },
+				{ id: "writeRoundSummary", type: "script" },
+				{ id: "codexSummaryReview", type: "review", agent: "task" },
+				{ id: "longRunningHold", type: "script" },
+				{ id: "longRunningHoldCheck", type: "script" },
+				{ id: "enterReviewPhase", type: "script" },
+				{ id: "fixReviewIssues", type: "agent", agent: "task" },
+				{ id: "codexCodeReview", type: "review", agent: "task" },
+				{ id: "finalAlignmentCheck", type: "review" },
+				{ id: "finalize", type: "script" },
+			],
+			edges: [
+				{ from: "planCompliancePrecheck", to: "planUnderstandingQuiz" },
+				{ from: "planUnderstandingQuiz", to: "recordOperatorGate" },
+				{ from: "recordOperatorGate", to: "initializeGoalTracker" },
+				{ from: "initializeGoalTracker", to: "implementRound" },
+				{ from: "implementRound", to: "writeRoundSummary" },
+				{ from: "writeRoundSummary", to: "codexSummaryReview" },
+				{
+					from: "codexSummaryReview",
+					to: "implementRound",
+					condition: { source: 'outputs.codexSummaryReview.verdict == "CONTINUE"' },
+				},
+				{
+					from: "codexSummaryReview",
+					to: "longRunningHold",
+					condition: { source: 'outputs.codexSummaryReview.verdict == "COMPLETE"' },
+				},
+				{ from: "longRunningHold", to: "longRunningHoldCheck" },
+				{
+					from: "longRunningHoldCheck",
+					to: "longRunningHold",
+					condition: { source: "state.longRunningFloorPending" },
+				},
+				{
+					from: "longRunningHoldCheck",
+					to: "enterReviewPhase",
+					condition: { source: "state.longRunningFloorSatisfied" },
+				},
+				{ from: "enterReviewPhase", to: "fixReviewIssues" },
+				{ from: "fixReviewIssues", to: "codexCodeReview" },
+				{
+					from: "codexCodeReview",
+					to: "fixReviewIssues",
+					condition: { source: 'outputs.codexCodeReview.verdict == "ISSUES"' },
+				},
+				{
+					from: "codexCodeReview",
+					to: "finalAlignmentCheck",
+					condition: { source: 'outputs.codexCodeReview.verdict != "ISSUES"' },
+				},
+				{ from: "finalAlignmentCheck", to: "finalize" },
+			],
+		});
+		wideLiveView.nodes[4] = { ...wideLiveView.nodes[4]!, status: "running", focused: true, activationCount: 1 };
+		wideLiveView.focus = {
+			nodeId: "implementRound",
+			label: "Implement round",
+			role: "Builder",
+			status: "running",
+			focusAgentId: "implementRound",
+		};
+		wideLiveView.activeAgents = [
+			{
+				activationId: "activation-implement",
+				focusAgentId: "implementRound",
+				nodeId: "implementRound",
+				label: "Implement round",
+				role: "Builder",
+				status: "running",
+				activity: "Listing project",
+			},
+		];
+		const wideLiveLines = new WorkflowGraphComponent(wideLiveView, { refreshMs: 0, heightProvider: () => 36 }).render(
+			220,
+		);
+		const wideLiveText = stripAnsi(wideLiveLines.join("\n"));
+		const visibleNodeRows = wideLiveText
+			.split("\n")
+			.filter(line =>
+				/[│║][○●✓!◆×] (initializeGoalTracker|implementRound|writeRoundSummary|codexSummaryReview|longRunningHold)/u.test(
+					line,
+				),
+			);
+
+		expect(wideLiveLines.length).toBeGreaterThan(30);
+		expect(wideLiveLines.length).toBeLessThanOrEqual(36);
+		expect(visibleNodeRows.length).toBeGreaterThanOrEqual(3);
+		expect(wideLiveText).not.toContain("workflow graph rows hidden");
+
 		const tallLines = new WorkflowGraphComponent(view, { refreshMs: 0, heightProvider: () => 48 }).render(156);
 		const tallText = stripAnsi(tallLines.join("\n"));
 
