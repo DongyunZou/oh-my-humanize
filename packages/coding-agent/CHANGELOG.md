@@ -185,6 +185,7 @@
 - Changed TUI workflow starts to show a single monitor-active status line when a resident workflow graph is mounted, leaving detailed graph, activation, and model information to the cockpit and inspect surfaces instead of duplicating it above the monitor.
 - Changed the workflow monitor to collapse the startup welcome/onboarding panel as soon as a workflow graph becomes active, keeping the resident cockpit as the primary first-viewport surface.
 - Changed the workflow graph and `/workflow manager` default surfaces into a concise operator cockpit that foregrounds run status, topology, on-flight work, recent output, subflow calls, change review, and contextual controls while leaving freeze ids and runtime binding dumps to diagnostics.
+- Changed the built-in `humanize-rlcr` implementation loop to enforce the durable long-running operator gate in graph control flow: when the operator requests long-running validation, a summary reviewer `COMPLETE` verdict keeps retrying until the recorded minimum runtime is satisfied.
 
 ### Fixed
 

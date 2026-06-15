@@ -138,8 +138,7 @@ describe("workflow artifact registry", () => {
 				runHumanInput: async request => {
 					humanQuestion = request.question;
 					return {
-						response:
-							"proceed: this changes documentation-facing behavior and validation evidence. This is intended as long-running validation with an eight hour minimum and five day maximum.",
+						response: "proceed: this is a bounded smoke validation for the local workflow contract.",
 					};
 				},
 				runAgentTask: async request => {
@@ -188,22 +187,90 @@ describe("workflow artifact registry", () => {
 		const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
 		const operatorGate = expectRecord(humanize.operatorGate, "humanize operator gate");
 		expect(operatorGate.decision).toBe("proceed");
-		expect(operatorGate.longRunningRequested).toBe(true);
+		expect(operatorGate.longRunningRequested).toBe(false);
 		expect(operatorGate.minimumRuntimeMs).toBe(28_800_000);
 		expect(operatorGate.maximumRuntimeMs).toBe(432_000_000);
-		expect(operatorGate.minimumSatisfied).toBe(false);
+		expect(operatorGate.minimumSatisfied).toBe(true);
 		const runtime = expectRecord(humanize.runtime, "humanize runtime");
 		const longRunning = expectRecord(runtime.longRunning, "humanize long-running runtime");
-		expect(longRunning.minimumSatisfied).toBe(false);
+		expect(longRunning.minimumSatisfied).toBe(true);
 		const latestSummaryReviewAssignment = summaryReviewAssignments.at(-1) ?? "";
 		expect(latestSummaryReviewAssignment).toContain('"minimumRuntimeMs":28800000');
-		expect(latestSummaryReviewAssignment).toContain('"minimumSatisfied":false');
+		expect(latestSummaryReviewAssignment).toContain('"minimumSatisfied":true');
 		const ledger = expectRecord(humanize.ledger, "humanize ledger");
 		const rounds = expectArray(ledger.rounds, "humanize ledger rounds");
 		expect(ledger.currentRound).toBe(2);
 		expect(rounds).toHaveLength(2);
 		expect(expectRecord(humanize.reviewPhase, "humanize review phase").enteredAfterRound).toBe(2);
 		expect(expectRecord(humanize.final, "humanize final").rounds).toBe(2);
+	});
+
+	it("keeps bundled Humanize RLCR in the implementation loop until the long-running gate is satisfied", async () => {
+		const spec = await resolveWorkflowFlowSpec("humanize-rlcr", { cwd: process.cwd(), flowDirs: [] });
+		const artifact = await loadWorkflowArtifact(spec.path);
+		const freeze = await freezeWorkflowArtifact(artifact);
+		const taskDir = await createTempDir();
+		await Bun.write(
+			path.join(taskDir, "task.md"),
+			[
+				"# Long-running RLCR gate smoke",
+				"",
+				"Goal: keep the workflow active when the operator requested long-running evidence.",
+				"Acceptance: reviewer COMPLETE cannot exit the implementation loop before the runtime floor is met.",
+			].join("\n"),
+		);
+		const host = createRunHost();
+		let implementationRound = 0;
+		const summaryReviewAssignments: string[] = [];
+
+		const result = await runWorkflow({
+			host,
+			definition: freeze.definition,
+			runId: "humanize-long-running-gate",
+			startNodeId: "planCompliancePrecheck",
+			runtimeHost: createSessionWorkflowRuntimeHost({
+				cwd: taskDir,
+				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+				runHumanInput: async () => ({
+					response:
+						"proceed: this is intended as long-running validation with an eight hour minimum and five day maximum.",
+				}),
+				runAgentTask: async request => {
+					if (request.nodeId === "implementRound") {
+						implementationRound++;
+						return {
+							exitCode: 0,
+							output: `round ${implementationRound} implementation evidence with verification notes`,
+						};
+					}
+					if (request.nodeId === "codexSummaryReview") {
+						summaryReviewAssignments.push(request.task.assignment);
+						return {
+							exitCode: 0,
+							output: "COMPLETE\nAcceptance evidence is present, but the runtime floor is not met.",
+						};
+					}
+					return { exitCode: 0, output: `completed ${request.nodeId}` };
+				},
+			}),
+			packageRoot: artifact.resourceDir,
+			frozenResources: freeze.resourceSnapshots,
+			maxActivations: 12,
+		});
+
+		const nodeIds = result.scheduler.activations.map(activation => activation.nodeId);
+		expect(nodeIds.filter(nodeId => nodeId === "implementRound")).toHaveLength(3);
+		expect(nodeIds.filter(nodeId => nodeId === "codexSummaryReview")).toHaveLength(2);
+		expect(nodeIds).not.toContain("enterReviewPhase");
+		expect(result.scheduler.frontierNodeIds).toEqual(["codexSummaryReview"]);
+		const humanize = expectRecord(result.scheduler.state.humanize, "humanize state");
+		const operatorGate = expectRecord(humanize.operatorGate, "humanize operator gate");
+		expect(operatorGate.longRunningRequested).toBe(true);
+		expect(operatorGate.minimumSatisfied).toBe(false);
+		const runtime = expectRecord(humanize.runtime, "humanize runtime");
+		const longRunning = expectRecord(runtime.longRunning, "humanize long-running runtime");
+		expect(longRunning.minimumSatisfied).toBe(false);
+		expect(summaryReviewAssignments.at(-1) ?? "").toContain('"minimumSatisfied":false');
 	});
 
 	it("treats explicit paths as paths even when the basename matches an installed flow name", async () => {

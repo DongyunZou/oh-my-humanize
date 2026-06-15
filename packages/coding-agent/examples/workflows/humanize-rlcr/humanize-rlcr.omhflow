@@ -151,7 +151,7 @@ sequence:
           - CONTINUE
           - COMPLETE
         fallbackVerdict: CONTINUE
-      retryWhen: outputs.codexSummaryReview.verdict != "COMPLETE"
+      retryWhen: outputs.codexSummaryReview.verdict != "COMPLETE" || state.humanize.operatorGate.minimumSatisfied == false
   - node:
       id: enterReviewPhase
       type: script
