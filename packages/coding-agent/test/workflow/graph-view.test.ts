@@ -676,6 +676,10 @@ describe("workflow graph view rendering", () => {
 
 		expect(tuiText).toContain("◎ focus review");
 		expect(tuiText).toContain("▶ restart");
+		expect(tuiText).toContain("1 frontier");
+		expect(tuiText).toContain("frontier: ◇ review");
+		expect(tuiText).not.toContain("1 active");
+		expect(tuiText).not.toContain("live: ◇ review");
 		expect(tuiText).not.toContain("◉ monitor review");
 		expect(tuiText).not.toContain("◆ hub");
 		expect(tuiText).not.toContain("↵ steer");

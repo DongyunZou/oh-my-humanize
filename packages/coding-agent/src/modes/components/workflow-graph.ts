@@ -670,12 +670,14 @@ function workflowGraphFlowLensAgentDetail(agent: WorkflowGraphActiveAgentView): 
 }
 
 function workflowGraphNodePulseLines(view: WorkflowGraphView, width: number): string[] {
-	const running = view.nodes.filter(node => node.status === "running" || node.status === "frontier");
+	const running = view.nodes.filter(node => node.status === "running");
+	const frontier = view.nodes.filter(node => node.status === "frontier");
 	const pending = view.nodes.filter(node => node.status === "pending");
 	const finished = view.nodes.filter(node => node.status === "completed" || node.status === "checkpointed");
 	const repeated = view.nodes.filter(node => (node.activationCount ?? 0) > 1);
 	const rows = [
 		workflowGraphNodePulseLine("live", running, width),
+		workflowGraphNodePulseLine("frontier", frontier, width),
 		workflowGraphNodePulseLine("next", pending.slice(0, 3), width),
 		workflowGraphNodePulseLine("done", finished.slice(-3), width),
 		workflowGraphNodePulseLine("rounds", repeated.slice(-3), width),
@@ -829,7 +831,7 @@ function workflowGraphProgressLine(view: WorkflowGraphView, width: number): stri
 	if (view.nodes.length === 0) return undefined;
 	const counts = workflowGraphStatusCounts(view);
 	const done = counts.completed + counts.checkpointed;
-	const active = counts.running + counts.frontier;
+	const active = counts.running;
 	const repeats = view.nodes.reduce((total, node) => total + Math.max(0, (node.activationCount ?? 0) - 1), 0);
 	const barWidth = Math.max(6, Math.min(18, Math.floor(width / 12)));
 	const filled = Math.max(0, Math.min(barWidth, Math.round((done / view.nodes.length) * barWidth)));
@@ -837,6 +839,7 @@ function workflowGraphProgressLine(view: WorkflowGraphView, width: number): stri
 	const statusParts = [
 		`${done}/${view.nodes.length} done`,
 		active > 0 ? `${active} active` : undefined,
+		counts.frontier > 0 ? `${counts.frontier} frontier` : undefined,
 		counts.failed > 0 ? `${counts.failed} failed` : undefined,
 		counts.aborted > 0 ? `${counts.aborted} aborted` : undefined,
 		repeats > 0 ? `${repeats} repeats` : undefined,
