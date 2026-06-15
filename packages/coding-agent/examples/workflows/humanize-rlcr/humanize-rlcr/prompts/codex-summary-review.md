@@ -15,10 +15,10 @@ valid blocker explanation, and negative-test/regression-risk coverage before
 emitting `COMPLETE`.
 
 If `operatorGate.longRunningRequested` is true and
-`runtime.longRunning.minimumSatisfied` is not true, do not emit `COMPLETE`.
-Eight hours is the minimum for a long-running Project x Flow x Task data point;
-end with `CONTINUE` and explain that the flow must keep working or remain active
-until the minimum is satisfied.
+`runtime.longRunning.minimumSatisfied` is not true, still emit `COMPLETE` when
+the implementation itself has enough acceptance, verification, and regression
+evidence. The workflow routes that `COMPLETE` verdict to the hold/check loop
+until the eight-hour Project x Flow x Task floor is satisfied.
 
 Use `CONTINUE` when implementation should do another round. If the flow is
 stagnating, explicitly say which prior finding repeated and whether human

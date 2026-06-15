@@ -279,7 +279,12 @@ describe("workflow artifact registry", () => {
 			const runtime = expectRecord(humanize.runtime, "humanize runtime");
 			const longRunning = expectRecord(runtime.longRunning, "humanize long-running runtime");
 			expect(longRunning.minimumSatisfied).toBe(false);
-			expect(summaryReviewAssignments.at(-1) ?? "").toContain('"minimumSatisfied":false');
+			const summaryReviewAssignment = summaryReviewAssignments.at(-1) ?? "";
+			expect(summaryReviewAssignment).toContain('"minimumSatisfied":false');
+			expect(summaryReviewAssignment).toContain(
+				"The workflow routes that `COMPLETE` verdict to the hold/check loop",
+			);
+			expect(summaryReviewAssignment).not.toContain("do not emit `COMPLETE`");
 		} finally {
 			if (previousHoldSeconds === undefined) {
 				delete Bun.env.OMH_LONG_RUNNING_HOLD_SECONDS;
