@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- Fixed bundled KDA Humanize evidence recording so durable evidence falls back to completed workflow activation outputs when agents/reviews return summaries without state patches.
 - Fixed bundled agent build/review workflow startup so it records the declared validation command without executing heavy project verification before the first build round.
 - Fixed bundled Humanize RLCR operator-gate parsing so an explicit leading `Proceed` is not overwritten by later instructions that mention stop/checkpoint handling.
 - Fixed workflow launch validation so nested state conditions must be declared in the flow schema, checkpoint restarts cannot skip incomplete join inputs, and runtime binding hard failures only block frontier nodes that are about to execute.

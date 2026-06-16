@@ -502,6 +502,87 @@ describe("workflow artifact registry", () => {
 		);
 	});
 
+	it("records bundled KDA evidence from completed activation outputs when agents did not patch state", async () => {
+		const spec = await resolveWorkflowFlowSpec("kda-humanize", { cwd: process.cwd(), flowDirs: [] });
+		const artifact = await loadWorkflowArtifact(spec.path);
+		const freeze = await freezeWorkflowArtifact(artifact);
+		const taskDir = await createTempDir();
+		const completedActivations = [
+			{
+				id: "activation-1",
+				nodeId: "draftPlan",
+				graphRevisionId: "workflow-graph",
+				status: "completed" as const,
+				parentActivationIds: [],
+				output: {
+					summary: "drafted console rendering KDA plan",
+					data: { summary: "compare render newline candidates" },
+				},
+			},
+			{
+				id: "activation-2",
+				nodeId: "humanize__finalize",
+				graphRevisionId: "workflow-graph",
+				status: "completed" as const,
+				parentActivationIds: [],
+				output: {
+					summary: "nested Humanize completed newline rendering fix",
+					data: { files: ["rich/console.py", "tests/test_console.py"] },
+				},
+			},
+			{
+				id: "activation-3",
+				nodeId: "implementCandidate",
+				graphRevisionId: "workflow-graph",
+				status: "completed" as const,
+				parentActivationIds: [],
+				output: {
+					summary: "candidate changed console newline handling",
+					data: { validation: "python -m pytest tests/test_console.py -q" },
+				},
+			},
+			{
+				id: "activation-4",
+				nodeId: "validateCandidate",
+				graphRevisionId: "workflow-graph",
+				status: "completed" as const,
+				parentActivationIds: [],
+				output: {
+					summary: "candidate is ready to promote",
+					data: { verdict: "promote" },
+				},
+			},
+		];
+
+		const result = await runWorkflow({
+			host: createRunHost(),
+			definition: freeze.definition,
+			runId: "kda-record-evidence-from-activations",
+			startNodeId: "recordEvidence",
+			initialState: {
+				taskContract: "Objective: improve console rendering evidence.",
+			},
+			completedActivations,
+			runtimeHost: createSessionWorkflowRuntimeHost({
+				cwd: taskDir,
+				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+				runAgentTask: async request => ({ exitCode: 0, output: `completed ${request.nodeId}` }),
+			}),
+			packageRoot: artifact.resourceDir,
+			frozenResources: freeze.resourceSnapshots,
+			maxActivations: 1,
+		});
+
+		expect(result.scheduler.activations.map(activation => activation.nodeId)).toEqual(["recordEvidence"]);
+		const evidence = expectRecord(result.scheduler.state.evidence, "KDA evidence");
+		expect(evidence.validationVerdict).toBe("promote");
+		const evidenceText = await Bun.file(path.join(taskDir, "workflow-output", "kda-evidence.md")).text();
+		expect(evidenceText).toContain("drafted console rendering KDA plan");
+		expect(evidenceText).toContain("nested Humanize completed newline rendering fix");
+		expect(evidenceText).toContain("candidate changed console newline handling");
+		expect(evidenceText).toContain("Verdict: promote");
+	});
+
 	it("blocks bundled parallel implementation review before agents when task contract is missing", async () => {
 		const spec = await resolveWorkflowFlowSpec("parallel-implementation-review", {
 			cwd: process.cwd(),
