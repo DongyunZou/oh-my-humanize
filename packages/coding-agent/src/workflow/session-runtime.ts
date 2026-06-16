@@ -619,14 +619,14 @@ function reviewVerdictFromObjectText(
 		if (exactFinalLineGate !== undefined) {
 			return { verdict: exactFinalLineGate, summary };
 		}
-		const finalLineGate = finalLine === undefined ? undefined : gateSuffixFromLine(finalLine, gates);
-		if (finalLineGate !== undefined) {
-			return { verdict: finalLineGate, summary };
-		}
 		const firstLine = firstNonEmptyLine(summary);
 		const firstLineGate = firstLine === undefined ? undefined : gatePrefixFromLine(firstLine, gates);
 		if (firstLineGate !== undefined) {
 			return { verdict: firstLineGate, summary };
+		}
+		const finalLineGate = finalLine === undefined ? undefined : gateSuffixFromLine(finalLine, gates);
+		if (finalLineGate !== undefined) {
+			return { verdict: finalLineGate, summary };
 		}
 	}
 	return undefined;

@@ -747,6 +747,12 @@ async function stopActiveWorkflowAttempt(
 	deadlineMs: number,
 ): Promise<SlashCommandResult> {
 	active.lifecycle.stopDeadlineMs = deadlineMs;
+	requestWorkflowAttemptStop(runtime.sessionManager, {
+		attemptId: attempt.id,
+		deadlineMs,
+		reason: "slash command stop",
+	});
+	await flushWorkflowLifecycle(runtime);
 	if (!active.stopController.signal.aborted) {
 		active.stopController.abort("slash command stop");
 	}

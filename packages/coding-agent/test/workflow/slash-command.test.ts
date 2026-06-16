@@ -2975,6 +2975,7 @@ edges:
 		const stop = executeAcpBuiltinSlashCommand("/workflow stop run-live:attempt-1 --deadline-ms 50", runtime);
 		await Bun.sleep(5);
 		expect(calls).toEqual(["build"]);
+		expect(reconstructWorkflowFamilies(entries)[0]?.attempts[0]?.status).toBe("stop_requested");
 		releaseBuild.resolve();
 
 		expect(await stop).toEqual({ consumed: true });

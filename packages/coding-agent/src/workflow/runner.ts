@@ -247,11 +247,7 @@ function finishLifecycleAttempt(
 	}
 	const checkpointReason = workflowCheckpointReason(scheduler, signal);
 	if (checkpointReason !== undefined) {
-		requestWorkflowAttemptStop(options.host, {
-			attemptId: lifecycle.attemptId,
-			deadlineMs: lifecycle.stopDeadlineMs ?? 0,
-			reason: checkpointReason,
-		});
+		requestWorkflowAttemptStopIfRunning(options, checkpointReason);
 		createWorkflowCheckpoint(options.host, {
 			checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
 			familyId: lifecycle.familyId,
@@ -271,6 +267,21 @@ function finishLifecycleAttempt(
 	completeWorkflowAttempt(options.host, {
 		attemptId: lifecycle.attemptId,
 		summary: "workflow completed",
+	});
+}
+
+function requestWorkflowAttemptStopIfRunning(options: WorkflowRunnerOptions, reason: string): void {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	const family = reconstructWorkflowFamilies(options.host.getBranch()).find(
+		candidate => candidate.id === lifecycle.familyId,
+	);
+	const attempt = family?.attempts.find(candidate => candidate.id === lifecycle.attemptId);
+	if (attempt?.status !== "running") return;
+	requestWorkflowAttemptStop(options.host, {
+		attemptId: lifecycle.attemptId,
+		deadlineMs: lifecycle.stopDeadlineMs ?? 0,
+		reason,
 	});
 }
 

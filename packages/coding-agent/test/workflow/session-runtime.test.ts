@@ -777,6 +777,39 @@ describe("session workflow runtime host", () => {
 		});
 	});
 
+	it("prefers an explicit review-text prefix over later gate mentions", async () => {
+		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
+		const node = definition.nodes.find(candidate => candidate.id === "review");
+		if (!node) throw new Error("expected review node");
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: process.cwd(),
+			runAgentTask: async () => ({
+				exitCode: 0,
+				output: JSON.stringify({
+					overall_correctness: "incorrect",
+					explanation:
+						"REWORK: the selected candidate has measurements, but the evidence floor is still missing; collect a transcript audit before PASS.",
+					confidence: 0.91,
+				}),
+			}),
+		});
+
+		const output = await host.runReviewNode?.({
+			node,
+			activation: activation(node.id),
+			agent: node.agent,
+			prompt: node.prompt,
+			model: node.model,
+			gates: ["PASS", "REWORK"],
+		});
+
+		expect(output).toEqual({
+			summary:
+				"REWORK: the selected candidate has measurements, but the evidence floor is still missing; collect a transcript audit before PASS.",
+			verdict: "REWORK",
+		});
+	});
+
 	it("extracts declared Humanize gates from generic review text yielded by task agents", async () => {
 		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
 		const node = definition.nodes.find(candidate => candidate.id === "review");
