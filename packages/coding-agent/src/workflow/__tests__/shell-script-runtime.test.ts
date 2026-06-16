@@ -138,6 +138,41 @@ describe.skipIf(!zshPath)("createShellScriptRunner", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.output).toBe("resource-ok");
 	});
+
+	it("cancels a running sh workflow script through the abort signal", async () => {
+		using tempDir = TempDir.createSync("@omp-workflow-sh-cancel-");
+		previousShell = Bun.env.SHELL;
+		Bun.env.SHELL = zshPath ?? "";
+
+		const settings = await Settings.init();
+		const session: ToolSession = {
+			cwd: tempDir.path(),
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => null,
+			settings,
+		};
+		const runner = createShellScriptRunner(session);
+		const controller = new AbortController();
+		const startedAt = performance.now();
+		const abortSoon = Bun.sleep(50).then(() => controller.abort("stop workflow"));
+
+		const result = await runner({
+			activationId: "activation-cancel",
+			nodeId: "longHold",
+			code: ["sleep 10", "printf 'should-not-finish\\n'"].join("\n"),
+			language: "sh",
+			title: "long-hold.sh",
+			signal: controller.signal,
+		});
+		await abortSoon;
+
+		expect(performance.now() - startedAt).toBeLessThan(2_000);
+		expect(result.exitCode).toBe(1);
+		expect(result.error).toContain("Command cancelled");
+		expect(result.output).toContain("Command cancelled");
+		expect(result.output).not.toContain("should-not-finish");
+	});
 });
 
 function findZshPath(): string | undefined {
