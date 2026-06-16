@@ -223,8 +223,8 @@
   graph patch operations at freeze time instead of later change review.
 - Fixed workflow shell script nodes so frozen data resources are materialized
   for the run and exposed through `OMP_WORKFLOW_RESOURCE_DIR`, including
-  headless `omp workflow start`; the built-in `recflow-audit-events-cockpit`
-  flow now bootstraps its seed project from the frozen resource snapshot.
+  headless `omp workflow start`; workflow demos can bootstrap seed projects
+  from frozen resource snapshots without receiving runtime special-casing.
 - Fixed source-CLI worker-host startup for JS eval and tab workers by buffering
   early parent-port messages until the hidden worker entrypoint installs its
   listener, preventing workflow JS script nodes from timing out during worker
@@ -301,7 +301,7 @@
   and `omp workflow start` default to a five-day runtime limit and accept
   `--max-runtime-ms` for shorter bounded runs; elapsed runs stop scheduling,
   abort in-flight nodes, and checkpoint for restart.
-- Added built-in `humanize-rlcr`, `kda-humanize-reference`, `parallel-weak-implementation`, `agent-build-review-loop`, `human-interactive-dev`, `recflow-audit-events-cockpit`, and the `branch-conditional`, `loop-until-done`, and `parallel-join` control-flow primitive `.omhflow` artifacts, shared named workflow resolution for `/workflow start|freeze`, Humanize/KDA workflow demos, and a non-interactive `omp workflow` command for listing, freezing, starting, installing, and uninstalling workflow artifacts via `OMHFLOW_DIR`.
+- Added practical built-in `humanize-rlcr`, `kda-humanize-reference`, `parallel-weak-implementation`, and `agent-build-review-loop` `.omhflow` artifacts, moved control-flow primitives and seed-bound examples into workflow demos, added shared named workflow resolution for `/workflow start|freeze`, and added a non-interactive `omp workflow` command for listing, freezing, starting, installing, and uninstalling workflow artifacts via `OMHFLOW_DIR`.
 - Added isolated profile support via `--profile <name>` / `OMP_PROFILE` and shell alias bootstrap via `--alias <command>`, including launch/ACP bootstrap handling, extension-flag-safe parsing, profile-scoped user config discovery, and symlinked extension-directory discovery.
 - Fixed paste and image placeholders crashing when the editor renders before theme initialization.
 

@@ -31,12 +31,12 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 `/workflow` turns omp into an interactive agentic workflow runner: freeze a
 distributable `.omhflow + resources` artifact, run it with a live TUI graph,
 stop/checkpoint a production attempt, approve flow changes, and restart safely.
-Built-in flows include `humanize-rlcr`, `kda-humanize-reference`,
-`parallel-weak-implementation`, `agent-build-review-loop`,
-`human-interactive-dev`, `recflow-audit-events-cockpit`, and the
-control-flow primitives `branch-conditional`, `loop-until-done`, and
-`parallel-join`; external flows can be installed with `omp workflow install` or
-discovered through `OMHFLOW_DIR`.
+Built-in flows are practical, generic workflows that are meant to work
+out-of-the-box on a real project directory: `humanize-rlcr`,
+`kda-humanize-reference`, `parallel-weak-implementation`, and
+`agent-build-review-loop`. Smaller control-flow primitives and seed-bound
+examples ship as workflow demos, not promoted built-ins. External flows can be
+installed with `omp workflow install` or discovered through `OMHFLOW_DIR`.
 
 ```sh
 omp workflow list
@@ -51,7 +51,7 @@ Inside the TUI:
 ```
 
 See [docs/workflows.md](docs/workflows.md) for artifact layout,
-`humanize-rlcr` and KDA demo walkthroughs, non-interactive usage,
+`humanize-rlcr` and KDA workflow walkthroughs, non-interactive usage,
 install/uninstall, and lifecycle commands.
 
 ## Install

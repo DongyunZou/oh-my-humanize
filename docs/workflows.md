@@ -26,37 +26,35 @@ The `.omhflow` file contains YAML frontmatter plus a fenced workflow block. The
 same-name directory contains prompts, scripts, templates, fixtures, and other
 resources. Resource paths inside the flow resolve from that same-name directory.
 
-## Built-In Flows
+## Built-In Practical Flows
 
-`omp` ships with built-in flows that can be addressed by name:
+`omp` ships with built-in flows that can be addressed by name. A built-in flow
+must be a practical, generic workflow: it should run in a user project
+directory, take its task-specific goal from the operator or task artifacts, and
+avoid bundled seed-project assumptions.
 
 - `humanize-rlcr` — a Humanize-style review loop with implementation and review
-  rounds.
+  rounds. It is intended for interactive, task-driven implementation with
+  explicit operator understanding and optional long-running evidence gates.
 - `kda-humanize-reference` — a KDA-style flow that imports a Humanize subflow.
+  It is a project-generic KDA structure for contract, inspection, planning,
+  candidate validation, and promotion; it is not GPU performance evidence unless
+  the task and environment provide that validation.
 - `parallel-weak-implementation` — a compact parallel fan-out/gather
-  implementation pattern with a weak review join.
+  implementation pattern with core, test, and docs/evidence branches plus a
+  weak integration review. Use a later strong review before production
+  promotion.
 - `agent-build-review-loop` — a generator/critic refinement loop for repeated
-  build and review rounds.
-- `human-interactive-dev` — a human-in-the-loop branch/refine workflow for
-  operator intervention and restart practice.
-- `recflow-audit-events-cockpit` — a recursive workflow development cockpit
-  with parallel builders, review-controlled loop, and an imported quality
-  subflow.
-- `branch-conditional` — a minimal structured-output branch primitive.
-- `loop-until-done` — a minimal bounded loop primitive controlled by node
-  output.
-- `parallel-join` — a minimal fan-out/join primitive over independent probes.
+  build and review rounds. It expects `task.md` and optionally
+  `workflow-task/verify.sh`.
 
-The additional built-ins are intentionally small, practical patterns rather
-than a large template zoo. They map to reusable multi-agent structures from the
-[Multi-Agent Wiki pattern index](https://multi-agent.wiki/patterns), including
-parallel fan-out/gather, generator-critic, refinement loop,
-human-in-the-loop, and dynamic workflow orchestration. Each promoted flow was
-validated under `temp/playground` before being packaged as a built-in.
-The three primitive flows are intentionally closer to executable language
-examples than project templates; use them to study and compose branch, loop, and
-join behavior. They run against a generic task directory and do not require a
-particular GitHub project checkout or project-specific binary.
+The built-in set is intentionally small. Primitive examples, UX probes, and
+seed-bound demos are useful for learning or validation, but they are not exposed
+as named practical built-ins and should not be counted as reusable development
+workflows. For example, `branch-conditional`, `loop-until-done`,
+`parallel-join`, `human-interactive-dev`, and `recflow-lab-audit-events-demo`
+are executable examples under the package's workflow demo directory; use them by
+explicit artifact path when studying flow-language mechanics.
 
 List available flows:
 
@@ -69,11 +67,11 @@ dependencies. The workflow runtime, freeze checker, resolver, and CLI must also
 work with any valid standalone `.omhflow + same-name directory` artifact supplied
 by path or through `OMHFLOW_DIR`.
 
-The demos below use the normal `omp` model, provider, auth, and tool settings.
+The workflows below use the normal `omp` model, provider, auth, and tool settings.
 The flow artifact can name portable defaults, but it does not carry API keys and
 does not introduce a second model/tool configuration layer.
 
-## Humanize RLCR Demo
+## Humanize RLCR Workflow
 
 Use `humanize-rlcr` when a task needs iterative implementation with explicit
 review gates. The flow models plan compliance, a human understanding gate,
@@ -114,7 +112,7 @@ Long-running evidence has a separate lower bound: a Project x Flow x Task run
 must remain active for more than eight hours to count as long-running. Shorter
 runs are useful smoke evidence, but they are not long-running validation.
 
-In the demo graph, expect the implementation loop to revisit the build and
+In the workflow graph, expect the implementation loop to revisit the build and
 summary-review nodes until the reviewer returns `COMPLETE`. If long-running
 evidence was requested and the eight-hour floor is still pending, the flow moves
 to a lightweight hold/check loop instead of asking the builder to keep expanding
@@ -137,7 +135,7 @@ omp workflow start humanize-rlcr \
 The headless path is useful for freeze/runtime checks. Human nodes, active-agent
 steering, and workflow mutation are TUI-first.
 
-## KDA Demo
+## KDA Workflow
 
 Use `kda-humanize-reference` when a task needs a KDA-style outer flow that
 defines a contract, inspects the workspace, drafts a plan, then calls Humanize
@@ -175,7 +173,7 @@ the outer KDA flow inspects the workspace, drafts a plan, enters the imported
 Humanize loop, validates the candidate, and records promotion evidence.
 
 For non-interactive validation, freeze the packaged artifact. A full headless
-start is intentionally not the KDA demo path because the first node asks the
+start is intentionally not the KDA workflow path because the first node asks the
 human operator to define the task contract:
 
 ```sh

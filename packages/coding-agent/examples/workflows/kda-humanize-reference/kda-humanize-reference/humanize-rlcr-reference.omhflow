@@ -2,6 +2,14 @@
 name: humanize-rlcr-reference
 version: 1
 schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
 checkpoint:
   stopDeadlineMs: 30000
 changePolicy:
@@ -14,6 +22,7 @@ changePolicy:
 capabilities:
   agents:
     - task
+    - reviewer
   tools:
     - eval
   skills:
@@ -39,6 +48,9 @@ sequence:
   - node:
       id: planCompliance
       type: review
+      agent: reviewer
+      model:
+        role: reviewer
       reads:
         - /plan
       prompt:
@@ -67,6 +79,8 @@ sequence:
       id: initializeGoalTracker
       type: agent
       agent: task
+      model:
+        role: builder
       reads:
         - /plan
       writes:
@@ -83,6 +97,8 @@ sequence:
         id: implementRound
         type: agent
         agent: task
+        model:
+          role: builder
         reads:
           - /plan
           - /goalTracker
@@ -97,6 +113,9 @@ sequence:
       review:
         id: implementationReview
         type: review
+        agent: reviewer
+        model:
+          role: reviewer
         reads:
           - /summary
         prompt:
@@ -120,6 +139,8 @@ sequence:
         id: fixCodeReviewIssues
         type: agent
         agent: task
+        model:
+          role: builder
         reads:
           - /plan
           - /implementationSummary
@@ -134,6 +155,9 @@ sequence:
       review:
         id: codeReviewGate
         type: review
+        agent: reviewer
+        model:
+          role: reviewer
         reads:
           - /summary
         prompt:
@@ -154,6 +178,8 @@ sequence:
       id: finalize
       type: agent
       agent: task
+      model:
+        role: builder
       reads:
         - /plan
         - /goalTracker

@@ -1,8 +1,8 @@
 ---
-name: recflow-audit-events-cockpit
+name: recflow-lab-audit-events-demo
 version: 1
 schema: omhflow/v1
-resourceDir: recflow-audit-events-cockpit
+resourceDir: recflow-lab-audit-events-demo
 models:
   roles:
     builder: gpt-5.5
@@ -19,15 +19,17 @@ changePolicy:
 compatibility:
   omp: ">=15.12.5"
 ---
-# Recflow Audit Events Cockpit
+# Recflow Lab Audit Events Demo
 
-Live OMH validation flow for extending a recursive workflow runner with
-inspectable execution events.
+Seed-bound OMH example flow for extending the packaged `recflow-lab` recursive
+workflow runner with inspectable execution events. This artifact is intentionally
+a demo: it carries its own seed project and must not be treated as a generic
+practical built-in workflow.
 
 ```yaml workflow
 imports:
   quality:
-    path: ./recflow-audit-events-cockpit/quality-subflow.omhflow
+    path: ./recflow-lab-audit-events-demo/quality-subflow.omhflow
 stateSchema:
   version: 1
   shape:

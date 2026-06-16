@@ -22,16 +22,25 @@ changePolicy:
 resources:
   - path: prompts/scope.md
     kind: prompt
+  - path: prompts/implement-core.md
+    kind: prompt
+  - path: prompts/implement-tests.md
+    kind: prompt
+  - path: prompts/implement-docs.md
+    kind: prompt
   - path: prompts/weak-review.md
     kind: prompt
 capabilities:
   agents:
     - task
+    - reviewer
 sequence:
   - node:
       id: scope
       type: agent
       agent: task
+      model:
+        role: builder
       prompt:
         file: prompts/scope.md
       writes:
@@ -41,25 +50,58 @@ sequence:
           id: implementCore
           type: agent
           agent: task
+          model:
+            role: builder
           reads:
             - /plan
+          prompt:
+            template:
+              file: prompts/implement-core.md
+              bindings:
+                plan:
+                  state: /plan
       - node:
           id: implementTests
           type: agent
           agent: task
+          model:
+            role: builder
           reads:
             - /plan
+          prompt:
+            template:
+              file: prompts/implement-tests.md
+              bindings:
+                plan:
+                  state: /plan
       - node:
           id: implementDocs
           type: agent
           agent: task
+          model:
+            role: builder
           reads:
             - /plan
+          prompt:
+            template:
+              file: prompts/implement-docs.md
+              bindings:
+                plan:
+                  state: /plan
     join:
       id: weakReview
       type: review
+      agent: reviewer
+      model:
+        role: reviewer
+      reads:
+        - /plan
       prompt:
-        file: prompts/weak-review.md
+        template:
+          file: prompts/weak-review.md
+          bindings:
+            plan:
+              state: /plan
       gates:
         - continue
         - finish

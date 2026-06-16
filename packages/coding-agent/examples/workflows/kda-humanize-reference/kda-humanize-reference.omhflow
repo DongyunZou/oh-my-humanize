@@ -2,6 +2,14 @@
 name: kda-humanize-reference
 version: 1
 schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
 checkpoint:
   stopDeadlineMs: 30000
 changePolicy:
@@ -17,6 +25,7 @@ imports:
 capabilities:
   agents:
     - task
+    - reviewer
   tools:
     - eval
 resources:
@@ -32,6 +41,8 @@ resources:
     kind: prompt
   - path: prompts/promotion.md
     kind: prompt
+  - path: scripts/record-evidence.js
+    kind: script
 sequence:
   - node:
       id: defineTaskContract
@@ -44,6 +55,8 @@ sequence:
       id: inspectWorkspace
       type: agent
       agent: task
+      model:
+        role: builder
       reads:
         - /taskContract
       writes:
@@ -58,6 +71,8 @@ sequence:
       id: draftPlan
       type: agent
       agent: task
+      model:
+        role: builder
       reads:
         - /taskContract
         - /workspace
@@ -78,6 +93,8 @@ sequence:
         id: implementCandidate
         type: agent
         agent: task
+        model:
+          role: builder
         reads:
           - /taskContract
           - /plan
@@ -94,7 +111,11 @@ sequence:
       review:
         id: validateCandidate
         type: review
+        agent: reviewer
+        model:
+          role: reviewer
         reads:
+          - /candidate
           - /summary
         prompt:
           template:
@@ -114,18 +135,20 @@ sequence:
       id: recordEvidence
       type: script
       script:
-        inline: |
-          return {
-            summary: "recorded KDA evidence",
-            statePatch: [
-              { op: "set", path: "/evidence/status", value: "candidate validation recorded" }
-            ]
-          };
+        language: js
+        file: scripts/record-evidence.js
+      reads:
+        - /taskContract
+        - /plan
+        - /candidate
       writes:
         - /evidence
   - node:
       id: promotionDecision
       type: review
+      agent: reviewer
+      model:
+        role: reviewer
       reads:
         - /evidence
       prompt:

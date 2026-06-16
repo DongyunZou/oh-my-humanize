@@ -41,18 +41,16 @@ afterEach(async () => {
 });
 
 describe("workflow artifact registry", () => {
-	it("resolves and freezes bundled practical workflow artifacts by name", async () => {
+	it("resolves and freezes only bundled practical workflow artifacts by name", async () => {
 		const expected = [
 			"humanize-rlcr",
 			"kda-humanize-reference",
 			"parallel-weak-implementation",
 			"agent-build-review-loop",
-			"human-interactive-dev",
-			"recflow-audit-events-cockpit",
-			"branch-conditional",
-			"loop-until-done",
-			"parallel-join",
 		];
+		const listed = await listWorkflowFlowSpecs({ cwd: process.cwd(), flowDirs: [] });
+
+		expect(listed.map(spec => spec.name)).toEqual([...expected].sort());
 
 		for (const name of expected) {
 			const spec = await resolveWorkflowFlowSpec(name, { cwd: process.cwd(), flowDirs: [] });
@@ -68,12 +66,41 @@ describe("workflow artifact registry", () => {
 				definition: { name },
 			});
 			expect(freeze.definition.capabilities?.tools ?? []).not.toContain("shell");
+			expect(
+				freeze.definition.nodes.some(
+					node => node.type === "agent" || node.type === "review" || node.type === "human",
+				),
+			).toBe(true);
+			expect(freeze.resourceSnapshots.some(resource => resource.path.startsWith("seed/"))).toBe(false);
 		}
 	});
 
-	it("runs bundled control-flow primitive artifacts in a generic workspace", async () => {
+	it("keeps demo and primitive workflow artifacts out of named practical built-in resolution", async () => {
+		const retiredNames = [
+			"branch-conditional",
+			"loop-until-done",
+			"parallel-join",
+			"human-interactive-dev",
+			"recflow-audit-events-cockpit",
+			"recflow-lab-audit-events-demo",
+		];
+		const listedNames = (await listWorkflowFlowSpecs({ cwd: process.cwd(), flowDirs: [] })).map(spec => spec.name);
+
+		for (const name of retiredNames) {
+			expect(listedNames).not.toContain(name);
+			await expect(resolveWorkflowFlowSpec(name, { cwd: process.cwd(), flowDirs: [] })).rejects.toThrow(
+				`workflow flow "${name}" was not found`,
+			);
+		}
+	});
+
+	it("runs explicit control-flow primitive example artifacts in a generic workspace", async () => {
+		const demoRoot = path.join(path.dirname(getBuiltinWorkflowRoot()), "workflow-demos");
 		for (const name of ["branch-conditional", "loop-until-done", "parallel-join"]) {
-			const spec = await resolveWorkflowFlowSpec(name, { cwd: process.cwd(), flowDirs: [] });
+			const spec = await resolveWorkflowFlowSpec(path.join(demoRoot, name, `${name}.omhflow`), {
+				cwd: process.cwd(),
+				flowDirs: [],
+			});
 			const artifact = await loadWorkflowArtifact(spec.path);
 			const freeze = await freezeWorkflowArtifact(artifact);
 			const taskDir = await createTempDir();
