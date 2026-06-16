@@ -56,11 +56,30 @@ async function readOptionalText(filePath) {
 }
 
 function requiredTaskValidationCommand(taskText) {
-	for (const line of taskText.split(/\r?\n/u)) {
-		const match = /^\s*(?:verify|verification command|validation command)\s*:\s*(.+)\s*$/iu.exec(line);
-		if (match?.[1]) return match[1].trim();
+	const lines = taskText.split(/\r?\n/u);
+	for (let index = 0; index < lines.length; index += 1) {
+		const match = /^\s*(?:verify|verification command|validation command)\s*:\s*(.*)\s*$/iu.exec(lines[index] ?? "");
+		if (!match) continue;
+		const inlineCommand = match[1]?.trim();
+		if (inlineCommand) return inlineCommand;
+		const followingCommand = firstFollowingCommandLine(lines, index + 1);
+		if (followingCommand) return followingCommand;
 	}
 	throw new Error("agent-build-review-loop task.md must declare a Validation Command");
+}
+
+function firstFollowingCommandLine(lines, startIndex) {
+	for (const line of lines.slice(startIndex)) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("```")) continue;
+		if (isTaskSectionHeading(trimmed)) return "";
+		return trimmed;
+	}
+	return "";
+}
+
+function isTaskSectionHeading(line) {
+	return line.startsWith("#") || /^[A-Z][A-Za-z /-]{0,80}:\s*$/u.test(line);
 }
 
 async function runTaskVerification(command) {

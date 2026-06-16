@@ -137,6 +137,47 @@ describe("workflow artifact registry", () => {
 		).resolves.toContain("verified task contract");
 	});
 
+	it("accepts bundled agent build/review validation commands on the line after the task heading", async () => {
+		const spec = await resolveWorkflowFlowSpec("agent-build-review-loop", { cwd: process.cwd(), flowDirs: [] });
+		const artifact = await loadWorkflowArtifact(spec.path);
+		const freeze = await freezeWorkflowArtifact(artifact);
+		const taskDir = await createTempDir();
+		await Bun.write(
+			path.join(taskDir, "task.md"),
+			[
+				"# Task-declared verification",
+				"",
+				"Goal: match the distributable task.md format used by Phase 3 run contracts.",
+				"",
+				"Validation Command:",
+				"printf 'verified multiline task contract\\n' && test -f task.md",
+			].join("\n"),
+		);
+
+		const result = await runWorkflow({
+			host: createRunHost(),
+			definition: freeze.definition,
+			runId: "agent-build-review-multiline-task-verification",
+			startNodeId: "initializeLoop",
+			runtimeHost: createSessionWorkflowRuntimeHost({
+				cwd: taskDir,
+				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+				runShellScript: request => runShellWorkflowScript(taskDir, request),
+			}),
+			packageRoot: artifact.resourceDir,
+			frozenResources: freeze.resourceSnapshots,
+			maxActivations: 1,
+		});
+
+		expect(result.scheduler.activations.map(activation => activation.nodeId)).toEqual(["initializeLoop"]);
+		expect(result.scheduler.frontierNodeIds).toEqual(["buildRound"]);
+		const progress = expectRecord(result.scheduler.state.progress, "agent build/review progress");
+		expect(progress.verification).toBe("pass");
+		await expect(
+			Bun.file(path.join(taskDir, "workflow-output", "initial-loop-snapshot.md")).text(),
+		).resolves.toContain("verified multiline task contract");
+	});
+
 	it("blocks bundled agent build/review loop before agents when task contract is missing", async () => {
 		const spec = await resolveWorkflowFlowSpec("agent-build-review-loop", { cwd: process.cwd(), flowDirs: [] });
 		const artifact = await loadWorkflowArtifact(spec.path);
