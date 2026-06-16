@@ -454,6 +454,44 @@ describe("workflow artifact registry", () => {
 		expect(candidateAssignment).toContain("nested Humanize handoff summary");
 	});
 
+	it("runs bundled KDA evidence recording under the eval script runtime", async () => {
+		const spec = await resolveWorkflowFlowSpec("kda-humanize", { cwd: process.cwd(), flowDirs: [] });
+		const artifact = await loadWorkflowArtifact(spec.path);
+		const freeze = await freezeWorkflowArtifact(artifact);
+		const taskDir = await createTempDir();
+		const initialState = {
+			taskContract: "Objective: promote only evidence-backed candidates.",
+			plan: { summary: "validate candidate before promotion" },
+			candidate: { summary: "candidate changed parser recovery tests" },
+			finalizeSummary: { summary: "nested Humanize handoff is complete" },
+		};
+
+		const result = await runWorkflow({
+			host: createRunHost(),
+			definition: freeze.definition,
+			runId: "kda-record-evidence-eval",
+			startNodeId: "recordEvidence",
+			initialState,
+			runtimeHost: createSessionWorkflowRuntimeHost({
+				cwd: taskDir,
+				runEvalScript: request => runBunFunctionWorkflowScript(taskDir, request),
+				runAgentTask: async request => ({ exitCode: 0, output: `completed ${request.nodeId}` }),
+			}),
+			packageRoot: artifact.resourceDir,
+			frozenResources: freeze.resourceSnapshots,
+			maxActivations: 1,
+		});
+
+		expect(result.scheduler.activations.map(activation => activation.nodeId)).toEqual(["recordEvidence"]);
+		expect(result.scheduler.activations[0]?.status).toBe("completed");
+		expect(result.scheduler.frontierNodeIds).toEqual(["promotionDecision"]);
+		const evidence = expectRecord(result.scheduler.state.evidence, "KDA evidence");
+		expect(evidence.status).toBe("recorded");
+		await expect(Bun.file(path.join(taskDir, "workflow-output", "kda-evidence.md")).text()).resolves.toContain(
+			"nested Humanize handoff is complete",
+		);
+	});
+
 	it("blocks bundled parallel implementation review before agents when task contract is missing", async () => {
 		const spec = await resolveWorkflowFlowSpec("parallel-implementation-review", {
 			cwd: process.cwd(),

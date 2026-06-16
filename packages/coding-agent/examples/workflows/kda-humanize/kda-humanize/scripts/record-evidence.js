@@ -1,5 +1,3 @@
-import * as path from "node:path";
-
 const state = workflowContext.state && typeof workflowContext.state === "object" ? workflowContext.state : {};
 const taskContract = state.taskContract ?? {};
 const plan = state.plan ?? {};
@@ -23,9 +21,8 @@ const evidence = {
 	validationActivationCount: validationActivations.length,
 	recordedAtMs: Date.now(),
 };
-const outputDir = path.join(process.cwd(), "workflow-output");
 await Bun.write(
-	path.join(outputDir, "kda-evidence.md"),
+	"workflow-output/kda-evidence.md",
 	[
 		"# KDA Evidence",
 		"",
