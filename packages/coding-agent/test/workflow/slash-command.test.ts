@@ -15,6 +15,7 @@ import { SessionManager } from "../../src/session/session-manager";
 import { executeAcpBuiltinSlashCommand } from "../../src/slash-commands/acp-builtins";
 import { type BuiltinSlashCommandRuntime, executeBuiltinSlashCommand } from "../../src/slash-commands/builtin-registry";
 import { buildWorkflowGraphViewForRuntime } from "../../src/slash-commands/helpers/workflow";
+import type { ToolSession } from "../../src/tools";
 import { parseWorkflowDefinition, type WorkflowDefinition } from "../../src/workflow/definition";
 import type { FlowFreeze } from "../../src/workflow/freeze";
 import type { WorkflowGraphActiveAgentProgress } from "../../src/workflow/graph-view";
@@ -46,6 +47,7 @@ import {
 	type WorkflowRunStoreHost,
 } from "../../src/workflow/run-store";
 import type { WorkflowAgentTaskRunner } from "../../src/workflow/session-runtime";
+import { createSessionWorkflowRuntimeHost } from "../../src/workflow/session-runtime";
 import { createShellScriptRunner } from "../../src/workflow/shell-script-runtime";
 
 interface CapturedEntry {
@@ -92,6 +94,19 @@ async function createTempDir(): Promise<string> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-slash-"));
 	tempDirs.push(dir);
 	return dir;
+}
+
+async function waitForFileText(filePath: string, needle: string): Promise<string> {
+	for (let attempt = 0; attempt < 500; attempt++) {
+		try {
+			const text = await Bun.file(filePath).text();
+			if (text.includes(needle)) return text;
+		} catch {
+			// The producer may not have created the file yet.
+		}
+		await Bun.sleep(10);
+	}
+	throw new Error(`Timed out waiting for ${filePath} to contain ${needle}`);
 }
 
 async function waitForPersistedWorkflowCheckpoint(
@@ -3808,6 +3823,111 @@ edges:
 			sourceMapping: { build: "build" },
 		});
 	});
+
+	it("checkpoints real shell workflow nodes that abort after the stop deadline", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "real-shell-deadline"), { recursive: true });
+		await Bun.write(
+			path.join(dir, "real-shell-deadline.omhflow"),
+			`---
+name: real-shell-deadline
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Real Shell Deadline
+
+\`\`\`yaml workflow
+nodes:
+  hold:
+    type: script
+    script:
+      language: sh
+      inline: |
+        printf 'started\\n' >> hold.log
+        sleep 2
+        printf '{"summary":"hold finished"}\\n'
+  review:
+    type: script
+    script:
+      inline: |
+        return { summary: "review should not run" };
+edges:
+  - from: hold
+    to: review
+\`\`\`
+`,
+		);
+		const entries: CapturedEntry[] = [];
+		const shellSettings = Settings.isolated({ shellPath: "/bin/sh" });
+		vi.spyOn(Settings, "init").mockResolvedValue(shellSettings);
+		const toolSession = {
+			cwd: dir,
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			getSessionId: () => "workflow-real-shell-deadline-test",
+			settings: shellSettings,
+		} as unknown as ToolSession;
+		const { output, runtime } = createRuntime(
+			entries,
+			createSessionWorkflowRuntimeHost({
+				cwd: dir,
+				runShellScript: createShellScriptRunner(toolSession),
+			}),
+		);
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow start ${path.join(dir, "real-shell-deadline.omhflow")} --run-id run-real-shell-deadline --family-id family-real-shell-deadline --background`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		await waitForFileText(path.join(dir, "hold.log"), "started").catch(error => {
+			const message = error instanceof Error ? error.message : String(error);
+			const family = reconstructWorkflowFamilies(entries)[0];
+			throw new Error(
+				[
+					message,
+					"Workflow output:",
+					output.join("\n") || "<none>",
+					"Workflow family:",
+					JSON.stringify(family, null, 2),
+				].join("\n"),
+			);
+		});
+
+		const stopStartedAt = Date.now();
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				"/workflow stop run-real-shell-deadline:attempt-1 --deadline-ms 25",
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(Date.now() - stopStartedAt).toBeLessThan(1_000);
+
+		expect(
+			output.some(entry => entry.includes("Workflow checkpoint: run-real-shell-deadline:attempt-1:checkpoint-1")),
+		).toBeTrue();
+		const family = reconstructWorkflowFamilies(entries)[0];
+		expect(family?.attempts.map(attempt => [attempt.id, attempt.status])).toEqual([
+			["run-real-shell-deadline:attempt-1", "stopped"],
+		]);
+		expect(family?.attempts[0]?.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["hold", "aborted"],
+		]);
+		expect(family?.checkpoints[0]).toMatchObject({
+			completedActivationIds: [],
+			abortedActivationIds: ["activation-1"],
+			frontierNodeIds: ["hold"],
+			state: {},
+			sourceMapping: { hold: "hold" },
+		});
+	}, 8_000);
 
 	it("waits until the stop deadline before aborting running lifecycle activations", async () => {
 		const entries: CapturedEntry[] = [];

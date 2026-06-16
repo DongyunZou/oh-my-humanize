@@ -15,6 +15,19 @@ async function createTempDir(): Promise<string> {
 	return dir;
 }
 
+async function waitForFileText(filePath: string, needle: string): Promise<string> {
+	for (let attempt = 0; attempt < 300; attempt++) {
+		try {
+			const text = await Bun.file(filePath).text();
+			if (text.includes(needle)) return text;
+		} catch {
+			// The producer may not have created the file yet.
+		}
+		await Bun.sleep(10);
+	}
+	throw new Error(`Timed out waiting for ${filePath} to contain ${needle}`);
+}
+
 function createToolSession(cwd: string): ToolSession {
 	const settings = Settings.isolated({});
 	return {
@@ -103,4 +116,34 @@ describe("workflow shell script runtime adapter", () => {
 		expect(result.error).toBe("exit code 7");
 		expect(result.language).toBe("sh");
 	});
+
+	it("returns cancellation promptly when shell workflow scripts are aborted", async () => {
+		const cwd = await createTempDir();
+		await Settings.init({ inMemory: true, overrides: { shellPath: "/bin/sh" } });
+		const runner = createShellScriptRunner(createToolSession(cwd));
+		const controller = new AbortController();
+
+		const run = runner({
+			activationId: "activation-abort",
+			nodeId: "hold",
+			code: [
+				"printf 'started\\n' >> hold.log",
+				"sleep 2",
+				"printf '%s\\n' '{\"summary\":\"should not finish\"}'",
+			].join("\n"),
+			language: "sh",
+			title: "hold",
+			signal: controller.signal,
+		});
+		await waitForFileText(path.join(cwd, "hold.log"), "started");
+
+		const abortStartedAt = Date.now();
+		controller.abort("test stop deadline elapsed");
+		const result = await run;
+
+		expect(Date.now() - abortStartedAt).toBeLessThan(1_000);
+		expect(result.exitCode).toBe(1);
+		expect(result.error).toContain("Command cancelled");
+		expect(result.language).toBe("sh");
+	}, 5_000);
 });

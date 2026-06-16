@@ -438,6 +438,7 @@ function namespaceExternalEdge(
 	};
 	const when = importedEdgeCondition(rawEdge);
 	if (when !== undefined) edge.when = namespaceOutputConditionReferences(when, prefix, knownNodeIds);
+	if (typeof rawEdge.label === "string") edge.label = rawEdge.label;
 	return edge;
 }
 

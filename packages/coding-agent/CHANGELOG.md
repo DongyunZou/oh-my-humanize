@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added workflow edge labels so flow artifacts can provide human-facing route text for the TUI without hardcoding flow-specific state paths in workflow infrastructure.
+
 ### Changed
 
 - Changed the workflow graph TUI monitor into a resident Workflow Dashboard with a concise status strip, responsive Flow Lens, and Operator Deck for focused agents, recent output, and intervention controls.

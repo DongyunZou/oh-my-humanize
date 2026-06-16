@@ -201,6 +201,9 @@ function parseWorkflowPatchEdge(value: unknown, pathLabel: string, missingMessag
 		`${pathLabel}.condition`,
 	);
 	if (condition !== undefined) edge.condition = condition;
+	if (raw.label !== undefined) {
+		edge.label = expectWorkflowPatchString(raw.label, `${pathLabel}.label`);
+	}
 	return edge;
 }
 

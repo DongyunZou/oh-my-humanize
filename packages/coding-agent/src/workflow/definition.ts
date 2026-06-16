@@ -27,6 +27,7 @@ export interface WorkflowEdge {
 	from: string;
 	to: string;
 	condition?: WorkflowCondition;
+	label?: string;
 }
 
 export type WorkflowResourceKind = "prompt" | "script" | "data";
@@ -260,9 +261,12 @@ function parseEdges(value: unknown, sourcePath?: string): WorkflowEdge[] {
 		const from = expectString(edge.from, `edges.${index}.from`, sourcePath);
 		const to = expectString(edge.to, `edges.${index}.to`, sourcePath);
 		const when = parseOptionalString(edge.when, `edges.${index}.when`, sourcePath);
-		return when
+		const label = parseOptionalString(edge.label, `edges.${index}.label`, sourcePath);
+		const parsed: WorkflowEdge = when
 			? { from, to, condition: parseConditionSource(when, `edges.${index}.when`, sourcePath) }
 			: { from, to };
+		if (label !== undefined) parsed.label = label;
+		return parsed;
 	});
 }
 

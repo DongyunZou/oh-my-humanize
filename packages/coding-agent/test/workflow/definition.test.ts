@@ -170,6 +170,32 @@ edges:
 		expect(definition.edges[0]?.condition?.source).toBe("state.score >= 0.8 && exists(outputs.review.verdict)");
 	});
 
+	it("preserves human-facing edge labels without changing route conditions", () => {
+		const source = `
+name: labeled-condition
+version: 1
+nodes:
+  hold:
+    type: script
+  check:
+    type: script
+edges:
+  - from: check
+    to: hold
+    when: state.operatorGate.minimumSatisfied == false
+    label: long-running floor pending
+`;
+
+		const definition = parseWorkflowDefinition(source, { sourcePath: "condition.yml" });
+
+		expect(definition.edges[0]).toEqual({
+			from: "check",
+			to: "hold",
+			condition: { source: "state.operatorGate.minimumSatisfied == false" },
+			label: "long-running floor pending",
+		});
+	});
+
 	it("rejects conditions that reference unknown output nodes", () => {
 		const source = `
 name: invalid-output-reference

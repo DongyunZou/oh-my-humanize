@@ -1005,16 +1005,34 @@ describe("workflow graph view rendering", () => {
 		expect(rendered).not.toContain("outputs.reviewInvestigation.verdict");
 	});
 
-	it("renders compound long-running loop conditions as human-facing labels", () => {
-		const label = formatWorkflowConditionLabel(
-			'outputs.codexSummaryReview.verdict != "COMPLETE" || state.humanize.operatorGate.minimumSatisfied == false',
-		);
+	it("renders flow-authored edge labels without hardcoding state path semantics", () => {
+		const view = createView({
+			name: "labeled-route",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "review", type: "review" },
+				{ id: "hold", type: "script" },
+			],
+			edges: [
+				{
+					from: "review",
+					to: "hold",
+					condition: {
+						source:
+							'outputs.codexSummaryReview.verdict == "COMPLETE" && state.humanize.operatorGate.minimumSatisfied == false',
+					},
+					label: "long-running floor pending",
+				},
+			],
+		});
 
-		expect(label).toBe("codex summary review verdict is not COMPLETE or long-running floor pending");
-		expect(label).not.toContain("outputs.");
-		expect(label).not.toContain("state.");
-		expect(label).not.toContain("||");
-		expect(label).not.toContain("humanize operator gate");
+		const diagram = renderWorkflowGraphDiagram(view, { width: 96 }).join("\n");
+
+		expect(diagram).toContain("if long-running floor pending");
+		expect(diagram).not.toContain("humanize operator gate");
+		expect(diagram).not.toContain("state.humanize");
+		expect(diagram).not.toContain("outputs.codexSummaryReview");
 	});
 
 	it("renders bare state gate conditions as human-facing labels", () => {

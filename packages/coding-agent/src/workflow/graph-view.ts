@@ -129,12 +129,14 @@ export interface WorkflowGraphEdgeView {
 	from: string;
 	to: string;
 	condition?: string;
+	label?: string;
 }
 
 export interface WorkflowGraphSelectedRouteView {
 	from: string;
 	to: string;
 	condition?: string;
+	label?: string;
 }
 
 export interface WorkflowGraphCheckpointView {
@@ -235,6 +237,7 @@ export function buildWorkflowGraphView(
 		currentFreeze?.definition.edges.map(edge => {
 			const view: WorkflowGraphEdgeView = { from: edge.from, to: edge.to };
 			if (edge.condition?.source !== undefined) view.condition = edge.condition.source;
+			if (edge.label !== undefined) view.label = edge.label;
 			return view;
 		}) ?? [];
 	const topology = buildWorkflowGraphTopology(nodes, edges, currentFreeze?.definition.subflows?.length ?? 0);
@@ -510,12 +513,12 @@ function renderWorkflowGraphConnector(rankIndex: number, layout: WorkflowGraphLa
 	}
 	const rows = renderWorkflowGraphConnectorRows(directEdges, layout.totalWidth);
 	const directLabels = directEdges
-		.filter(routed => routed.edge.condition !== undefined)
+		.filter(routed => workflowGraphEdgeHasLabel(routed.edge))
 		.map(routed =>
 			renderWorkflowGraphConnectorLabel(
 				routed.target,
 				layout.labelWidth,
-				formatWorkflowGraphRouteLabel(routed.edge.condition!),
+				formatWorkflowGraphEdgeRouteLabel(routed.edge),
 			),
 		);
 	const skippedLabels = skippedEdges.map(routed =>
@@ -651,7 +654,7 @@ function formatWorkflowGraphLoopbackLabels(labels: readonly string[], labelColum
 
 function formatWorkflowGraphLoopbackLabel(edge: WorkflowGraphEdgeView): string {
 	if (edge.condition === undefined) return `↺ ${edge.to}`;
-	return `↺ ${edge.to} · ${formatWorkflowGraphRouteLabel(edge.condition)}`;
+	return `↺ ${edge.to} · ${formatWorkflowGraphEdgeRouteLabel(edge)}`;
 }
 
 interface WorkflowGraphLoopbackPath {
@@ -1128,7 +1131,8 @@ function isWorkflowDisplayRecord(value: unknown): value is Record<string, unknow
 }
 
 function formatEdgeTarget(edge: WorkflowGraphEdgeView): string {
-	return edge.condition === undefined ? edge.to : `${edge.to} when ${formatWorkflowConditionLabel(edge.condition)}`;
+	if (edge.condition === undefined) return edge.to;
+	return `${edge.to} when ${workflowGraphEdgeConditionLabel(edge)}`;
 }
 
 export function formatWorkflowSelectedRoute(route: WorkflowGraphSelectedRouteView): string {
@@ -1144,18 +1148,36 @@ export function formatWorkflowConditionLabel(condition: string): string {
 	}
 }
 
-function formatWorkflowGraphRouteLabel(condition: string): string {
+function formatWorkflowRouteConditionLabel(condition: string): string {
 	const trimmed = condition.trim();
 	try {
-		return `if ${formatWorkflowConditionAst(parseWorkflowCondition(trimmed).ast, "route")}`;
+		return formatWorkflowConditionAst(parseWorkflowCondition(trimmed).ast, "route");
 	} catch {
-		return `if ${formatWorkflowConditionFallback(trimmed, "route")}`;
+		return formatWorkflowConditionFallback(trimmed, "route");
 	}
+}
+
+function formatWorkflowGraphEdgeRouteLabel(edge: WorkflowGraphEdgeView): string {
+	return `if ${workflowGraphEdgeConditionLabel(edge, "route")}`;
 }
 
 function formatWorkflowGraphSkippedRouteLabel(edge: WorkflowGraphEdgeView): string {
 	if (edge.condition === undefined) return `to ${edge.to}`;
-	return `to ${edge.to} · ${formatWorkflowGraphRouteLabel(edge.condition)}`;
+	return `to ${edge.to} · ${formatWorkflowGraphEdgeRouteLabel(edge)}`;
+}
+
+function workflowGraphEdgeHasLabel(edge: WorkflowGraphEdgeView): boolean {
+	return edge.condition !== undefined || edge.label !== undefined;
+}
+
+function workflowGraphEdgeConditionLabel(
+	edge: WorkflowGraphEdgeView,
+	mode: WorkflowConditionLabelMode = "default",
+): string {
+	if (edge.label !== undefined) return edge.label;
+	if (edge.condition === undefined) return "";
+	if (mode === "route") return formatWorkflowRouteConditionLabel(edge.condition);
+	return formatWorkflowConditionLabel(edge.condition);
 }
 
 function formatWorkflowConditionFallback(condition: string, mode: WorkflowConditionLabelMode): string {
@@ -1201,8 +1223,6 @@ function formatWorkflowComparisonCondition(
 		const routeLabel = formatWorkflowRouteComparisonCondition(condition);
 		if (routeLabel !== undefined) return routeLabel;
 	}
-	const knownLabel = formatKnownWorkflowComparisonCondition(condition);
-	if (knownLabel !== undefined) return knownLabel;
 	const subject = formatWorkflowConditionSubjectPath(condition.leftPath, mode);
 	const relation = formatWorkflowComparisonRelation(condition.operator, mode);
 	const value = formatWorkflowConditionLiteral(condition.right);
@@ -1229,25 +1249,6 @@ function workflowConditionVerdictSubjectLabel(path: readonly string[]): string |
 	if (!/Verdict$/u.test(leaf)) return undefined;
 	const subjectLeaf = leaf.replace(/Verdict$/u, "");
 	return formatWorkflowConditionPath([...path.slice(1, -1), subjectLeaf]);
-}
-
-function formatKnownWorkflowComparisonCondition(condition: WorkflowComparisonCondition): string | undefined {
-	if (
-		condition.leftPath.length === 4 &&
-		condition.leftPath[0] === "state" &&
-		condition.leftPath[1] === "humanize" &&
-		condition.leftPath[2] === "operatorGate" &&
-		condition.leftPath[3] === "minimumSatisfied" &&
-		typeof condition.right === "boolean"
-	) {
-		const satisfied =
-			(condition.operator === "==" && condition.right) || (condition.operator === "!=" && !condition.right);
-		const pending =
-			(condition.operator === "==" && !condition.right) || (condition.operator === "!=" && condition.right);
-		if (satisfied) return "long-running floor satisfied";
-		if (pending) return "long-running floor pending";
-	}
-	return undefined;
 }
 
 function formatWorkflowComparisonRelation(
@@ -1476,6 +1477,7 @@ function buildWorkflowGraphSelectedRoutes(
 				from: edge.from,
 				to: edge.to,
 				...(edge.condition !== undefined ? { condition: edge.condition } : {}),
+				...(edge.label !== undefined ? { label: edge.label } : {}),
 			});
 		}
 	}

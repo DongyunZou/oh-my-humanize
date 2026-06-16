@@ -398,6 +398,7 @@ function artifactToExternalModule(artifact: WorkflowArtifact, importingResourceD
 		edges: artifact.definition.edges.map(edge => {
 			const rawEdge: Record<string, unknown> = { from: edge.from, to: edge.to };
 			if (edge.condition) rawEdge.when = edge.condition.source;
+			if (edge.label !== undefined) rawEdge.label = edge.label;
 			return rawEdge;
 		}),
 		entries: [...artifact.entryNodeIds],

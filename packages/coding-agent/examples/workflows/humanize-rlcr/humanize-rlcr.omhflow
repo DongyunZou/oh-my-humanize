@@ -236,17 +236,21 @@ edges:
   - from: codexSummaryReview
     to: longRunningHold
     when: outputs.codexSummaryReview.verdict == "COMPLETE" && state.humanize.operatorGate.minimumSatisfied == false
+    label: long-running floor pending
   - from: codexSummaryReview
     to: enterReviewPhase
     when: outputs.codexSummaryReview.verdict == "COMPLETE" && state.humanize.operatorGate.minimumSatisfied != false
+    label: long-running floor satisfied
   - from: longRunningHold
     to: longRunningHoldCheck
   - from: longRunningHoldCheck
     to: longRunningHold
     when: state.humanize.operatorGate.minimumSatisfied == false
+    label: long-running floor pending
   - from: longRunningHoldCheck
     to: enterReviewPhase
     when: state.humanize.operatorGate.minimumSatisfied != false
+    label: long-running floor satisfied
   - from: enterReviewPhase
     to: fixReviewIssues
   - from: fixReviewIssues
