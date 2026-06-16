@@ -26,34 +26,42 @@ The `.omhflow` file contains YAML frontmatter plus a fenced workflow block. The
 same-name directory contains prompts, scripts, templates, fixtures, and other
 resources. Resource paths inside the flow resolve from that same-name directory.
 
-## Built-In Practical Flows
+## Flow Library Tiers
 
-`omp` ships with built-in flows that can be addressed by name. A built-in flow
-must be a practical, generic workflow: it should run in a user project
-directory, take its task-specific goal from the operator or task artifacts, and
-avoid bundled seed-project assumptions.
+`omp` separates workflow artifacts into three tiers:
 
-- `humanize-rlcr` — a Humanize-style review loop with implementation and review
-  rounds. It is intended for interactive, task-driven implementation with
-  explicit operator understanding and optional long-running evidence gates.
-- `kda-humanize` — a KDA-style flow that imports a Humanize subflow.
-  It is a project-generic KDA structure for contract, inspection, planning,
-  candidate validation, and promotion; it is not GPU performance evidence unless
-  the task and environment provide that validation.
-- `parallel-implementation-review` — a compact parallel fan-out/gather
-  implementation pattern with core, test, and docs/evidence branches, followed
-  by integration review and final strong review.
-- `agent-build-review-loop` — a generator/critic refinement loop for repeated
-  build and review rounds. It uses `task.md` as the default task contract, and
-  verification comes from commands declared by that contract.
+- **Built-in practical flows** are generic, reusable workflows that ship with
+  `omp` and can be addressed by name. A flow may be promoted into this tier only
+  after stable long-running validation evidence on real projects. In OMH terms,
+  long-running means more than eight hours for a Project x Flow x Task run.
+- **Flow candidates** are promising practical workflows that still need
+  long-running evidence or design hardening. Keep them outside the package and
+  load them through `OMHFLOW_DIR` or an explicit `.omhflow` path. Candidate
+  status is not a failure; it is the evidence-gathering stage before promotion.
+- **Flow demos** are teaching artifacts, control-flow probes, UI fixtures, or
+  seed-project examples. They may be executable and useful, but they are not
+  advertised as practical out-of-the-box development workflows.
 
-The built-in set is intentionally small. Primitive examples, UX probes, and
-seed-bound demos are useful for learning or validation, but they are not exposed
-as named practical built-ins and should not be counted as reusable development
-workflows. For example, `branch-conditional`, `loop-until-done`,
-`parallel-join`, `human-interactive-dev`, and `recflow-lab-audit-events-demo`
-are executable examples under the package's workflow demo directory; use them by
-explicit artifact path when studying flow-language mechanics.
+A built-in practical flow must be project-generic: it should run in a user
+project directory, take its task-specific goal from the operator or task
+artifacts, and avoid bundled seed-project assumptions. A flow tied to a concrete
+seed project, fixture, or demo workspace must stay a demo or be split into a
+generic structure plus a separate demo binding.
+
+At the moment, the packaged built-in practical set is empty until candidates
+earn stable long-running evidence. During development, candidates such as
+Humanize RLCR or KDA-style Humanize composition can still be exercised through
+`OMHFLOW_DIR`:
+
+```sh
+export OMHFLOW_DIR="$PWD/temp/candidate-flows"
+omp workflow list
+```
+
+The built-in set should remain intentionally small and evidence-backed.
+Primitive examples, UX probes, and seed-bound demos remain executable examples
+under the package's workflow demo directory; use them by explicit artifact path
+when studying flow-language mechanics.
 
 List available flows:
 
@@ -64,17 +72,21 @@ omp workflow list
 Built-in flows are packaged workflow artifacts, not infrastructure
 dependencies. The workflow runtime, freeze checker, resolver, and CLI must also
 work with any valid standalone `.omhflow + same-name directory` artifact supplied
-by path or through `OMHFLOW_DIR`.
+by path or through `OMHFLOW_DIR`. Built-in and external flows use the same
+runtime interface; built-in status never grants a special execution path.
 
 The workflows below use the normal `omp` model, provider, auth, and tool settings.
 The flow artifact can name portable defaults, but it does not carry API keys and
 does not introduce a second model/tool configuration layer.
 
-## Humanize RLCR Workflow
+## Humanize RLCR Candidate Workflow
 
-Use `humanize-rlcr` when a task needs iterative implementation with explicit
-review gates. The flow models plan compliance, a human understanding gate,
-implementation/review looping, code-review cleanup, and final alignment.
+Use the `humanize-rlcr` candidate when a task needs iterative implementation
+with explicit review gates. The flow models plan compliance, a human
+understanding gate, implementation/review looping, code-review cleanup, and
+final alignment. Until it has stable long-running evidence, load it as an
+external candidate through `OMHFLOW_DIR` or an explicit artifact path rather
+than treating it as a packaged built-in.
 
 Prepare a project directory with a task brief:
 
@@ -90,6 +102,7 @@ EOF
 Launch the TUI from the project directory:
 
 ```sh
+export OMHFLOW_DIR=/path/to/candidate-flows
 omp
 ```
 
@@ -124,7 +137,7 @@ activation so the headless command verifies resolution, freeze, and runtime
 wiring without trying to answer the human gate:
 
 ```sh
-omp workflow start humanize-rlcr \
+OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr \
   --cwd "$PWD" \
   --run-id demo-humanize-smoke \
   --max-activations 1 \
@@ -136,9 +149,11 @@ steering, and workflow mutation are TUI-first.
 
 ## KDA Workflow
 
-Use `kda-humanize` when a task needs a KDA-style outer flow that
+Use the `kda-humanize` candidate when a task needs a KDA-style outer flow that
 loads a task contract, inspects the workspace, drafts a plan, then calls
-Humanize as a reusable subflow before candidate validation and promotion.
+Humanize as a reusable subflow before candidate validation and promotion. Until
+long-running validation promotes it, expose it through `OMHFLOW_DIR` or an
+explicit artifact path.
 
 Prepare a project directory:
 
@@ -154,6 +169,7 @@ EOF
 Launch the TUI from the project directory:
 
 ```sh
+export OMHFLOW_DIR=/path/to/candidate-flows
 omp
 ```
 
@@ -172,14 +188,14 @@ immutable task contract, inspects the workspace, drafts a plan, enters the
 imported Humanize loop, validates the candidate against the nested Humanize
 handoff, and records promotion evidence.
 
-For non-interactive validation, freeze the packaged artifact or run a bounded
+For non-interactive validation, freeze the candidate artifact or run a bounded
 headless smoke from a project directory that contains `task.md`. Full KDA runs
 still become TUI-first once the imported Humanize subflow reaches its human
 understanding gate:
 
 ```sh
-omp workflow freeze kda-humanize --json
-omp workflow start kda-humanize --json --max-activations 1
+OMHFLOW_DIR=/path/to/candidate-flows omp workflow freeze kda-humanize --json
+OMHFLOW_DIR=/path/to/candidate-flows omp workflow start kda-humanize --json --max-activations 1
 ```
 
 ## Interactive Use
@@ -188,14 +204,14 @@ Use `/workflow` inside the TUI when a human operator should observe, steer,
 interrupt, approve changes, or restart attempts.
 
 ```text
-/workflow start humanize-rlcr --family-id my-feature --background
+/workflow start ./my-flow.omhflow --family-id my-feature --background
 /workflow graph --family-id my-feature
 /workflow manager --family-id my-feature
 /workflow stop my-run:attempt-1 --deadline-ms 30000
 /workflow restart my-run:attempt-1:checkpoint-1 --freeze-id flowfreeze:...
 ```
 
-`/workflow start <flow-or-path>` accepts either a named built-in or installed
+`/workflow start <flow-or-path>` accepts a named verified built-in or installed
 flow, a direct `.omhflow` path, a workflow YAML file, or a directory containing
 `workflow.yml`.
 
@@ -252,10 +268,10 @@ Use `omp workflow` for scripting, CI-style checks, or deterministic workflow
 smoke runs without opening the TUI.
 
 ```sh
-omp workflow freeze humanize-rlcr
+OMHFLOW_DIR=/path/to/candidate-flows omp workflow freeze humanize-rlcr
 omp workflow start ./my-flow.omhflow --run-id run-1 --max-activations 20
-omp workflow start humanize-rlcr --json --max-activations 1
-omp workflow start humanize-rlcr --json --max-runtime-ms 60000
+OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr --json --max-activations 1
+OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr --json --max-runtime-ms 60000
 ```
 
 Headless workflow runs reuse the existing `omp` runtime boundary. Shell and JS
@@ -283,10 +299,10 @@ omp workflow list
 omp workflow start team-release-hardening
 ```
 
-For a named lookup, `omp` treats bundled and external artifacts as peers. A flow
-name must resolve to exactly one artifact across bundled flows and
-`OMHFLOW_DIR`; if a bundled flow and an external flow share the same name, the
-lookup is rejected as ambiguous. Use an explicit `.omhflow` path to select a
+For a named lookup, `omp` treats verified built-in and external artifacts as
+peers. A flow name must resolve to exactly one artifact across built-in flows
+and `OMHFLOW_DIR`; if a built-in flow and an external flow share the same name,
+the lookup is rejected as ambiguous. Use an explicit `.omhflow` path to select a
 specific artifact.
 Each flow can be laid out either as `<dir>/<name>.omhflow` plus `<dir>/<name>/`,
 or as `<dir>/<name>/<name>.omhflow` plus `<dir>/<name>/<name>/`.

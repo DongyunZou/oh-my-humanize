@@ -83,7 +83,7 @@ export async function resolveWorkflowFlowSpec(
 	if (namedCandidates[0] !== undefined) return namedCandidates[0];
 
 	throw new WorkflowArtifactRegistryError(
-		`workflow flow "${input}" was not found. Use a path, a built-in flow name, or add a .omhflow artifact to ${OMHFLOW_DIR_ENV}.`,
+		`workflow flow "${input}" was not found. Use a path, a verified built-in flow name, or add a .omhflow artifact to ${OMHFLOW_DIR_ENV}.`,
 	);
 }
 

@@ -1406,36 +1406,48 @@ edges: []
 		]);
 	});
 
-	it("resolves bundled workflow artifact names for freeze and start commands", async () => {
+	it("keeps unverified candidate names out of bundled lookup while explicit artifacts still freeze and start", async () => {
+		const missingEntries: CapturedEntry[] = [];
+		const missingRuntime = createRuntime(missingEntries);
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				"/workflow freeze humanize-rlcr --family-id family-unverified-candidate",
+				missingRuntime.runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(missingRuntime.output.at(-1)).toContain('workflow flow "humanize-rlcr" was not found');
+		expect(reconstructWorkflowFamilies(missingEntries)).toEqual([]);
+
+		const dir = await createTempDir();
+		const flowPath = path.join(dir, "release.omhflow");
+		await fs.mkdir(path.join(dir, "release"), { recursive: true });
+		await Bun.write(flowPath, workflowArtifactSource());
 		const freezeEntries: CapturedEntry[] = [];
 		const freezeRuntime = createRuntime(freezeEntries);
 
 		expect(
 			await executeAcpBuiltinSlashCommand(
-				"/workflow freeze humanize-rlcr --family-id family-builtin-freeze",
+				`/workflow freeze ${flowPath} --family-id family-explicit-freeze`,
 				freezeRuntime.runtime,
 			),
 		).toEqual({ consumed: true });
-		expect(reconstructWorkflowFamilies(freezeEntries)[0]?.freezes[0]?.flowPath).toContain(
-			path.join("examples", "workflows", "humanize-rlcr", "humanize-rlcr.omhflow"),
-		);
+		expect(reconstructWorkflowFamilies(freezeEntries)[0]?.freezes[0]?.flowPath).toBe(flowPath);
 
 		const startEntries: CapturedEntry[] = [];
 		const { runtime } = createRuntime(startEntries, {});
 
 		expect(
 			await executeAcpBuiltinSlashCommand(
-				"/workflow start humanize-rlcr --run-id run-builtin --family-id family-builtin-start --max-activations 0",
+				`/workflow start ${flowPath} --run-id run-explicit --family-id family-explicit-start --max-activations 0`,
 				runtime,
 			),
 		).toEqual({ consumed: true });
 		const family = reconstructWorkflowFamilies(startEntries)[0];
-		expect(family?.id).toBe("family-builtin-start");
-		expect(family?.freezes[0]?.flowPath).toContain(
-			path.join("examples", "workflows", "humanize-rlcr", "humanize-rlcr.omhflow"),
-		);
+		expect(family?.id).toBe("family-explicit-start");
+		expect(family?.freezes[0]?.flowPath).toBe(flowPath);
 		expect(family?.attempts.map(attempt => [attempt.id, attempt.status])).toEqual([
-			["run-builtin:attempt-1", "stopped"],
+			["run-explicit:attempt-1", "stopped"],
 		]);
 	});
 

@@ -31,28 +31,26 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 `/workflow` turns omp into an interactive agentic workflow runner: freeze a
 distributable `.omhflow + resources` artifact, run it with a live TUI graph,
 stop/checkpoint a production attempt, approve flow changes, and restart safely.
-Built-in flows are practical, generic workflows that are meant to work
-out-of-the-box on a real project directory: `humanize-rlcr`,
-`kda-humanize`, `parallel-implementation-review`, and
-`agent-build-review-loop`. Smaller control-flow primitives and seed-bound
-examples ship as workflow demos, not promoted built-ins. External flows can be
-installed with `omp workflow install` or discovered through `OMHFLOW_DIR`.
+Built-in flows are reserved for practical, generic workflows with stable
+long-running validation evidence on real projects. Unverified but promising
+flows stay outside the package as candidates and can be loaded through
+`OMHFLOW_DIR`; seed-bound or teaching artifacts stay demos. External flows can
+be installed with `omp workflow install` or discovered through `OMHFLOW_DIR`.
 
 ```sh
 omp workflow list
-omp workflow start humanize-rlcr --max-activations 1
+omp workflow start ./my-flow.omhflow --max-activations 1
 ```
 
 Inside the TUI:
 
 ```text
-/workflow start humanize-rlcr --background
+/workflow start ./my-flow.omhflow --background
 /workflow manager
 ```
 
-See [docs/workflows.md](docs/workflows.md) for artifact layout,
-`humanize-rlcr` and KDA workflow walkthroughs, non-interactive usage,
-install/uninstall, and lifecycle commands.
+See [docs/workflows.md](docs/workflows.md) for artifact layout, flow promotion
+policy, non-interactive usage, install/uninstall, and lifecycle commands.
 
 ## Install
 

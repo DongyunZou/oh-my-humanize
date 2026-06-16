@@ -439,9 +439,15 @@ function workflowStartConflict(
 async function handleFreezeCommand(rest: string, runtime: SlashCommandRuntime): Promise<SlashCommandResult> {
 	const parsed = parseWorkflowFreezeArgs(rest);
 	if ("error" in parsed) return usage(parsed.error, runtime);
-	const spec = await resolveWorkflowFlowSpec(parsed.workflowPath, { cwd: runtime.cwd });
-	const artifact = await loadWorkflowArtifact(spec.path);
-	const freeze = await freezeWorkflowArtifact(artifact);
+	let artifact: WorkflowArtifact;
+	let freeze: FlowFreeze;
+	try {
+		const spec = await resolveWorkflowFlowSpec(parsed.workflowPath, { cwd: runtime.cwd });
+		artifact = await loadWorkflowArtifact(spec.path);
+		freeze = await freezeWorkflowArtifact(artifact);
+	} catch (error) {
+		return usage(errorMessage(error), runtime);
+	}
 	const familyId = parsed.familyId ?? `${freeze.id}:family`;
 	const existingFamily = reconstructWorkflowFamilies(runtime.sessionManager.getBranch()).find(
 		candidate => candidate.id === familyId,

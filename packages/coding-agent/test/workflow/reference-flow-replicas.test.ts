@@ -231,13 +231,10 @@ describe("reference workflow replicas", () => {
 		).toContain("Candidate summary:\ncandidate v1 needs more evidence");
 	});
 
-	it("keeps built-in KDA retry reviews stable across checkpoint restarts", async () => {
-		const artifact = await loadWorkflowArtifact(
-			path.resolve(
-				import.meta.dir,
-				"../../examples/workflows/kda-humanize-reference/kda-humanize-reference.omhflow",
-			),
-		);
+	it("keeps KDA retry review prompts stable across checkpoint restarts", async () => {
+		const dir = await createTempDir();
+		const kdaPath = await writeKdaHumanizeReferenceFlow(dir);
+		const artifact = await loadWorkflowArtifact(kdaPath);
 		const freeze = await freezeWorkflowArtifact(artifact);
 
 		await expectReviewPromptUsesLatestOutput(
@@ -252,8 +249,8 @@ describe("reference workflow replicas", () => {
 			freeze.definition.nodes,
 			artifact.resourceDir,
 			freeze.resourceSnapshots,
-			"humanize__codeReviewGate",
-			"humanize__fixCodeReviewIssues",
+			"humanize__codeReview",
+			"humanize__fixReviewIssues",
 			"second Humanize code-review fix",
 		);
 		await expectReviewPromptUsesLatestOutput(

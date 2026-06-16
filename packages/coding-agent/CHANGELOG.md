@@ -15,6 +15,7 @@
 - Changed dashboard responsive behavior for compact, wide, and ultrawide terminals so the graph and operator controls stay visible while less urgent details are clipped.
 - Changed dashboard status language to distinguish live/running work from checkpoint frontiers, using `focus`/`frontier`/`Operator Deck` labels when no Agent Hub target is on-flight.
 - Changed named workflow lookup to treat bundled and `OMHFLOW_DIR` artifacts as peers: same-name matches are now rejected as ambiguous instead of silently preferring the bundled flow.
+- Changed workflow library policy so packaged built-in flows are reserved for practical, generic workflows with stable long-running evidence; unverified practical flows stay as `OMHFLOW_DIR` candidates and seed-bound artifacts stay demos.
 
 ### Fixed
 
@@ -39,6 +40,11 @@
 - Fixed workflow-owned task agents remaining live after their node result was captured, so completed workflow activations preserve transcripts without continuing to mutate workspaces or receive IRC wakeups outside the workflow frontier.
 - Fixed bundled KDA Humanize evidence recording so its script runs under the workflow eval runtime instead of using module-only import syntax.
 - Fixed Agent Hub labeling for parked agents that have no reviver, showing them as history-only transcript entries instead of implying they can be revived.
+
+### Removed
+
+- Removed unverified practical workflow artifacts from `packages/coding-agent/examples/workflows`; Humanize RLCR, KDA Humanize, parallel implementation/review, and agent build/review loop must remain external candidates until stable long-running validation promotes them.
+
 ## [16.0.2] - 2026-06-16
 
 ### Added
