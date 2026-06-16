@@ -6,7 +6,17 @@ archive="workflow-output/final-agent-loop-archive.md"
 verify_result='not-specified'
 verify_command=''
 if [ -f task.md ]; then
-  verify_command="$(sed -n -E 's/^[[:space:]]*(verify|verification command|validation command)[[:space:]]*:[[:space:]]*(.+)$/\2/ip' task.md | head -n 1)"
+  verify_command="$(awk '
+    {
+      line = $0
+      lower = tolower(line)
+      if (lower ~ /^[[:space:]]*(verify|verification command|validation command)[[:space:]]*:/) {
+        sub(/^[^:]*:[[:space:]]*/, "", line)
+        print line
+        exit
+      }
+    }
+  ' task.md)"
 fi
 
 {

@@ -97,6 +97,45 @@ describe("workflow artifact registry", () => {
 		}
 	});
 
+	it("executes bundled agent build/review verification declared by the task artifact", async () => {
+		const spec = await resolveWorkflowFlowSpec("agent-build-review-loop", { cwd: process.cwd(), flowDirs: [] });
+		const artifact = await loadWorkflowArtifact(spec.path);
+		const freeze = await freezeWorkflowArtifact(artifact);
+		const taskDir = await createTempDir();
+		await Bun.write(
+			path.join(taskDir, "task.md"),
+			[
+				"# Task-declared verification",
+				"",
+				"Goal: prove the built-in flow reads the task contract instead of assuming a project stack.",
+				"Validation Command: printf 'verified task contract\\n' && test -f task.md",
+			].join("\n"),
+		);
+		const host = createRunHost();
+
+		const result = await runWorkflow({
+			host,
+			definition: freeze.definition,
+			runId: "agent-build-review-task-verification",
+			startNodeId: "initializeLoop",
+			runtimeHost: createSessionWorkflowRuntimeHost({
+				cwd: taskDir,
+				runShellScript: request => runShellWorkflowScript(taskDir, request),
+			}),
+			packageRoot: artifact.resourceDir,
+			frozenResources: freeze.resourceSnapshots,
+			maxActivations: 1,
+		});
+
+		expect(result.scheduler.activations.map(activation => activation.nodeId)).toEqual(["initializeLoop"]);
+		expect(result.scheduler.frontierNodeIds).toEqual(["buildRound"]);
+		const progress = expectRecord(result.scheduler.state.progress, "agent build/review progress");
+		expect(progress.verification).toBe("pass");
+		await expect(
+			Bun.file(path.join(taskDir, "workflow-output", "initial-loop-snapshot.md")).text(),
+		).resolves.toContain("verified task contract");
+	});
+
 	it("runs explicit control-flow primitive example artifacts in a generic workspace", async () => {
 		const demoRoot = path.join(path.dirname(getBuiltinWorkflowRoot()), "workflow-demos");
 		for (const name of ["branch-conditional", "loop-until-done", "parallel-join"]) {
