@@ -147,7 +147,7 @@ OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr \
 The headless path is useful for freeze/runtime checks. Human nodes, active-agent
 steering, and workflow mutation are TUI-first.
 
-## KDA Workflow
+## KDA Candidate Workflow
 
 Use the `kda-humanize` candidate when a task needs a KDA-style outer flow that
 loads a task contract, inspects the workspace, drafts a plan, then calls

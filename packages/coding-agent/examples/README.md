@@ -13,6 +13,17 @@ Example hooks for intercepting tool calls, adding safety gates, and integrating 
 ### [custom-tools/](custom-tools/)
 Example custom tools that extend the agent's capabilities.
 
+### [workflow-demos/](workflow-demos/)
+Workflow-language demos and fixtures. These artifacts may be executable, but
+they are not packaged practical workflows and should be used by explicit path.
+
+### workflows/
+Reserved for built-in practical workflow artifacts. A workflow may be added here
+only after it is generic, useful on real projects, and backed by stable
+long-running validation evidence. Unverified practical flows belong in an
+external candidate directory such as `OMHFLOW_DIR`; seed-bound or teaching
+artifacts belong in `workflow-demos/`.
+
 ## Documentation
 
 - [SDK Reference](sdk/README.md)
