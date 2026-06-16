@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { commands, isSubcommand, resolveCliArgv } from "@oh-my-pi/pi-coding-agent/cli-commands";
 import { buildHeadlessAgentTaskArgs, resolveWorkflowCommandArgs } from "../src/cli/workflow-cli";
+import Workflow from "../src/commands/workflow";
 
 describe("workflow command is registered as a top-level subcommand", () => {
 	test("CLI runner routes workflow commands to the workflow command, not launch", () => {
@@ -13,6 +14,15 @@ describe("workflow command is registered as a top-level subcommand", () => {
 		expect(resolveCliArgv(["flow", "start", "humanize-rlcr"])).toEqual({
 			argv: ["flow", "start", "humanize-rlcr"],
 		});
+	});
+
+	test("help examples keep unverified candidate flows out of built-in examples", () => {
+		const examples = Workflow.examples.join("\n");
+
+		expect(examples).not.toContain("Start a flow by built-in name");
+		expect(examples).not.toContain("\n  omp workflow start humanize-rlcr");
+		expect(examples).toContain("OMHFLOW_DIR=./candidate-flows omp workflow start humanize-rlcr");
+		expect(examples).toContain("OMHFLOW_DIR");
 	});
 });
 

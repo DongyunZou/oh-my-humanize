@@ -42,8 +42,9 @@ export default class Workflow extends Command {
 	};
 
 	static examples = [
-		`# List built-in and installed workflow flows\n  ${APP_NAME} workflow list`,
-		`# Start a flow by built-in name without opening the TUI\n  ${APP_NAME} workflow start humanize-rlcr --max-activations 1`,
+		`# List verified built-in and installed workflow flows\n  ${APP_NAME} workflow list`,
+		`# Start a distributable artifact by path without opening the TUI\n  ${APP_NAME} workflow start ./my-flow.omhflow --max-activations 1`,
+		`# Start a candidate or installed flow by name through OMHFLOW_DIR\n  OMHFLOW_DIR=./candidate-flows ${APP_NAME} workflow start humanize-rlcr --max-activations 1`,
 		`# Install a distributable .omhflow artifact into OMHFLOW_DIR or ~/.omp/flows\n  ${APP_NAME} workflow install ./my-flow.omhflow`,
 	];
 

@@ -16,30 +16,20 @@
 - Changed dashboard status language to distinguish live/running work from checkpoint frontiers, using `focus`/`frontier`/`Operator Deck` labels when no Agent Hub target is on-flight.
 - Changed named workflow lookup to treat bundled and `OMHFLOW_DIR` artifacts as peers: same-name matches are now rejected as ambiguous instead of silently preferring the bundled flow.
 - Changed workflow library policy so packaged built-in flows are reserved for practical, generic workflows with stable long-running evidence; unverified practical flows stay as `OMHFLOW_DIR` candidates and seed-bound artifacts stay demos.
+- Changed `omp workflow` help examples to start distributable artifacts by path or candidate flows through `OMHFLOW_DIR`, avoiding bare-name examples for unverified candidates.
 
 ### Fixed
 
 - Fixed workflow shell script nodes to run through one-shot shell executions instead of accumulating persistent shell sessions across long activation loops.
 - Fixed workflow dashboard role labels for builder fixer nodes whose ids mention review, so on-flight repair agents are not shown as reviewers.
-- Fixed bundled KDA Humanize nested code review so the implementation is reviewed before the fixer runs, and fixer prompts receive the blocking review findings before looping back to the gate.
-- Fixed bundled KDA Humanize so long-running task contracts enter a duration hold/check loop before evidence recording and promotion instead of completing immediately after candidate validation.
-- Fixed bundled KDA Humanize plan-compliance handoff so repairable validation gaps are not rejected solely because the target validation artifact does not exist before implementation.
-- Fixed bundled KDA Humanize evidence recording so durable evidence falls back to completed workflow activation outputs when agents/reviews return summaries without state patches.
-- Fixed bundled agent build/review workflow startup so it records the declared validation command without executing heavy project verification before the first build round.
-- Fixed bundled Humanize RLCR operator-gate parsing so an explicit leading `Proceed` is not overwritten by later instructions that mention stop/checkpoint handling.
 - Fixed workflow launch validation so nested state conditions must be declared in the flow schema, checkpoint restarts cannot skip incomplete join inputs, and runtime binding hard failures only block frontier nodes that are about to execute.
 - Fixed workflow review verdict extraction preferring incidental later gate mentions over an explicit first-line verdict, and made active `/workflow stop` requests immediately persist as `stop_requested` before waiting for the stop deadline.
 - Fixed `omp workflow` headless commands showing TypeScript stack traces for workflow artifact lookup/load errors such as ambiguous bundled/`OMHFLOW_DIR` flow names or directory paths passed where a `.omhflow` file is required; they now print a concise user-facing diagnostic and exit nonzero.
 - Fixed workflow dashboard monitor targeting so stale focused-agent ids without a matching active workflow agent no longer advertise Agent Hub, hub, or steer controls.
 - Fixed workflow dashboard on-flight wording so running program or human work is labeled as live work instead of live agents when no Agent Hub target exists.
-- Fixed bundled practical workflow artifacts that still declared the non-canonical `shell` tool capability, so runtime binding diagnostics use the canonical `bash` capability that the workflow host can resolve.
-- Fixed bundled practical workflow artifacts so KDA consumes nested Humanize gate outcomes and handoff evidence, Humanize final alignment can route through rework, parallel implementation requires a task contract before agent fan-out, and agent build/review loop scripts avoid shell-specific workspace scans.
-- Fixed bundled agent build/review workflow startup so it fails before agent fan-out when `task.md` or its `Validation Command` is missing, instead of continuing with weak task context.
-- Fixed bundled agent build/review workflow task parsing so `Validation Command:` may use the same next-line command format as distributable Phase 3 task contracts.
 - Fixed workflow dashboard height clipping so the hidden-rows marker preserves the outer TUI frame and renders as a dashboard divider instead of looking like broken nested panel content.
 - Fixed workflow monitor activation in the TUI so the welcome/onboarding panel is removed from the current viewport when a workflow dashboard becomes active.
 - Fixed workflow-owned task agents remaining live after their node result was captured, so completed workflow activations preserve transcripts without continuing to mutate workspaces or receive IRC wakeups outside the workflow frontier.
-- Fixed bundled KDA Humanize evidence recording so its script runs under the workflow eval runtime instead of using module-only import syntax.
 - Fixed Agent Hub labeling for parked agents that have no reviver, showing them as history-only transcript entries instead of implying they can be revived.
 
 ### Removed
