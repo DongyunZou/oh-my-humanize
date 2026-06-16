@@ -105,8 +105,7 @@ sequence:
             plan:
               state: /plan
       gates:
-        - continue
-        - finish
+        - reviewed
   - node:
       id: strongReview
       type: review

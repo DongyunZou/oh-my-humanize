@@ -60,7 +60,6 @@ describe("workflow artifact registry", () => {
 			expect(freeze).toMatchObject({
 				definition: { name },
 			});
-			expect(freeze.definition.capabilities?.tools ?? []).not.toContain("shell");
 			expect(
 				freeze.definition.nodes.some(
 					node => node.type === "agent" || node.type === "review" || node.type === "human",

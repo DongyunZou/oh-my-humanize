@@ -10,14 +10,8 @@ Shared plan:
 {{jsonStringify plan}}
 ```
 
-Return exactly one verdict token on the final non-empty line:
+Summarize changed files, verification evidence, unresolved risks, branch
+conflicts, and the highest-priority follow-up for the final strong reviewer.
+This node records integration evidence; it does not decide promotion.
 
-- `finish` if the parallel branches produced a coherent, reviewable increment
-  with at least one meaningful implementation, validation, or documentation
-  artifact and no obvious conflict between branches.
-- `continue` if branches conflict, no meaningful project progress was made, the
-  task contract is ignored, or the next iteration needs a specific follow-up.
-
-Before the token, summarize changed files, verification evidence, unresolved
-risks, and the highest-priority follow-up. A `finish` verdict only means the
-parallel branches are ready for the final strong review in this flow.
+Put exactly one token on the final non-empty line: `reviewed`.
