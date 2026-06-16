@@ -30,6 +30,7 @@
 - Fixed bundled agent build/review workflow task parsing so `Validation Command:` may use the same next-line command format as distributable Phase 3 task contracts.
 - Fixed workflow dashboard height clipping so the hidden-rows marker preserves the outer TUI frame and renders as a dashboard divider instead of looking like broken nested panel content.
 - Fixed workflow monitor activation in the TUI so the welcome/onboarding panel is removed from the current viewport when a workflow dashboard becomes active.
+- Fixed workflow-owned task agents remaining live after their node result was captured, so completed workflow activations preserve transcripts without continuing to mutate workspaces or receive IRC wakeups outside the workflow frontier.
 
 ## [16.0.1] - 2026-06-15
 

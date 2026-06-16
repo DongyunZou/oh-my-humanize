@@ -259,6 +259,13 @@ export interface ExecutorOptions {
 	/** Override local:// protocol options so subagent shares parent's local:// root */
 	localProtocolOptions?: LocalProtocolOptions;
 	/**
+	 * What to do with a successful non-isolated subagent after its result is
+	 * captured. The default keeps normal task agents live/revivable. Workflow
+	 * node agents use "park" so a completed activation cannot keep mutating the
+	 * workspace or wake via IRC outside the workflow frontier.
+	 */
+	completionLifecycle?: "adopt" | "park";
+	/**
 	 * Parent session's ArtifactManager. Subagent adopts it so artifact IDs are
 	 * unique across the whole agent tree and all artifacts land in the parent's
 	 * artifacts directory (no per-subagent subdir).
@@ -1605,6 +1612,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		signal,
 		onProgress,
 	} = options;
+	const completionLifecycle = options.completionLifecycle ?? "adopt";
 	const startTime = Date.now();
 
 	// Check if already aborted
@@ -2125,10 +2133,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					} catch {
 						// Ignore cleanup errors
 					}
-				} else if (worktree !== undefined) {
-					// Isolated run: the worktree is merged + cleaned after the run, so
-					// the session is not resumable. Park the ref WITHOUT adopting — the
-					// transcript stays reachable (history://), but ensureLive will throw.
+				} else if (worktree !== undefined || completionLifecycle === "park") {
+					// Isolated and workflow-owned runs are not live follow-up agents.
+					// Park the ref WITHOUT adopting: the transcript stays reachable
+					// (history://), but ensureLive will throw and IRC cannot wake it.
 					// Status must flip to "parked" before dispose so the sdk dispose
 					// wrapper skips unregister.
 					registry.setStatus(id, "parked");

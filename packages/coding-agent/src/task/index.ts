@@ -1308,6 +1308,7 @@ export class TaskTool implements AgentTool<TaskToolSchemaInstance, TaskToolDetai
 				parentMnemopiSessionState: this.session.getMnemopiSessionState?.(),
 				parentTelemetry: this.session.getTelemetry?.(),
 				parentEvalSessionId,
+				completionLifecycle: this.session.taskAgentCompletionLifecycle,
 			};
 
 			const runTask = async (): Promise<SingleResult> => {

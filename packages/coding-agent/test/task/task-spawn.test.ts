@@ -187,4 +187,29 @@ describe("task spawn routing", () => {
 		expect(firstJob.status).toBe("completed");
 		expect(secondJob.status).toBe("completed");
 	});
+
+	it("passes the session task-agent completion lifecycle to synchronous spawns", async () => {
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
+			agents: [taskAgent],
+			projectAgentsDir: null,
+		});
+		const runSpy = vi
+			.spyOn(executorModule, "runSubprocess")
+			.mockImplementation(async options => makeResult(options.id ?? "?"));
+		const session = {
+			...createSession({}),
+			taskAgentCompletionLifecycle: "park",
+		} as ToolSession;
+		const tool = await TaskTool.create(session);
+
+		const result = await tool.execute("tc-sync-lifecycle", {
+			agent: "task",
+			id: "WorkflowNode",
+			assignment: "Run a workflow-owned task.",
+		} as TaskParams);
+
+		expect(result.details?.results[0]?.id).toBe("WorkflowNode");
+		expect(runSpy).toHaveBeenCalledTimes(1);
+		expect(runSpy.mock.calls[0]?.[0].completionLifecycle).toBe("park");
+	});
 });

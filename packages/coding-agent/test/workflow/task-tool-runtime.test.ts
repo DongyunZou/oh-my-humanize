@@ -194,6 +194,47 @@ describe("workflow task tool runtime adapter", () => {
 		expect(parentSettings.get("async.enabled")).toBe(true);
 	});
 
+	it("parks workflow-owned agents after synchronous task results", async () => {
+		let capturedSession: ToolSession | undefined;
+		const taskTool = {
+			execute: async (): Promise<AgentToolResult<TaskToolDetails>> => ({
+				content: [{ type: "text", text: "task tool completed" }],
+				details: {
+					projectAgentsDir: null,
+					totalDurationMs: 12,
+					results: [
+						{
+							index: 0,
+							id: "build",
+							agent: "task",
+							agentSource: "project",
+							task: "Implement the workflow feature.",
+							assignment: "Implement the workflow feature.",
+							description: "Builder · Build",
+							exitCode: 0,
+							output: "agent completed",
+							stderr: "",
+							truncated: false,
+							durationMs: 12,
+							tokens: 0,
+							requests: 1,
+						},
+					],
+				},
+			}),
+		};
+		vi.spyOn(taskModule.TaskTool, "create").mockImplementation(async session => {
+			capturedSession = session;
+			return taskTool as unknown as taskModule.TaskTool;
+		});
+		const runner = createTaskToolAgentRunner(createToolSession());
+
+		const result = await runner(createRequest());
+
+		expect(result.exitCode).toBe(0);
+		expect(capturedSession?.taskAgentCompletionLifecycle).toBe("park");
+	});
+
 	it("passes workflow abort signals into TaskTool execution", async () => {
 		const controller = new AbortController();
 		let capturedSignal: AbortSignal | undefined;

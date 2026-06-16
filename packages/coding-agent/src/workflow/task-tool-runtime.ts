@@ -60,10 +60,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function synchronousTaskToolSession(toolSession: ToolSession): Promise<ToolSession> {
-	if (!toolSession.settings.get("async.enabled")) return toolSession;
+	const workflowToolSession: ToolSession = { ...toolSession, taskAgentCompletionLifecycle: "park" };
+	if (!toolSession.settings.get("async.enabled")) return workflowToolSession;
 	const settings = await toolSession.settings.cloneForCwd(toolSession.cwd);
 	settings.override("async.enabled", false);
-	return { ...toolSession, settings };
+	return { ...workflowToolSession, settings };
 }
 
 function textContent(content: Array<{ type: string; text?: string }>): string {

@@ -152,6 +152,13 @@ export interface ToolSession {
 	/** Whether UI is available */
 	hasUI: boolean;
 	/**
+	 * Internal task-agent completion policy. Normal interactive task agents are
+	 * adopted so the user can keep chatting with them. Workflow-owned agents run
+	 * as production node activations and should be parked after their result is
+	 * captured, preserving transcript history without leaving a live mutable peer.
+	 */
+	taskAgentCompletionLifecycle?: "adopt" | "park";
+	/**
 	 * Suppress the spawn specialization/coordination advisory appended to `task`
 	 * results. Set by internal/programmatic callers (e.g. the commit agent's
 	 * file-analysis fan-out) whose results are consumed by code — not by a model
