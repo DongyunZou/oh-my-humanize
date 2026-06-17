@@ -106,7 +106,7 @@ export const TAB_METADATA: Record<SettingTab, { label: string; icon: `tab.${stri
  */
 export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 	appearance: ["Theme", "Status Line", "Display", "Images"],
-	model: ["Thinking", "Sampling", "Prompt", "Retry & Fallback", "Advisor"],
+	model: ["Thinking", "Sampling", "Prompt", "Retry & Fallback", "Advisor", "Vision"],
 	interaction: [
 		"Input",
 		"Approvals",
@@ -117,6 +117,7 @@ export const TAB_GROUPS: Record<SettingTab, readonly string[]> = {
 		"Startup & Updates",
 		"Power (macOS)",
 		"Agent",
+		"Git",
 	],
 	context: ["General", "Compaction", "Rules (TTSR)", "Experimental"],
 	memory: ["General", "Auto-Learn", "Mnemopi", "Hindsight"],
@@ -412,6 +413,25 @@ export const SETTINGS_SCHEMA = {
 			label: "Advisor Sync Backlog",
 			description:
 				"Pause the main agent for up to 30 seconds if the advisor falls behind by this many turns. Off disables catch-up delays.",
+		},
+	},
+	"advisor.immuneTurns": {
+		type: "number",
+		default: 1,
+		ui: {
+			tab: "model",
+			group: "Advisor",
+			label: "Advisor Immune Turns",
+			description:
+				"After an advisor concern or blocker interrupts, route further concerns/blockers non-interruptingly for this many primary turns.",
+			options: [
+				{ value: "0", label: "0 turns", description: "Allow every concern/blocker to interrupt." },
+				{ value: "1", label: "1 turn", description: "Default." },
+				{ value: "2", label: "2 turns" },
+				{ value: "3", label: "3 turns" },
+				{ value: "4", label: "4 turns" },
+				{ value: "5", label: "5 turns" },
+			],
 		},
 	},
 	shellPath: { type: "string", default: undefined },

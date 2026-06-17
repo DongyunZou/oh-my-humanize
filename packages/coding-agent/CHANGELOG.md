@@ -45,6 +45,9 @@
 - Added automatic endpoint-mode support for google-antigravity provider calls so users can force production-only or sandbox-only usage
 - Added `images.describeForTextModels` option (default `true`) to control automatic image description for attachments sent to models without vision input
 - Added automatic vision fallback prompts to describe images for text-only models
+- Added `advisor.immuneTurns` setting (default `1`) to limit how often advisor `concern`/`blocker` notes can interrupt the primary agent.
+- Added a main-session `session_stop` extension event with continuation feedback and an 8-continuation loop cap ([#2834](https://github.com/can1357/oh-my-pi/issues/2834)).
+- Added `--max-time <seconds>` so CLI sessions can stop after a wall-clock deadline.
 
 ### Changed
 
@@ -54,6 +57,9 @@
 
 ### Fixed
 
+- Fixed Matplotlib figure display to emit PNG output immediately when `display(fig)` is called, even if the figure is closed before the end-of-cell flush
+- Fixed persisted tool-result image payloads in `details.images` to externalize and resolve through the session blob store, so generated-image details survive resume without stale blob refs or truncation
+- Fixed duplicate Matplotlib image output by skipping the automatic end-of-request figure flush for figures that were already displayed through `display(fig)`
 - Fixed google-antigravity image generation and web search requests to fail over to the alternate antigravity endpoint on 429/server/network failures instead of stopping at the first endpoint
 - Fixed context usage breakdown to use a completed assistant usage anchor from the current turn instead of a pending prompt snapshot so totals no longer overcount when a large in-turn tool step returns usage
 - Fixed side-channel turns and advisor requests to keep using credential resolvers during retries, so Google `Resource exhausted` 429s can rotate to the next account instead of surfacing a terminal error banner
@@ -63,6 +69,13 @@
 - Fixed the status-line context% reading inflated during long tool turns and then dropping sharply on the next message even though no compaction ran. While a request was in flight `getContextBreakdown` summed a cl100k estimate of the entire tail on top of the stale turn-start prompt and never re-anchored to completed in-turn steps; it now prefers the real provider prompt-token count of any step that resolves at or after the pending cutoff. The status-line memo also keys on a `contextUsageRevision` that bumps when the in-flight snapshot is set/cleared, so a mid-turn estimate is invalidated on turn end/abort instead of surviving into idle until the next message
 - Fixed image attachment handling for text-only models by saving attachments to `local://` and injecting generated descriptions so they are no longer lost when the target model cannot process images
 - Fixed the ssh tool rejecting valid Windows identity files before invoking OpenSSH by skipping Unix mode-bit key validation on native Windows ([#2850](https://github.com/can1357/oh-my-pi/issues/2850)).
+- Fixed `web_search`/`omp q` aborting before any provider ran when the global Settings singleton was not initialized; `executeSearch` now reads `providers.antigravityEndpoint` once and tolerates an uninitialized settings store instead of throwing
+- Fixed the new `git.enabled` and `images.describeForTextModels` settings declaring section groups (`Git`, `Vision`) that were not registered in `TAB_GROUPS`, so they now render in their intended settings-panel sections
+- Fixed Python `display(fig)` for Matplotlib figures to emit PNG output immediately, even when user code closes the figure before the end-of-cell flush.
+- Fixed persisted tool-result image payloads stored in `details.images` to externalize and resolve through the session blob store, so generated-image details survive resume without stale blob refs or truncation.
+- Fixed the `tools.format` setting schema so `minimax` can be selected as an owned tool-calling dialect, and taught auto mode to route tool-less MiniMax-family models to the MiniMax owned dialect. ([#2759](https://github.com/can1357/oh-my-pi/issues/2759))
+- Fixed WSL2 TUI stutter by adding a `git.enabled` setting and skipping footer/status-line git probes when disabled or when no git-backed status segment is visible ([#2847](https://github.com/can1357/oh-my-pi/issues/2847)).
+- Fixed JSON-mode startup notices (export/resume/session-picker messages) writing to stdout before the JSON event stream; they now route to stderr so stdout remains newline-delimited JSON.
 
 ## [16.0.4] - 2026-06-17
 
@@ -71,13 +84,6 @@
 - Fixed RPC/ACP startup forcing todo settings back to host defaults, so project-level `todo.enabled`, `todo.reminders`, and `todo.eager` opt-outs now suppress protocol-mode todo prompt injection; enabled todo reminders are now persisted to the JSONL transcript so the log matches the model-visible context ([#2824](https://github.com/can1357/oh-my-pi/issues/2824)).
 - Fixed default prompts to instruct the agent to read applicable `skill://<name>` content before starting work, so discovered skills influence broad task requests like frontend generation ([#2829](https://github.com/can1357/oh-my-pi/issues/2829)).
 - Fixed hashline visible-line validation for ACP editor reads so `INS.POST` anchors displayed by bridge-backed range and multi-range `read` output are merged into the session snapshot before `edit` validates them ([#2773](https://github.com/can1357/oh-my-pi/issues/2773)).
-### Added
-
-- Added a main-session `session_stop` extension event with continuation feedback and an 8-continuation loop cap ([#2834](https://github.com/can1357/oh-my-pi/issues/2834)).
-
-### Fixed
-
-- Fixed the `tools.format` setting schema so `minimax` can be selected as an owned tool-calling dialect, and taught auto mode to route tool-less MiniMax-family models to the MiniMax owned dialect. ([#2759](https://github.com/can1357/oh-my-pi/issues/2759))
 
 ## [16.0.3] - 2026-06-16
 
@@ -120,15 +126,9 @@
 - Fixed startup model fallback choosing the plain OpenAI `gpt-5.5` provider before the Codex OAuth provider when both shared the same default model id, which could surface a misleading OpenAI 401 despite valid Codex credentials ([#2807](https://github.com/can1357/oh-my-pi/issues/2807)).
 - Fixed local auto-thinking classification for reasoning-capable tiny models by giving them the same safe answer budget as online reasoning classifiers, with a larger local floor for non-reasoning tiny models ([#2808](https://github.com/can1357/oh-my-pi/issues/2808)).
 
-- Fixed WSL2 TUI stutter by adding a `git.enabled` setting and skipping footer/status-line git probes when disabled or when no git-backed status segment is visible ([#2847](https://github.com/can1357/oh-my-pi/issues/2847)).
-
 ### Removed
 
 - Removed the built-in `render_mermaid` tool and its `renderMermaid.enabled` setting, so it can no longer be invoked directly
-
-### Added
-
-- Added `--max-time <seconds>` so CLI sessions can stop after a wall-clock deadline.
 
 ## [16.0.2] - 2026-06-16
 
@@ -411,7 +411,6 @@
 
 - Fixed Auto-Promote Context being pre-empted by compaction: the pre-prompt context check ran compaction directly, so snapcompact (or any strategy) fired before promotion ever got a chance. It now tries promotion to a larger-context model first — mirroring the post-turn threshold path — and only compacts when no larger-context target is available. Snapcompact (auto and manual) also falls back to a context-full LLM summary when its frame archive plus kept history would still overflow the model's usable window, instead of leaving the session over the limit.
 - Fixed `eval` JS cells intermittently failing after ~15s with exit code 1 under load (e.g. `bun test --parallel`, where each file runs in a worker subprocess and the eval worker is nested). The host swallowed asynchronous worker spawn/load/crash failures — `new Worker` reports module-load errors via an async `error` event, not a synchronous throw, so the spawn `try/catch` (and its inline-worker fallback) never fired, and no `error`/`messageerror` listener was wired — leaving a dead worker indistinguishable from a slow one and blocking the full worker-init timeout. The init handshake now rejects immediately on a worker `error`/`messageerror` event and falls back to the inline worker, and the `ready` listener is attached synchronously after `new Worker` (Bun does not buffer messages posted before a listener exists) so a fast worker's `ready` can no longer be dropped.
-- Fixed JSON-mode startup notices (export/resume/session-picker messages) writing to stdout before the JSON event stream; they now route to stderr so stdout remains newline-delimited JSON.
 
 ## [15.13.1] - 2026-06-15
 
