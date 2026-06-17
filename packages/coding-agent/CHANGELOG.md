@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [16.0.5] - 2026-06-17
+
 ### Added
 
 - Added workflow edge labels so flow artifacts can provide human-facing route text for the TUI without hardcoding flow-specific state paths in workflow infrastructure.
@@ -41,6 +43,7 @@
 ### Removed
 
 - Removed unverified practical workflow artifacts from `packages/coding-agent/examples/workflows`; Humanize RLCR, KDA Humanize, parallel implementation/review, and agent build/review loop must remain external candidates until stable long-running validation promotes them.
+- Added `tui.tight` setting (default `false`) to enable tight layout by removing the 1-character horizontal padding from terminal output.
 - Added a `providers.antigravityEndpoint` setting (`auto`, `production`, `sandbox`) to control google-antigravity routing for chat, search, image, and discovery calls
 - Added automatic endpoint-mode support for google-antigravity provider calls so users can force production-only or sandbox-only usage
 - Added `images.describeForTextModels` option (default `true`) to control automatic image description for attachments sent to models without vision input

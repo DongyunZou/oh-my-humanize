@@ -346,7 +346,7 @@ pub fn apply_bash_fixups(command: String) -> BashFixupResult {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
+	use std::{sync::OnceLock, time::Duration};
 
 	use pi_shell::{
 		ShellRunOptions as CoreShellRunOptions,
@@ -355,6 +355,11 @@ mod tests {
 	use tokio::{sync::mpsc, time};
 
 	use super::CoreShell;
+
+	fn shell_process_test_lock() -> &'static tokio::sync::Mutex<()> {
+		static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+		LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+	}
 
 	mod child_session_action_tests {
 		use pi_shell::{ChildSessionAction, child_session_action};
@@ -400,6 +405,7 @@ mod tests {
 	#[cfg(unix)]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn embedded_external_command_runs_in_its_own_session() {
+		let _process_guard = shell_process_test_lock().lock().await;
 		let shell = CoreShell::new(None);
 		let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 		let handle = tokio::spawn(async move {
@@ -446,6 +452,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn read_output_stops_when_cancelled_before_pipe_eof() {
+		let _process_guard = shell_process_test_lock().lock().await;
 		let shell = CoreShell::new(None);
 		let mut cancel = CancelToken::default();
 		let abort = cancel.emplace_abort_token();
