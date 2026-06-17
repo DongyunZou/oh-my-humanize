@@ -116,10 +116,10 @@ function resolveTemplatePromptBindings(
 	source: WorkflowTemplatePromptSource,
 	context: WorkflowPromptResolutionContext,
 ): {
-	values: Record<string, unknown>;
+	values: Record<string, string>;
 	sources: Record<string, WorkflowResolvedTemplatePromptBindingSource>;
 } {
-	const values: Record<string, unknown> = {};
+	const values: Record<string, string> = {};
 	const sources: Record<string, WorkflowResolvedTemplatePromptBindingSource> = {};
 	for (const [name, binding] of Object.entries(source.bindings)) {
 		if (binding.kind === "inline") {
@@ -128,15 +128,35 @@ function resolveTemplatePromptBindings(
 			continue;
 		}
 		if (binding.kind === "state" || binding.kind === "human") {
-			values[name] = readWorkflowState(context.state, binding.path, { allowedReadPaths: node.reads });
+			values[name] = promptTemplateBindingText(
+				node,
+				name,
+				readWorkflowState(context.state, binding.path, { allowedReadPaths: node.reads }),
+			);
 			sources[name] = binding;
 			continue;
 		}
 		const activation = selectOutputPromptActivation(node, binding, context);
-		values[name] = readOutputPromptValue(node, binding, activation);
+		values[name] = promptTemplateBindingText(node, name, readOutputPromptValue(node, binding, activation));
 		sources[name] = { ...binding, activationId: activation.id };
 	}
 	return { values, sources };
+}
+
+function promptTemplateBindingText(node: WorkflowNode, bindingName: string, value: unknown): string {
+	if (typeof value === "string") return value;
+	try {
+		const serialized = JSON.stringify(value, null, 2);
+		if (serialized !== undefined) return serialized;
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new WorkflowPromptSourceError(
+			`workflow prompt template binding "${bindingName}" for node "${node.id}" is not JSON serializable: ${reason}`,
+		);
+	}
+	throw new WorkflowPromptSourceError(
+		`workflow prompt template binding "${bindingName}" for node "${node.id}" must resolve to a string or JSON value`,
+	);
 }
 
 function readOutputPromptValue(

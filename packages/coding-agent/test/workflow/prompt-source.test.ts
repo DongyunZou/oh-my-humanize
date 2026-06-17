@@ -581,6 +581,51 @@ edges:
 		});
 	});
 
+	it("renders structured prompt template bindings as readable JSON text", async () => {
+		const dir = await createTempDir();
+		await Bun.write(path.join(dir, "prompts", "promotion.md"), "Evidence:\n{{evidence}}\n");
+		const definition = parseWorkflowDefinition(
+			`
+name: structured-template-prompt-demo
+version: 1
+nodes:
+  decide:
+    type: review
+    reads:
+      - /evidence
+    prompt:
+      template:
+        file: prompts/promotion.md
+        bindings:
+          evidence:
+            state: /evidence
+edges: []
+`,
+			{ sourcePath: path.join(dir, "workflow.yml") },
+		);
+		const decideNode = definition.nodes.find(node => node.id === "decide");
+		if (!decideNode) throw new Error("expected decide node");
+
+		const resolved = await resolveWorkflowPrompt(decideNode, {
+			state: {
+				evidence: {
+					verdict: "promote",
+					checks: ["unit", "integration"],
+					metrics: { passed: 219 },
+					ready: true,
+				},
+			},
+			completedActivations: [],
+			parentActivationIds: [],
+			packageRoot: dir,
+		});
+
+		expect(resolved?.value).toBe(
+			'Evidence:\n{\n  "verdict": "promote",\n  "checks": [\n    "unit",\n    "integration"\n  ],\n  "metrics": {\n    "passed": 219\n  },\n  "ready": true\n}',
+		);
+		expect(resolved?.value).not.toContain("[object Object]");
+	});
+
 	it("resolves package-local prompt files before agent execution", async () => {
 		const dir = await createTempDir();
 		await Bun.write(path.join(dir, "prompts", "build.md"), "Implement the package workflow.\n");

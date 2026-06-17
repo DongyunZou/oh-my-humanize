@@ -29,6 +29,7 @@
 - Fixed `omp workflow` headless commands showing TypeScript stack traces for workflow artifact lookup/load errors such as ambiguous bundled/`OMHFLOW_DIR` flow names or directory paths passed where a `.omhflow` file is required; they now print a concise user-facing diagnostic and exit nonzero.
 - Fixed workflow dashboard monitor targeting so stale focused-agent ids without a matching active workflow agent no longer advertise Agent Hub, hub, or steer controls.
 - Fixed workflow dashboard on-flight wording so running program or human work is labeled as live work instead of live agents when no Agent Hub target exists.
+- Fixed workflow prompt template bindings so structured state or output values render as readable JSON text instead of `[object Object]`.
 - Fixed workflow dashboard height clipping so the hidden-rows marker preserves the outer TUI frame and renders as a dashboard divider instead of looking like broken nested panel content.
 - Fixed workflow monitor activation in the TUI so the welcome/onboarding panel is removed from the current viewport when a workflow dashboard becomes active.
 - Fixed workflow-owned task agents remaining live after their node result was captured, so completed workflow activations preserve transcripts without continuing to mutate workspaces or receive IRC wakeups outside the workflow frontier.
