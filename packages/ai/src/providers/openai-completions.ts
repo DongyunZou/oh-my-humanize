@@ -1,6 +1,6 @@
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { toFirepassWireModelId, toFireworksWireModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
-import { isDeepseekModelIdOrName } from "@oh-my-pi/pi-catalog/identity";
+import { isDeepseekModelIdOrName, isGlm52ReasoningEffortModelId } from "@oh-my-pi/pi-catalog/identity";
 import { getSupportedEfforts, resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import type { ResolvedOpenAICompat } from "@oh-my-pi/pi-catalog/types";
@@ -373,7 +373,7 @@ export interface OpenAICompletionsOptions extends StreamOptions {
 	openrouterVariant?: string;
 }
 
-type OpenAICompletionsParams = ChatCompletionCreateParamsStreaming & {
+type OpenAICompletionsParams = Omit<ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
 	top_k?: number;
 	min_p?: number;
 	repetition_penalty?: number;
@@ -381,6 +381,8 @@ type OpenAICompletionsParams = ChatCompletionCreateParamsStreaming & {
 	enable_thinking?: boolean;
 	chat_template_kwargs?: { enable_thinking: boolean };
 	reasoning?: { effort?: string } | { enabled: false };
+	reasoning_effort?: string | null;
+	tool_stream?: boolean;
 	provider?: OpenAICompat["openRouterRouting"];
 	providerOptions?: { gateway?: { only?: string[]; order?: string[] } };
 };
@@ -1250,7 +1252,8 @@ async function createRequestSetup(
 		}
 		apiKey = $env.OPENAI_API_KEY;
 	}
-	const rawApiKey = apiKey;
+	let requestApiKey: string = apiKey;
+	const rawApiKey = requestApiKey;
 
 	if (model.provider === "openrouter") {
 		// App attribution — opts the agent into OpenRouter's public rankings and per-app
@@ -1277,7 +1280,7 @@ async function createRequestSetup(
 
 	let baseUrl = model.baseUrl;
 	if (model.provider === "github-copilot") {
-		apiKey = parseGitHubCopilotApiKey(rawApiKey).accessToken;
+		requestApiKey = parseGitHubCopilotApiKey(rawApiKey).accessToken;
 		const hasImages = hasCopilotVisionInput(context.messages);
 		const copilot = buildCopilotDynamicHeaders({
 			messages: context.messages,
@@ -1290,8 +1293,21 @@ async function createRequestSetup(
 		copilotPremiumRequests = copilot.premiumRequests;
 		baseUrl = resolveGitHubCopilotBaseUrl(model.baseUrl, rawApiKey) ?? model.baseUrl;
 	}
-	setBearerAuthorizationHeader(headers, apiKey, {
-		overrideExisting: apiKey !== MODEL_AUTHORIZATION_HEADER_API_KEY,
+	if (model.provider === "alibaba-coding-plan") {
+		try {
+			const parsed = JSON.parse(rawApiKey);
+			if (typeof parsed?.token === "string") {
+				requestApiKey = parsed.token;
+			}
+			if (typeof parsed?.enterpriseUrl === "string") {
+				baseUrl = parsed.enterpriseUrl;
+			}
+		} catch {
+			// Not JSON — use raw apiKey and catalog baseUrl
+		}
+	}
+	setBearerAuthorizationHeader(headers, requestApiKey, {
+		overrideExisting: requestApiKey !== MODEL_AUTHORIZATION_HEADER_API_KEY,
 	});
 	// Azure OpenAI requires /deployments/{id}/chat/completions?api-version=YYYY-MM-DD.
 	// The generic openai-completions path adds neither, producing silent 404s.
@@ -1314,7 +1330,7 @@ async function createRequestSetup(
 	return {
 		copilotPremiumRequests,
 		baseUrl: resolvedBaseUrl,
-		headers: { Authorization: `Bearer ${apiKey}`, ...headers },
+		headers: { Authorization: `Bearer ${requestApiKey}`, ...headers },
 		query: azureDefaultQuery,
 		requestHeaders: headers,
 	};
@@ -1350,6 +1366,10 @@ function buildParams(
 	// `compat.alwaysSendMaxTokens` carries that detection.
 	const requestedMaxTokens =
 		options?.maxTokens ?? (compat.alwaysSendMaxTokens ? (model.maxTokens ?? OPENAI_MAX_OUTPUT_TOKENS) : undefined);
+	const providerOutputClamp =
+		compat.thinkingFormat === "zai" && isGlm52ReasoningEffortModelId(model.id)
+			? (model.maxTokens ?? OPENAI_MAX_OUTPUT_TOKENS)
+			: OPENAI_MAX_OUTPUT_TOKENS;
 	// OpenRouter fans out to upstreams whose output caps differ from the catalog
 	// value (which tracks the highest-cap provider). A max_tokens above the routed
 	// upstream's cap makes OpenRouter silently skip that provider (e.g. Cerebras
@@ -1360,7 +1380,7 @@ function buildParams(
 	const effectiveMaxTokens =
 		requestedMaxTokens === undefined || omitMaxTokensForRouting
 			? undefined
-			: Math.min(requestedMaxTokens, model.maxTokens ?? Number.POSITIVE_INFINITY, OPENAI_MAX_OUTPUT_TOKENS);
+			: Math.min(requestedMaxTokens, model.maxTokens ?? Number.POSITIVE_INFINITY, providerOutputClamp);
 
 	const requestModelId = resolveOpenAICompletionsModelId(model, options);
 	const params: OpenAICompletionsParams = {
@@ -1434,6 +1454,15 @@ function buildParams(
 		// so LiteLLM → Bedrock never sees an empty `toolConfig` block.
 		params.tools = [];
 	}
+	if (
+		compat.thinkingFormat === "zai" &&
+		compat.supportsReasoningEffort &&
+		isGlm52ReasoningEffortModelId(model.id) &&
+		Array.isArray(params.tools) &&
+		params.tools.length > 0
+	) {
+		params.tool_stream = true;
+	}
 
 	if (options?.toolChoice && compat.supportsToolChoice) {
 		params.tool_choice = mapToOpenAICompletionsToolChoice(options.toolChoice);
@@ -1471,12 +1500,23 @@ function buildParams(
 	}
 
 	if (supportsReasoningParams && compat.thinkingFormat === "zai" && model.reasoning) {
-		// Z.ai uses binary thinking: { type: "enabled" | "disabled" }
-		// Must explicitly disable since z.ai defaults to thinking enabled.
-		const enabled = options?.reasoning && !options?.disableReasoning;
+		// Z.AI-style hosts use binary thinking, while GLM-5.2+ also accepts
+		// `reasoning_effort` when thinking is enabled. `minimal` maps to the
+		// provider's skip-thinking path, so keep the effort field absent there.
+		const requestedEffort = options?.reasoning;
+		const mappedEffort =
+			requestedEffort === undefined
+				? undefined
+				: (compat.reasoningEffortMap?.[requestedEffort] ??
+					model.thinking?.effortMap?.[requestedEffort] ??
+					requestedEffort);
+		const enabled = mappedEffort !== undefined && mappedEffort !== "none" && !options?.disableReasoning;
 		params.thinking = { type: enabled ? "enabled" : "disabled" };
 		if (enabled && compat.thinkingKeep) {
 			params.thinking.keep = compat.thinkingKeep;
+		}
+		if (enabled && compat.supportsReasoningEffort) {
+			params.reasoning_effort = mappedEffort;
 		}
 	} else if (supportsReasoningParams && compat.thinkingFormat === "qwen" && model.reasoning) {
 		// Qwen uses top-level enable_thinking: boolean

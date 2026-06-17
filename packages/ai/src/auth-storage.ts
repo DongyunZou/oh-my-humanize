@@ -361,9 +361,8 @@ export interface AuthCredentialStore {
 	markCredentialSuspect?(credentialId: number, opts?: { signal?: AbortSignal }): Promise<void>;
 	/**
 	 * Optional async write hook for upserting a single credential. When present,
-	 * `AuthStorage.#upsertOAuthCredential` routes through this instead of the
-	 * sync `upsertAuthCredentialForProvider`. `RemoteAuthCredentialStore` uses
-	 * it to send the upsert to the broker via `POST /v1/credential`.
+	 * remote store implementations can send the upsert to the broker via
+	 * `POST /v1/credential` instead of writing only to the local snapshot.
 	 *
 	 * Implementations MUST update the in-memory snapshot before returning so the
 	 * post-write read path is consistent.
@@ -1512,17 +1511,6 @@ export class AuthStorage {
 		this.#resetProviderAssignments(provider);
 	}
 
-	async #upsertOAuthCredential(provider: string, credential: OAuthCredential): Promise<void> {
-		const stored = this.#store.upsertAuthCredentialRemote
-			? await this.#store.upsertAuthCredentialRemote(provider, credential)
-			: this.#store.upsertAuthCredentialForProvider(provider, credential);
-		this.#setStoredCredentials(
-			provider,
-			stored.map(record => ({ id: record.id, credential: record.credential })),
-		);
-		this.#resetProviderAssignments(provider);
-	}
-
 	/**
 	 * List stored credential rows, optionally filtered by provider.
 	 */
@@ -1786,7 +1774,10 @@ export class AuthStorage {
 			return;
 		}
 		const newCredential: OAuthCredential = { type: "oauth", ...result };
-		await this.#upsertOAuthCredential(def.storeCredentialsAs ?? provider, newCredential);
+		// Use set() instead of #upsertOAuthCredential to replace ALL existing credentials
+		// (including legacy api_key rows from older versions) with the new OAuth credential.
+		// This ensures getApiKey() doesn't match an old api_key row before the new OAuth row.
+		await this.set(def.storeCredentialsAs ?? provider, newCredential);
 	}
 
 	/**
