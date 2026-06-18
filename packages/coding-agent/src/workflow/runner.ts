@@ -22,6 +22,7 @@ import {
 	startWorkflowAttempt,
 	startWorkflowFamily,
 } from "./lifecycle";
+import { diagnoseWorkflowLiveness } from "./liveness";
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "./model-resolution";
 import { executeWorkflowNode, type WorkflowNodeRuntimeHost } from "./node-runtime";
 import {
@@ -348,6 +349,10 @@ async function executeAndPersistActivation(
 ): Promise<WorkflowActivationOutput> {
 	let started = false;
 	try {
+		const livenessDiagnostic = diagnoseWorkflowLiveness(options.definition, node, context.completedActivations);
+		if (livenessDiagnostic !== undefined) {
+			throw new WorkflowRunnerError(livenessDiagnostic.message);
+		}
 		const resolvedPrompt = await resolvePromptForActivation(options, activation, node, context);
 		const input = inputSnapshotFromPrompt(resolvedPrompt);
 		appendWorkflowActivationStarted(options.host, run.id, {

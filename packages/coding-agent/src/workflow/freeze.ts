@@ -201,6 +201,7 @@ function validateNodeRuntimeContracts(definition: WorkflowDefinition): void {
 			);
 		}
 	}
+	validateLoopProgressContracts(definition);
 }
 
 function validateNodeStateScopes(node: WorkflowNode): void {
@@ -244,6 +245,72 @@ function statePathWithinScopes(pointer: string, scopes: string[] | undefined): b
 
 function isJsonPointer(value: string): boolean {
 	return value.startsWith("/");
+}
+
+function validateLoopProgressContracts(definition: WorkflowDefinition): void {
+	const nodeById = new Map(definition.nodes.map(node => [node.id, node]));
+	for (const component of stronglyConnectedNodeComponents(definition)) {
+		if (!componentHasCycle(component, definition)) continue;
+		if (!component.every(nodeId => nodeById.get(nodeId)?.type === "script")) continue;
+		throw new WorkflowFreezeError(
+			`workflow script-only loop "${component.sort().join(" -> ")}" cannot prove meaningful progress before production freeze; include an agent, review, or human node, or move wall-clock waiting outside the workflow graph`,
+		);
+	}
+}
+
+function componentHasCycle(component: string[], definition: WorkflowDefinition): boolean {
+	if (component.length > 1) return true;
+	const nodeId = component[0];
+	return definition.edges.some(edge => edge.from === nodeId && edge.to === nodeId);
+}
+
+function stronglyConnectedNodeComponents(definition: WorkflowDefinition): string[][] {
+	const adjacency = new Map<string, string[]>();
+	for (const node of definition.nodes) adjacency.set(node.id, []);
+	for (const edge of definition.edges) adjacency.get(edge.from)?.push(edge.to);
+	for (const targets of adjacency.values()) targets.sort((left, right) => left.localeCompare(right));
+
+	const indexByNode = new Map<string, number>();
+	const lowLinkByNode = new Map<string, number>();
+	const stack: string[] = [];
+	const onStack = new Set<string>();
+	const components: string[][] = [];
+	let nextIndex = 0;
+
+	const visit = (nodeId: string): void => {
+		indexByNode.set(nodeId, nextIndex);
+		lowLinkByNode.set(nodeId, nextIndex);
+		nextIndex += 1;
+		stack.push(nodeId);
+		onStack.add(nodeId);
+
+		for (const targetId of adjacency.get(nodeId) ?? []) {
+			if (!indexByNode.has(targetId)) {
+				visit(targetId);
+				lowLinkByNode.set(nodeId, Math.min(lowLinkByNode.get(nodeId) ?? 0, lowLinkByNode.get(targetId) ?? 0));
+				continue;
+			}
+			if (onStack.has(targetId)) {
+				lowLinkByNode.set(nodeId, Math.min(lowLinkByNode.get(nodeId) ?? 0, indexByNode.get(targetId) ?? 0));
+			}
+		}
+
+		if (lowLinkByNode.get(nodeId) !== indexByNode.get(nodeId)) return;
+		const component: string[] = [];
+		while (stack.length > 0) {
+			const stackedNodeId = stack.pop();
+			if (stackedNodeId === undefined) break;
+			onStack.delete(stackedNodeId);
+			component.push(stackedNodeId);
+			if (stackedNodeId === nodeId) break;
+		}
+		components.push(component);
+	};
+
+	for (const node of definition.nodes) {
+		if (!indexByNode.has(node.id)) visit(node.id);
+	}
+	return components;
 }
 
 function expectRecord(value: unknown, message: string): Record<string, unknown> {

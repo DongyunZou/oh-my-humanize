@@ -601,6 +601,77 @@ edges: []
 			'migration "weak-review" -> "strong-review" maps frontier "weakReview" to unknown node "strongReview"',
 		);
 	});
+
+	it("rejects pure script loops before production freeze", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "release"), { recursive: true });
+		const flowPath = path.join(dir, "release.omhflow");
+		await Bun.write(
+			flowPath,
+			omhflowSource(`
+nodes:
+  hold:
+    type: script
+    script:
+      inline: |
+        return { summary: "hold tick" };
+  check:
+    type: script
+    script:
+      inline: |
+        return { summary: "still pending" };
+edges:
+  - from: hold
+    to: check
+  - from: check
+    to: hold
+    when: state.runtime.minimumSatisfied == false
+`),
+		);
+
+		const artifact = await loadWorkflowArtifact(flowPath);
+
+		await expect(freezeWorkflowArtifact(artifact)).rejects.toThrow(
+			'workflow script-only loop "check -> hold" cannot prove meaningful progress before production freeze',
+		);
+	});
+
+	it("allows review-controlled loops because they can produce semantic progress", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "release"), { recursive: true });
+		const flowPath = path.join(dir, "release.omhflow");
+		await Bun.write(
+			flowPath,
+			omhflowSource(`
+nodes:
+  build:
+    type: agent
+    agent: task
+    prompt:
+      inline: Build the requested change.
+  review:
+    type: review
+    agent: reviewer
+    prompt:
+      inline: Review the build and return continue or finish.
+    gates:
+      - continue
+      - finish
+edges:
+  - from: build
+    to: review
+  - from: review
+    to: build
+    when: outputs.review.verdict == "continue"
+`),
+		);
+
+		const artifact = await loadWorkflowArtifact(flowPath);
+
+		await expect(freezeWorkflowArtifact(artifact)).resolves.toMatchObject({
+			staticCheckReport: { status: "passed" },
+		});
+	});
 });
 
 function omhflowSource(workflowBlock: string): string {

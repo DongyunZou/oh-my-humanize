@@ -319,6 +319,92 @@ edges: []
 		]);
 	});
 
+	it("blocks script-only cycles that repeat without workflow progress", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(
+			`
+name: liveness-guard-demo
+version: 1
+nodes:
+  hold:
+    type: script
+  check:
+    type: script
+edges:
+  - from: hold
+    to: check
+  - from: check
+    to: hold
+`,
+			{ sourcePath: "workflow.yml" },
+		);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => ({
+				summary: `${input.node.id} observed no progress`,
+				data: { elapsedMs: 1000 },
+			}),
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-liveness-guard",
+			startNodeId: "hold",
+			runtimeHost,
+			maxActivations: 20,
+		});
+
+		expect(result.scheduler.limitReached).toBe(false);
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["hold", "completed"],
+			["check", "completed"],
+			["hold", "completed"],
+			["check", "completed"],
+			["hold", "failed"],
+		]);
+		expect(result.scheduler.activations.at(-1)?.error).toContain(
+			'workflow liveness guard blocked script-only cycle at node "hold"',
+		);
+		const reconstructed = reconstructWorkflowRuns(host.getBranch());
+		expect(reconstructed[0]?.activations.at(-1)).toMatchObject({
+			nodeId: "hold",
+			status: "failed",
+		});
+	});
+
+	it("does not treat honest agent retry non-convergence as fake script progress", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(agentDecisionSource, { sourcePath: "workflow.yml" });
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async () => ({
+				summary: "agent requested another retry",
+				data: { verdict: "retry" },
+			}),
+			runScriptNode: async input => ({
+				summary: `${input.node.id} completed without artifacts`,
+			}),
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-agent-non-converged",
+			startNodeId: "decide",
+			runtimeHost,
+			maxActivations: 5,
+		});
+
+		expect(result.scheduler.limitReached).toBe(true);
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["decide", "completed"],
+			["retry", "completed"],
+			["decide", "completed"],
+			["retry", "completed"],
+			["decide", "completed"],
+		]);
+		expect(result.scheduler.activations.some(activation => activation.status === "failed")).toBe(false);
+	});
+
 	it("checkpoints frozen attempts when cancellation stops downstream scheduling", async () => {
 		const host = createHost();
 		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
