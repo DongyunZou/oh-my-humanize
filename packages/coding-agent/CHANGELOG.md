@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Changed public branding from Oh My Pi / `omp` to Oh My Humanize / `omh` across package metadata, CLI help, ACP metadata, setup/welcome surfaces, workflow docs, and README examples while preserving `omp` as a compatibility bin alias.
 - Changed workflow examples to use `examples/workflow/` as the promotion root,
   `examples/workflow/experimental/` for practical but not yet promoted flows,
   and `examples/workflow/demo/` for teaching or seed-bound demo flows.

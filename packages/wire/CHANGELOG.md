@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed the default collab relay and share URLs from `my.omp.sh` to `my.omh.sh`.
+
 ## [15.12.4] - 2026-06-13
 
 ### Changed

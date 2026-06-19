@@ -7,7 +7,7 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { getProjectDir, Snowflake } from "@oh-my-pi/pi-utils";
+import { APP_NAME, getProjectDir, Snowflake } from "@oh-my-pi/pi-utils";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import chalk from "chalk";
 import { Settings, settings } from "../config/settings";
@@ -29,9 +29,9 @@ export default class Say extends Command {
 	};
 
 	static examples = [
-		'omp say "hello world"',
-		'omp say "hello world" --out /tmp/hello.wav',
-		'omp say "bonjour" --voice af_heart --model kokoro',
+		`${APP_NAME} say "hello world"`,
+		`${APP_NAME} say "hello world" --out /tmp/hello.wav`,
+		`${APP_NAME} say "bonjour" --voice af_heart --model kokoro`,
 	];
 
 	async run(): Promise<void> {
@@ -60,7 +60,7 @@ export default class Say extends Command {
 				process.stderr.write(
 					chalk.red(
 						`error: could not synthesize with local TTS model "${model}". ` +
-							"Run `omp setup speech` to install it.\n",
+							`Run \`${APP_NAME} setup speech\` to install it.\n`,
 					),
 				);
 				exitCode = 1;
@@ -79,7 +79,7 @@ export default class Say extends Command {
 				return;
 			}
 
-			const tmp = path.join(os.tmpdir(), `omp-say-${Snowflake.next()}.wav`);
+			const tmp = path.join(os.tmpdir(), `${APP_NAME}-say-${Snowflake.next()}.wav`);
 			await Bun.write(tmp, wav);
 			try {
 				await playAudioFile(tmp);

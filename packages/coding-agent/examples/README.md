@@ -1,6 +1,7 @@
 # Examples
 
-Example code for omp-coding-agent SDK, hooks, and custom tools.
+Example code for the OMH coding-agent SDK, hooks, custom tools, and workflow
+artifacts.
 
 ## Directories
 

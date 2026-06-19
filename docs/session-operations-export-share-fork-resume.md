@@ -133,7 +133,7 @@ Only when no custom share handler is found (`shareSession()`):
      blob is pushed base64-encoded as `session.ompshare.txt` (budget 5 MB
      sealed; gist raw fetches cap at 10 MB).
    - **Share server** — `POST <share.serverUrl>` (default
-     `https://my.omp.sh/s`) with the raw blob, capped at 1 MB. Oversized
+     `https://my.omh.sh/s`) with the raw blob, capped at 1 MB. Oversized
      snapshots are trimmed until they fit: inline images first, then long
      strings (32 KB → 8 KB → 2 KB → 512 B caps), then oldest entries.
 5. The link is `<share.serverUrl>/<id>#<base64url key>` in both cases. The

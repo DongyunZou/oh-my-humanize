@@ -29,7 +29,7 @@ export function ConnectScreen({ defaultName, error, onConnect }: ConnectScreenPr
 		<div className="sh-connect">
 			<form className="sh-connect-card" onSubmit={submit}>
 				<div className="sh-lockup">
-					<span className="sh-lockup-pi">π</span> omp collab
+					<span className="sh-lockup-pi">OMH</span> collab
 				</div>
 				<label className="sh-field">
 					<span className="sh-field-label">join link</span>

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed package metadata links and description from the old Oh My Pi branding to OMH.
+
 ## [16.1.3] - 2026-06-19
 
 ### Added

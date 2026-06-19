@@ -2,17 +2,17 @@
 	"type": "module",
 	"name": "@oh-my-pi/pi-utils",
 	"version": "16.1.3",
-	"description": "Shared utilities for pi packages",
-	"homepage": "https://omp.sh",
+	"description": "Shared utilities for OMH packages",
+	"homepage": "https://omh.sh",
 	"author": "Can Boluk",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/humanfia/oh-my-humanize.git",
 		"directory": "packages/utils"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/humanfia/oh-my-humanize/issues"
 	},
 	"keywords": [
 		"utilities",

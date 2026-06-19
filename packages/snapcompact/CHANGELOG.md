@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Changed package metadata links from the old Oh My Pi site/repository to the OMH site/repository.
 - Refactored compaction to be text-sourced, re-rendering from unified `Archive.text` source
 - Implemented foveated archive layout (HQ edges, dense LQ middle) for optimized context usage
 - Raised `MAX_FRAMES_DEFAULT` to 80 and consolidated `PROVIDER_IMAGE_BUDGETS`

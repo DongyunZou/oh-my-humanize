@@ -2,17 +2,17 @@
 	"type": "module",
 	"name": "@oh-my-pi/swarm-extension",
 	"version": "16.1.3",
-	"description": "Swarm orchestration extension for omp",
-	"homepage": "https://omp.sh",
+	"description": "Swarm orchestration extension for OMH",
+	"homepage": "https://omh.sh",
 	"author": "Derek Rynd",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/humanfia/oh-my-humanize.git",
 		"directory": "packages/swarm-extension"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/humanfia/oh-my-humanize/issues"
 	},
 	"keywords": [
 		"swarm",

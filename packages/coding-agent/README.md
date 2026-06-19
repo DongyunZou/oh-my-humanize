@@ -1,10 +1,12 @@
 # @oh-my-pi/pi-coding-agent
 
-Core implementation package for the `omp` coding agent in the `oh-my-pi` monorepo.
+Core implementation package for the Oh My Humanize (`omh`) coding agent in the
+`oh-my-humanize` monorepo. The npm package scope remains `@oh-my-pi/*` for
+compatibility while the user-facing CLI and product brand move to OMH.
 
 For installation, setup, provider configuration, model roles, slash commands, and full CLI reference, see:
 - [Monorepo README (local)](../../README.md)
-- [Monorepo README (GitHub)](https://github.com/can1357/oh-my-pi#readme)
+- [Monorepo README (GitHub)](https://github.com/humanfia/oh-my-humanize#readme)
 
 Package-specific references:
 - [CHANGELOG](./CHANGELOG.md)

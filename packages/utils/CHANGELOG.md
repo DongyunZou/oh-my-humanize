@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed the public application name constant from `omp` to `omh` while preserving the existing `.omp` compatibility config root.
+
 ## [16.1.3] - 2026-06-19
 
 ### Changed

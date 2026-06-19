@@ -3,17 +3,17 @@
 	"name": "@oh-my-pi/collab-web",
 	"version": "15.11.7",
 	"private": true,
-	"description": "Browser guest client and local relay tools for omp collab live sessions",
-	"homepage": "https://omp.sh",
+	"description": "Browser guest client and local relay tools for OMH collab live sessions",
+	"homepage": "https://omh.sh",
 	"author": "Can Boluk",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/can1357/oh-my-pi.git",
+		"url": "git+https://github.com/humanfia/oh-my-humanize.git",
 		"directory": "packages/collab-web"
 	},
 	"bugs": {
-		"url": "https://github.com/can1357/oh-my-pi/issues"
+		"url": "https://github.com/humanfia/oh-my-humanize/issues"
 	},
 	"keywords": [
 		"collab",

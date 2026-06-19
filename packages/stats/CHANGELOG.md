@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed package metadata links from the old Oh My Pi site/repository to the OMH site/repository.
+
 ## [16.0.10] - 2026-06-18
 
 ### Changed

@@ -1,13 +1,13 @@
 # Workflows
 
-`omp` can run `.omhflow` workflow artifacts for mutable, auditable agentic
+`omh` can run `.omhflow` workflow artifacts for mutable, auditable agentic
 development flows. A workflow can be edited while it is in development, but a
 production attempt runs against an immutable freeze. If the flow must change,
 the operator stops the attempt, checkpoints it, applies an approved change,
 freezes the new graph, and restarts from the checkpoint.
 
 The workflow UI is still part of the interactive terminal coding tool. It is a
-workflow-mode monitoring and intervention dashboard for `omp`, not a separate
+workflow-mode monitoring and intervention dashboard for `omh`, not a separate
 replacement for the normal chat, tool, model, and file-editing experience.
 
 ## Artifact Shape
@@ -28,10 +28,10 @@ resources. Resource paths inside the flow resolve from that same-name directory.
 
 ## Flow Library Tiers
 
-`omp` separates workflow artifacts into three tiers:
+`omh` separates workflow artifacts into three tiers:
 
 - **Built-in practical flows** are generic, reusable workflows that ship with
-  `omp` and can be addressed by name. A flow may be promoted into this tier only
+  `omh` and can be addressed by name. A flow may be promoted into this tier only
   after stable long-running validation evidence across real projects and tasks.
   In OMH terms, long-running means more than eight hours for a Project x Flow x
   Task run. One audited eight-hour run is useful candidate evidence, but it is
@@ -57,7 +57,7 @@ Humanize composition can still be exercised through `OMHFLOW_DIR`:
 
 ```sh
 export OMHFLOW_DIR="$PWD/temp/candidate-flows"
-omp workflow list
+omh workflow list
 ```
 
 The built-in set should remain intentionally small and evidence-backed.
@@ -68,7 +68,7 @@ when studying flow-language mechanics.
 List available flows:
 
 ```sh
-omp workflow list
+omh workflow list
 ```
 
 Built-in flows are packaged workflow artifacts, not infrastructure
@@ -77,7 +77,7 @@ work with any valid standalone `.omhflow + same-name directory` artifact supplie
 by path or through `OMHFLOW_DIR`. Built-in and external flows use the same
 runtime interface; built-in status never grants a special execution path.
 
-The workflows below use the normal `omp` model, provider, auth, and tool settings.
+The workflows below use the normal `omh` model, provider, auth, and tool settings.
 The flow artifact can name portable defaults, but it does not carry API keys and
 does not introduce a second model/tool configuration layer.
 
@@ -105,7 +105,7 @@ Launch the TUI from the project directory:
 
 ```sh
 export OMHFLOW_DIR=/path/to/candidate-flows
-omp
+omh
 ```
 
 Start the flow interactively so the operator can observe the graph, answer the
@@ -118,7 +118,7 @@ human gate, interrupt agents, or approve changes:
 ```
 
 Production workflow starts and restarts have a default max runtime of five days.
-When that deadline elapses, `omp` stops scheduling new nodes, aborts in-flight
+When that deadline elapses, `omh` stops scheduling new nodes, aborts in-flight
 nodes, and records a checkpoint that can be restarted. Use `--max-runtime-ms`
 when a shorter smoke or validation bound is needed.
 
@@ -141,7 +141,7 @@ activation so the headless command verifies resolution, freeze, and runtime
 wiring without trying to answer the human gate:
 
 ```sh
-OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr \
+OMHFLOW_DIR=/path/to/candidate-flows omh workflow start humanize-rlcr \
   --cwd "$PWD" \
   --run-id demo-humanize-smoke \
   --max-activations 1 \
@@ -174,7 +174,7 @@ Launch the TUI from the project directory:
 
 ```sh
 export OMHFLOW_DIR=/path/to/candidate-flows
-omp
+omh
 ```
 
 Run it in the TUI:
@@ -198,8 +198,8 @@ still become TUI-first once the imported Humanize subflow reaches its human
 understanding gate:
 
 ```sh
-OMHFLOW_DIR=/path/to/candidate-flows omp workflow freeze kda-humanize --json
-OMHFLOW_DIR=/path/to/candidate-flows omp workflow start kda-humanize --json --max-activations 1
+OMHFLOW_DIR=/path/to/candidate-flows omh workflow freeze kda-humanize --json
+OMHFLOW_DIR=/path/to/candidate-flows omh workflow start kda-humanize --json --max-activations 1
 ```
 
 ## Interactive Use
@@ -249,7 +249,7 @@ running; stopped and checkpoint-frontier views use `Operator Deck`. When a
 checkpointed attempt can resume, `restart` is promoted into the same rail so the
 next safe lifecycle action is visible without opening the command list.
 
-The dashboard is intentionally collapsible because `omp` remains an
+The dashboard is intentionally collapsible because `omh` remains an
 interactive terminal coding tool, not a full-screen workflow viewer. Use:
 
 ```text
@@ -299,42 +299,42 @@ programmer cockpit rather than a lifecycle dump.
 
 ## Non-Interactive Use
 
-Use `omp workflow` for scripting, CI-style checks, or deterministic workflow
+Use `omh workflow` for scripting, CI-style checks, or deterministic workflow
 smoke runs without opening the TUI.
 
 ```sh
-OMHFLOW_DIR=/path/to/candidate-flows omp workflow freeze humanize-rlcr
-omp workflow start ./my-flow.omhflow --run-id run-1 --max-activations 20
-OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr --json --max-activations 1
-OMHFLOW_DIR=/path/to/candidate-flows omp workflow start humanize-rlcr --json --max-runtime-ms 60000
+OMHFLOW_DIR=/path/to/candidate-flows omh workflow freeze humanize-rlcr
+omh workflow start ./my-flow.omhflow --run-id run-1 --max-activations 20
+OMHFLOW_DIR=/path/to/candidate-flows omh workflow start humanize-rlcr --json --max-activations 1
+OMHFLOW_DIR=/path/to/candidate-flows omh workflow start humanize-rlcr --json --max-runtime-ms 60000
 ```
 
-Headless workflow runs reuse the existing `omp` runtime boundary. Shell and JS
+Headless workflow runs reuse the existing `omh` runtime boundary. Shell and JS
 script nodes run directly. Agent and review nodes are delegated through the
-normal `omp launch -p` path so model, provider, auth, tool, and settings
-configuration stay in the existing oh-my-pi layer. Human nodes require the
+normal `omh launch -p` path so model, provider, auth, tool, and settings
+configuration stay in the existing OMH model/provider/tool settings layer. Human nodes require the
 interactive TUI path.
 
 ## Installing External Flows
 
 External `.omhflow` artifacts are installed into the first directory from
-`OMHFLOW_DIR`. If `OMHFLOW_DIR` is unset, `omp` uses `~/.omp/flows`.
+`OMHFLOW_DIR`. If `OMHFLOW_DIR` is unset, `omh` uses `~/.omp/flows`.
 
 ```sh
-omp workflow install ./my-flow.omhflow
-omp workflow install ./my-flow.omhflow --force
-omp workflow uninstall my-flow
+omh workflow install ./my-flow.omhflow
+omh workflow install ./my-flow.omhflow --force
+omh workflow uninstall my-flow
 ```
 
 `OMHFLOW_DIR` accepts a platform path list:
 
 ```sh
 export OMHFLOW_DIR="$HOME/.omp/flows:$PWD/team-flows"
-omp workflow list
-omp workflow start team-release-hardening
+omh workflow list
+omh workflow start team-release-hardening
 ```
 
-For a named lookup, `omp` treats verified built-in and external artifacts as
+For a named lookup, `omh` treats verified built-in and external artifacts as
 peers. A flow name must resolve to exactly one artifact across built-in flows
 and `OMHFLOW_DIR`; if a built-in flow and an external flow share the same name,
 the lookup is rejected as ambiguous. Use an explicit `.omhflow` path to select a
@@ -347,10 +347,10 @@ or as `<dir>/<name>/<name>.omhflow` plus `<dir>/<name>/<name>/`.
 - Flows use the workflow infrastructure only through stable artifact/runtime
   interfaces: node types, declared resources, model/tool capabilities,
   workflow context, state, review verdicts, and lifecycle commands. They should
-  not depend on `omp` source paths, private implementation details, or a special
+  not depend on `omh` source paths, private implementation details, or a special
   built-in execution path.
 - Keep model and tool selections as portable defaults or capability
-  declarations in the flow; actual resolution happens through `omp` settings and
+  declarations in the flow; actual resolution happens through `omh` settings and
   runtime configuration.
 - Prefer small, reusable subflows over large monolithic graphs.
 - Use review node outputs and edge conditions for loops such as
@@ -368,5 +368,5 @@ or as `<dir>/<name>/<name>.omhflow` plus `<dir>/<name>/<name>/`.
 - Freeze a flow before treating it as production-safe:
 
 ```sh
-omp workflow freeze ./my-flow.omhflow
+omh workflow freeze ./my-flow.omhflow
 ```

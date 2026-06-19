@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed the collab web app branding, metadata, sitemap, and generated icon/social assets from OMP to OMH.
+
 ## [16.0.10] - 2026-06-18
 
 ### Added

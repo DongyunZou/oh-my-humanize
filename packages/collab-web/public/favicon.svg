@@ -1,11 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OMH">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ed4abf" />
-      <stop offset=".5" stop-color="#9b4dff" />
-      <stop offset="1" stop-color="#5ad8e6" />
+    <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38d7ff"/>
+      <stop offset="0.5" stop-color="#a76bff"/>
+      <stop offset="1" stop-color="#ff5ea8"/>
     </linearGradient>
+    <filter id="glow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.36 0 0 0 0 0.78 0 0 0 0 1 0 0 0 .55 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-  <rect width="64" height="64" rx="12" fill="#0f0a14" />
-  <path fill="url(#g)" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" />
+  <rect width="64" height="64" rx="14" fill="#090d14"/>
+  <path d="M15 32h11m12 0h11M26 32V20m0 12v12m12-12V20m0 12v12" fill="none" stroke="#273348" stroke-width="5" stroke-linecap="round"/>
+  <path d="M15 32h11m12 0h11M26 32V20m0 12v12m12-12V20m0 12v12" fill="none" stroke="url(#g)" stroke-width="2.5" stroke-linecap="round"/>
+  <g filter="url(#glow)">
+    <circle cx="15" cy="32" r="5" fill="#38d7ff"/>
+    <circle cx="26" cy="20" r="4.5" fill="#75a7ff"/>
+    <circle cx="26" cy="44" r="4.5" fill="#8f7cff"/>
+    <circle cx="38" cy="20" r="4.5" fill="#b66cff"/>
+    <circle cx="38" cy="44" r="4.5" fill="#df64d2"/>
+    <circle cx="49" cy="32" r="5" fill="#ff5ea8"/>
+  </g>
+  <text x="32" y="36" text-anchor="middle" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="800" letter-spacing="1" fill="#f8fbff">OMH</text>
 </svg>
