@@ -60,6 +60,9 @@ General loop contract:
 - Run only the verification command specified by the task contract. Do not infer
   project-wide commands from file names or package managers unless the contract
   asks for that command.
+- Do not modify task-local validation harnesses to install, update, or bootstrap
+  dependencies after preflight. Missing validation dependencies are a setup
+  blocker to report, not semantic project progress.
 - Append exactly one new line to `progress.md` in this format:
   `ROUND <n>: <short concrete action>; validation=<command or not-run>; result=<pass|fail|not-run>`
 - The next round number is one more than the number of existing `ROUND ` lines.

@@ -3,6 +3,8 @@ const REPEATED_LINE_MIN_COUNT = 20;
 const REPEATED_LINE_RATIO = 0.45;
 const LOW_UNIQUE_LINE_RATIO = 0.2;
 const PADDING_WORD_PATTERN = /\b(padding|dummy|placeholder|lorem|sleep|hold|no-op|noop|filler)\b/iu;
+const VALIDATION_HARNESS_BOOTSTRAP_PATTERN =
+	/\b(?:(?:npm|pnpm|yarn|bun)(?:\s+\S+){0,5}\s+(?:install|add|ci|update|upgrade)|(?:pip|pip3)(?:\s+\S+){0,5}\s+install|python(?:3)?\s+-m\s+pip(?:\s+\S+){0,5}\s+install|uv\s+(?:sync|add|pip\s+install)|poetry\s+(?:install|add|update)|cargo\s+(?:install|update)|bundle\s+install|go\s+(?:install|get))\b/iu;
 
 const taskText = await readOptionalText("task.md");
 const explicitAllowance = explicitLowSemanticAllowance(taskText);
@@ -16,6 +18,7 @@ for (const file of changedFiles) {
 	const finding = analyzeTextFile(file, text);
 	if (finding !== null) findings.push(finding);
 }
+findings.push(...(await dependencyBootstrapFindings()));
 
 const blockingFindings = explicitAllowance ? [] : findings;
 const verdict = blockingFindings.length === 0 ? "PASS" : "REPAIR";
@@ -55,6 +58,40 @@ async function changedProjectFiles() {
 		.map(statusLineToPath)
 		.filter(Boolean)
 		.filter(file => !ignoredEvidencePath(file));
+}
+
+async function dependencyBootstrapFindings() {
+	const findings = [];
+	const files = await workflowOutputFiles();
+	for (const file of files) {
+		if (!isValidationHarness(file)) continue;
+		const text = await readOptionalText(file);
+		if (!VALIDATION_HARNESS_BOOTSTRAP_PATTERN.test(text)) continue;
+		findings.push({
+			file,
+			reason: "validation harness performs dependency bootstrap after preflight",
+			policy:
+				"Install or update dependencies before workflow launch as run setup; workflow rounds may run validation but must not make dependency bootstrap semantic progress.",
+		});
+	}
+	return findings;
+}
+
+async function workflowOutputFiles() {
+	try {
+		const glob = new Bun.Glob("workflow-output/*");
+		const files = [];
+		for await (const file of glob.scan({ cwd: process.cwd(), onlyFiles: true })) {
+			files.push(file);
+		}
+		return files.sort();
+	} catch {
+		return [];
+	}
+}
+
+function isValidationHarness(file) {
+	return /^workflow-output\/(?:run-|validate|validation|check).*\.(?:sh|bash|zsh)$/u.test(file);
 }
 
 function statusLineToPath(line) {

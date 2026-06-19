@@ -7,6 +7,7 @@ const validationActivations = completedActivationsFor("validateCandidate");
 const latestValidation = validationActivations.at(-1)?.output ?? {};
 const validationEvidence = activationEvidence(latestValidation);
 const promotionVerdict = reviewVerdict(latestValidation) ?? "unknown";
+const fullEvidenceArtifact = "workflow-output/kda-evidence.md";
 assertPromotionEvidence({
 	taskContract,
 	plan,
@@ -16,19 +17,20 @@ assertPromotionEvidence({
 	validationEvidence,
 	promotionVerdict,
 });
-const evidence = {
-	status: "recorded",
+const recordedAtMs = Date.now();
+const evidence = compactPromotionEvidence({
 	taskContract,
 	plan,
 	humanizeHandoff,
 	candidate,
-	validation: validationEvidence,
-	validationVerdict: promotionVerdict,
+	validationEvidence,
+	promotionVerdict,
 	validationActivationCount: validationActivations.length,
-	recordedAtMs: Date.now(),
-};
+	recordedAtMs,
+	fullEvidenceArtifact,
+});
 await Bun.write(
-	"workflow-output/kda-evidence.md",
+	fullEvidenceArtifact,
 	[
 		"# KDA Evidence",
 		"",
@@ -71,8 +73,56 @@ await Bun.write(
 return {
 	summary: "recorded KDA evidence from task contract, plan, nested Humanize handoff, candidate, and validation verdict",
 	statePatch: [{ op: "set", path: "/evidence", value: evidence }],
-	artifacts: ["local://workflow-output/kda-evidence.md"],
+	artifacts: [`local://${fullEvidenceArtifact}`],
 };
+
+function compactPromotionEvidence({
+	taskContract,
+	plan,
+	humanizeHandoff,
+	candidate,
+	validationEvidence,
+	promotionVerdict,
+	validationActivationCount,
+	recordedAtMs,
+	fullEvidenceArtifact,
+}) {
+	for (const budget of [1400, 1000, 700, 420]) {
+		const evidence = {
+			status: "recorded-prompt-summary",
+			fullEvidenceArtifact,
+			taskContract: boundedValue(taskContract, budget),
+			plan: boundedValue(plan, budget),
+			nestedHumanizeHandoff: boundedValue(humanizeHandoff, budget),
+			candidate: boundedValue(candidate, budget),
+			validation: boundedValue(validationEvidence, budget),
+			validationVerdict: promotionVerdict,
+			validationActivationCount,
+			recordedAtMs,
+			promptBudget: {
+				maxFieldChars: budget,
+				note: "Full promotion evidence is stored in fullEvidenceArtifact; workflow state carries a bounded prompt summary.",
+			},
+		};
+		if (JSON.stringify(evidence).length <= 9000) return evidence;
+	}
+	return {
+		status: "recorded-prompt-summary",
+		fullEvidenceArtifact,
+		taskContract: boundedValue(taskContract, 260),
+		plan: boundedValue(plan, 260),
+		nestedHumanizeHandoff: boundedValue(humanizeHandoff, 260),
+		candidate: boundedValue(candidate, 260),
+		validation: boundedValue(validationEvidence, 260),
+		validationVerdict: promotionVerdict,
+		validationActivationCount,
+		recordedAtMs,
+		promptBudget: {
+			maxFieldChars: 260,
+			note: "Promotion state was aggressively compacted; inspect fullEvidenceArtifact before approving residual risk.",
+		},
+	};
+}
 
 function evidenceValue(stateValue, nodeId) {
 	if (!isEmptyEvidence(stateValue)) return stateValue;
@@ -113,6 +163,16 @@ function isEmptyEvidence(value) {
 	if (Array.isArray(value)) return value.length === 0;
 	if (typeof value === "object") return Object.keys(value).length === 0;
 	return false;
+}
+
+function boundedValue(value, maxChars) {
+	const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+	return boundedText(text, maxChars);
+}
+
+function boundedText(text, maxChars) {
+	if (text.length <= maxChars) return text;
+	return `${text.slice(0, maxChars)}\n[truncated ${text.length - maxChars} chars]`;
 }
 
 function assertPromotionEvidence(input) {
