@@ -96,7 +96,7 @@ function hasComponentAcknowledgement(text) {
 }
 
 function hasConnectionAcknowledgement(text) {
-	return /\b(connect|connection|interact|interaction|coupled|coupling|boundary|through|between|via|route|routes|forward|forwards|depend|depends)\b/u.test(
+	return /\b(connect(?:s|ed|ing)?|connections?|interact(?:s|ed|ing)?|interactions?|coupled|coupling|boundar(?:y|ies)|through|between|via|route|routes|routing|forward|forwards|depend|depends|drives?)\b/u.test(
 		text,
 	);
 }
