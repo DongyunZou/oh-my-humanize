@@ -1,0 +1,172 @@
+---
+name: test-generation-hardening
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    tester: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: tester
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Test generation hardening
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    gaps: object
+    generatedTests: object
+    repair: object
+    suite: object
+    review: string
+    runtime: object
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/run-test-suite.js
+    kind: script
+  - path: scripts/archive-tests.js
+    kind: script
+  - path: prompts/test-gaps.md
+    kind: prompt
+  - path: prompts/generate-tests.md
+    kind: prompt
+  - path: prompts/repair-tests.md
+    kind: prompt
+  - path: prompts/test-review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+nodes:
+  - id: precheckTaskContract
+    type: script
+    script:
+      language: js
+      file: scripts/precheck-task-contract.js
+    writes:
+      - /task
+      - /runtime
+  - id: inspectCoverage
+    type: agent
+    agent: task
+    model:
+      role: tester
+    reads:
+      - /task
+    prompt:
+      file: prompts/test-gaps.md
+    writes:
+      - /gaps
+  - id: generateTests
+    type: agent
+    agent: task
+    model:
+      role: tester
+    reads:
+      - /task
+      - /gaps
+    prompt:
+      file: prompts/generate-tests.md
+    writes:
+      - /generatedTests
+  - id: repairTests
+    type: agent
+    agent: task
+    model:
+      role: tester
+    reads:
+      - /task
+      - /gaps
+      - /suite
+      - /review
+      - /summary
+    prompt:
+      template:
+        file: prompts/repair-tests.md
+        bindings:
+          reviewSummary:
+            output:
+              node: testReview
+              path: /summary
+              activation: latest-completed
+    writes:
+      - /repair
+  - id: runTestSuite
+    type: script
+    reads:
+      - /task
+      - /generatedTests
+      - /repair
+    script:
+      language: js
+      file: scripts/run-test-suite.js
+    writes:
+      - /suite
+  - id: testReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /task
+      - /gaps
+      - /generatedTests
+      - /repair
+      - /suite
+    prompt:
+      file: prompts/test-review.md
+    writes:
+      - /review
+    gates:
+      - continue
+      - finish
+    fallbackVerdict: continue
+
+
+  - id: archiveTests
+    type: script
+    reads:
+      - /task
+      - /gaps
+      - /suite
+      - /review
+    script:
+      language: js
+      file: scripts/archive-tests.js
+    writes:
+      - /archive
+edges:
+  - from: precheckTaskContract
+    to: inspectCoverage
+  - from: inspectCoverage
+    to: generateTests
+  - from: generateTests
+    to: runTestSuite
+  - from: repairTests
+    to: runTestSuite
+  - from: runTestSuite
+    to: testReview
+  - from: testReview
+    to: repairTests
+    when: outputs.testReview.verdict == "continue"
+    label: review requests test repair
+  - from: testReview
+    to: archiveTests
+    when: outputs.testReview.verdict != "continue"
+    label: review accepted tests
+```

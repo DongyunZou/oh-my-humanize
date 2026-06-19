@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Changed workflow examples to use `examples/workflow/` as the promotion root,
+  `examples/workflow/experimental/` for practical but not yet promoted flows,
+  and `examples/workflow/demo/` for teaching or seed-bound demo flows.
 - Changed workflow long-running guidance so the eight-hour validation floor is an external audit/evidence rule, not a reason for flows to keep themselves alive with sleep, hold, or duration-check nodes.
 - Changed workflow start to require frozen `.omhflow` artifacts instead of raw authoring YAML packages.
 

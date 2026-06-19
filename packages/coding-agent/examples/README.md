@@ -13,19 +13,22 @@ Example hooks for intercepting tool calls, adding safety gates, and integrating 
 ### [custom-tools/](custom-tools/)
 Example custom tools that extend the agent's capabilities.
 
-### [workflow-demos/](workflow-demos/)
-Workflow-language demos and fixtures. These artifacts may be executable, but
-they are not packaged practical workflows and should be used by explicit path.
+### [workflow/](workflow/)
+Workflow artifacts are separated by validation tier.
 
-### workflows/
-Reserved for built-in practical workflow artifacts; the directory is
-intentionally absent while no workflow has earned that tier. A workflow may be
-added here only after it is generic, useful on real projects, and backed by
-stable eight-hour-plus Project x Flow x Task validation evidence across more
-than one real context. A single audited long-running run is candidate evidence,
-not a built-in promotion. Unverified practical flows belong in an external
-candidate directory such as `OMHFLOW_DIR`; seed-bound or teaching artifacts
-belong in `workflow-demos/`.
+The top level is reserved for formally promoted practical workflows. A workflow
+may be added there only after it is generic, useful on real projects, and backed
+by at least 100 cumulative hours of successful Project x Flow x Task validation
+evidence.
+
+### [workflow/experimental/](workflow/experimental/)
+Practical workflows that are useful enough to share as examples, but have not
+earned formal promotion. They should still be treated as experimental
+`OMHFLOW_DIR` artifacts, not built-in workflows with stability guarantees.
+
+### [workflow/demo/](workflow/demo/)
+Workflow-language demos and fixtures. These artifacts may be executable, but
+they are teaching or seed-bound examples rather than practical promoted flows.
 
 ## Documentation
 

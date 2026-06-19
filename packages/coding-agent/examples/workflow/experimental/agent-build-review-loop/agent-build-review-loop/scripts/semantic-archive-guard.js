@@ -1,0 +1,153 @@
+const MAX_FILE_BYTES = 512_000;
+const REPEATED_LINE_MIN_COUNT = 20;
+const REPEATED_LINE_RATIO = 0.45;
+const LOW_UNIQUE_LINE_RATIO = 0.2;
+const PADDING_WORD_PATTERN = /\b(padding|dummy|placeholder|lorem|sleep|hold|no-op|noop|filler)\b/iu;
+
+const taskText = await readOptionalText("task.md");
+const explicitAllowance = explicitLowSemanticAllowance(taskText);
+const changedFiles = await changedProjectFiles();
+const findings = [];
+
+for (const file of changedFiles) {
+	if (ignoredEvidencePath(file)) continue;
+	const text = await readTextFileIfSmall(file);
+	if (text === null) continue;
+	const finding = analyzeTextFile(file, text);
+	if (finding !== null) findings.push(finding);
+}
+
+const blockingFindings = explicitAllowance ? [] : findings;
+const verdict = blockingFindings.length === 0 ? "PASS" : "REPAIR";
+const diagnostic = {
+	verdict,
+	changedFiles: changedFiles.slice(0, 200),
+	explicitAllowance,
+	findings,
+	checkedAtMs: Date.now(),
+};
+
+await Bun.write(
+	"workflow-output/semantic-archive-guard.json",
+	`${JSON.stringify(diagnostic, null, 2)}\n`,
+);
+
+return {
+	summary:
+		verdict === "PASS"
+			? `semantic archive guard passed: inspected ${changedFiles.length} changed project files`
+			: `semantic archive guard requires repair: ${blockingFindings.map(finding => `${finding.file}: ${finding.reason}`).join("; ")}`,
+	verdict,
+	data: diagnostic,
+	statePatch: [{ op: "set", path: "/semanticGuard", value: diagnostic }],
+};
+
+async function changedProjectFiles() {
+	const proc = Bun.spawn(["git", "status", "--short", "--untracked-files=all"], {
+		cwd: process.cwd(),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+	if (exitCode !== 0) return [];
+	return stdout
+		.split(/\r?\n/u)
+		.map(statusLineToPath)
+		.filter(Boolean)
+		.filter(file => !ignoredEvidencePath(file));
+}
+
+function statusLineToPath(line) {
+	const trimmed = line.trim();
+	if (!trimmed) return "";
+	const rename = /^R[ MDA?]?\s+(.+?)\s+->\s+(.+)$/u.exec(trimmed);
+	if (rename) return normalizeGitPath(rename[2]?.trim() ?? "");
+	return normalizeGitPath(trimmed.slice(2).trim());
+}
+
+function normalizeGitPath(filePath) {
+	if (filePath.startsWith('"') && filePath.endsWith('"')) return filePath.slice(1, -1);
+	return filePath;
+}
+
+async function readTextFileIfSmall(filePath) {
+	try {
+		const file = Bun.file(filePath);
+		if (file.size > MAX_FILE_BYTES) return null;
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		if (bytes.includes(0)) return null;
+		return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+	} catch {
+		return null;
+	}
+}
+
+function analyzeTextFile(file, text) {
+	const lines = text
+		.split(/\r?\n/u)
+		.map(line => normalizeLine(line))
+		.filter(line => line.length > 0);
+	if (lines.length < REPEATED_LINE_MIN_COUNT) return null;
+	const counts = new Map();
+	for (const line of lines) {
+		counts.set(line, (counts.get(line) ?? 0) + 1);
+	}
+	let topLine = "";
+	let topCount = 0;
+	for (const [line, count] of counts) {
+		if (count > topCount) {
+			topLine = line;
+			topCount = count;
+		}
+	}
+	const repeatedRatio = topCount / lines.length;
+	const uniqueRatio = counts.size / lines.length;
+	const paddingWord = PADDING_WORD_PATTERN.test(topLine);
+	const suspiciousRepeat = topCount >= REPEATED_LINE_MIN_COUNT && repeatedRatio >= REPEATED_LINE_RATIO;
+	const suspiciousLowUnique = lines.length >= 80 && uniqueRatio <= LOW_UNIQUE_LINE_RATIO && topCount >= 10;
+	if (!suspiciousRepeat && !suspiciousLowUnique && !paddingWord) return null;
+	return {
+		file,
+		reason: "high-repetition low-semantic text content before archive",
+		lineCount: lines.length,
+		uniqueLineCount: counts.size,
+		topRepeatedLineCount: topCount,
+		repeatedRatio: Number(repeatedRatio.toFixed(3)),
+		uniqueRatio: Number(uniqueRatio.toFixed(3)),
+		repeatedLinePreview: topLine.slice(0, 160),
+	};
+}
+
+function normalizeLine(line) {
+	return line.trim().replace(/\s+/gu, " ");
+}
+
+function explicitLowSemanticAllowance(text) {
+	return /(^|\n)\s*(?:#+\s*)?(?:generated fixture allowed|low-semantic repetition allowed|bulk fixture allowed)\s*:\s*yes\b/iu.test(
+		text,
+	);
+}
+
+async function readOptionalText(filePath) {
+	try {
+		return await Bun.file(filePath).text();
+	} catch {
+		return "";
+	}
+}
+
+function ignoredEvidencePath(file) {
+	return (
+		file === "evidence-ledger.jsonl" ||
+		file === "manifest-entry.json" ||
+		file === "monitor-assignment.json" ||
+		file === "task.md" ||
+		file === "progress.md" ||
+		file.startsWith("workflow-output/") ||
+		file.includes("/.pytest_cache/") ||
+		file.includes("/node_modules/") ||
+		file.includes("/.venv/") ||
+		file.includes("/dist/") ||
+		file.includes("/build/")
+	);
+}

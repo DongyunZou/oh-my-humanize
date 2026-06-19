@@ -1,0 +1,215 @@
+---
+name: research-reproduction
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    researcher: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: researcher
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Research reproduction
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    runtime: object
+    claim: object
+    setup: object
+    reproduction: object
+    variant: object
+    comparison: object
+    review: string
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/run-setup.js
+    kind: script
+  - path: scripts/run-reproduction.js
+    kind: script
+  - path: scripts/run-variant.js
+    kind: script
+  - path: scripts/archive-reproduction.js
+    kind: script
+  - path: prompts/reproduction.md
+    kind: prompt
+  - path: prompts/review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+nodes:
+  - id: precheckTaskContract
+    type: script
+    script:
+      language: js
+      file: scripts/precheck-task-contract.js
+    writes:
+      - /task
+      - /runtime
+      - /review
+  - id: extractClaim
+    type: agent
+    agent: task
+    model:
+      role: researcher
+    reads:
+      - /task
+    prompt:
+      template:
+        file: prompts/reproduction.md
+        bindings:
+          mode:
+            inline: extract claim
+          task:
+            state: /task
+    writes:
+      - /claim
+  - id: setupExperiment
+    type: script
+    script:
+      language: js
+      file: scripts/run-setup.js
+    reads:
+      - /task
+      - /claim
+    writes:
+      - /setup
+  - id: reproduceBaseline
+    type: script
+    script:
+      language: js
+      file: scripts/run-reproduction.js
+    reads:
+      - /task
+      - /setup
+    writes:
+      - /reproduction
+  - id: runVariant
+    type: script
+    script:
+      language: js
+      file: scripts/run-variant.js
+    reads:
+      - /task
+      - /reproduction
+    writes:
+      - /variant
+  - id: compareResults
+    type: agent
+    agent: task
+    model:
+      role: researcher
+    reads:
+      - /task
+      - /claim
+      - /setup
+      - /reproduction
+      - /variant
+      - /review
+    prompt:
+      template:
+        file: prompts/reproduction.md
+        bindings:
+          mode:
+            inline: compare results
+          task:
+            state: /task
+          claim:
+            state: /claim
+          setup:
+            state: /setup
+          reproduction:
+            state: /reproduction
+          variant:
+            state: /variant
+          review:
+            state: /review
+    writes:
+      - /comparison
+  - id: reportReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /task
+      - /claim
+      - /setup
+      - /reproduction
+      - /variant
+      - /comparison
+    prompt:
+      template:
+        file: prompts/review.md
+        bindings:
+          task:
+            state: /task
+          claim:
+            state: /claim
+          setup:
+            state: /setup
+          reproduction:
+            state: /reproduction
+          variant:
+            state: /variant
+          comparison:
+            state: /comparison
+    writes:
+      - /review
+    gates:
+      - continue
+      - finish
+    fallbackVerdict: continue
+
+
+  - id: archiveReproduction
+    type: script
+    script:
+      language: js
+      file: scripts/archive-reproduction.js
+    reads:
+      - /task
+      - /reproduction
+      - /variant
+      - /comparison
+      - /review
+    writes:
+      - /archive
+edges:
+  - from: precheckTaskContract
+    to: extractClaim
+  - from: extractClaim
+    to: setupExperiment
+  - from: setupExperiment
+    to: reproduceBaseline
+  - from: reproduceBaseline
+    to: runVariant
+  - from: runVariant
+    to: compareResults
+  - from: compareResults
+    to: reportReview
+  - from: reportReview
+    to: extractClaim
+    when: outputs.reportReview.verdict == "continue"
+    label: refine reproduction
+  - from: reportReview
+    to: archiveReproduction
+    when: outputs.reportReview.verdict != "continue"
+    label: reproduction accepted
+```

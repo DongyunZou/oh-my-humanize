@@ -1,0 +1,126 @@
+const state = workflowContext.state && typeof workflowContext.state === "object" ? workflowContext.state : {};
+const task = state.task && typeof state.task === "object" ? state.task : {};
+const benchmark = state.benchmark && typeof state.benchmark === "object" ? state.benchmark : {};
+
+if (benchmark.status !== "pass") {
+	throw new Error("cannot finalize performance selection before benchmark and validation pass");
+}
+
+const changedFiles = await gitDiffHeadChangedFiles();
+const projectChangedFiles = changedFiles.filter((file) => !file.startsWith("workflow-output/") && file !== "task.md");
+const branchReports = await readBranchReports();
+const joinedText = branchReports.map((report) => report.text).join("\n");
+const selectedBranches = branchReports.filter((report) => /\bfinal-selection\s*:\s*yes\b/iu.test(report.text));
+const noWinBranches = branchReports.filter((report) => /\bno-win-result\s*:\s*yes\b/iu.test(report.text));
+const hasRollbackEvidence = /\brollback\b/iu.test(joinedText);
+const noWinAllowed = allowsNoWinArchive(task);
+
+let terminalState;
+if (projectChangedFiles.length === 0) {
+	if (!noWinAllowed) {
+		throw new Error(
+			"no-win performance selection requires `No-Win Result: allowed` in task.md when project diff is empty",
+		);
+	}
+	if (noWinBranches.length === 0) {
+		throw new Error("no-win performance selection requires at least one branch with `no-win-result: yes`");
+	}
+	if (!hasRollbackEvidence) {
+		throw new Error("no-win performance selection requires rollback or no-change evidence");
+	}
+	if (selectedBranches.length > 0) {
+		throw new Error("no-win performance selection cannot also contain `final-selection: yes`");
+	}
+	terminalState = "no-win";
+} else {
+	if (noWinBranches.length > 0 && selectedBranches.length === 0) {
+		throw new Error("no-win performance selection requires an empty project diff");
+	}
+	if (selectedBranches.length !== 1) {
+		throw new Error(
+			"positive performance selection requires exactly one retained branch with `final-selection: yes`",
+		);
+	}
+	if (!hasRollbackEvidence) {
+		throw new Error("positive performance selection requires rollback evidence for the retained/rejected branches");
+	}
+	terminalState = "positive";
+}
+
+const outputPath = "workflow-output/performance-selection.md";
+await Bun.write(
+	outputPath,
+	[
+		"# Performance Selection",
+		"",
+		`terminalState: ${terminalState}`,
+		`projectChangedFiles: ${projectChangedFiles.length}`,
+		`selectedBranches: ${selectedBranches.map((report) => report.name).join(", ") || "none"}`,
+		`noWinBranches: ${noWinBranches.map((report) => report.name).join(", ") || "none"}`,
+		`rollbackEvidence: ${hasRollbackEvidence ? "yes" : "no"}`,
+		"",
+		"## Project Changed Files",
+		"",
+		projectChangedFiles.length > 0 ? projectChangedFiles.map((file) => `- ${file}`).join("\n") : "No project changes.",
+		"",
+	].join("\n"),
+);
+
+return {
+	summary: `finalized performance selection: ${terminalState}`,
+	statePatch: [
+		{
+			op: "set",
+			path: "/selection",
+			value: {
+				status: "pass",
+				terminalState,
+				file: outputPath,
+				projectChangedFiles,
+				selectedBranches: selectedBranches.map((report) => report.name),
+				noWinBranches: noWinBranches.map((report) => report.name),
+				rollbackEvidence: hasRollbackEvidence,
+			},
+		},
+	],
+};
+
+async function gitDiffHeadChangedFiles() {
+	const proc = Bun.spawn(["git", "diff", "HEAD", "--name-only"], {
+		cwd: process.cwd(),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	if (exitCode !== 0) throw new Error(`git diff HEAD failed: ${stderr.trim() || stdout.trim()}`);
+	return stdout
+		.split(/\r?\n/u)
+		.map((line) => line.trim())
+		.filter(Boolean);
+}
+
+async function readBranchReports() {
+	const reports = [];
+	for (const name of ["algorithmic", "caching", "io"]) {
+		const file = `workflow-output/perf-${name}.md`;
+		reports.push({ name, file, text: await readOptionalText(file) });
+	}
+	return reports;
+}
+
+function allowsNoWinArchive(taskValue) {
+	const taskText = typeof taskValue.text === "string" ? taskValue.text : "";
+	return /\bNo-Win Result\s*:\s*allowed\b/iu.test(taskText);
+}
+
+async function readOptionalText(filePath) {
+	try {
+		return await Bun.file(filePath).text();
+	} catch {
+		return "";
+	}
+}

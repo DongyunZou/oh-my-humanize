@@ -1,0 +1,232 @@
+---
+name: refactor-migration-plan
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    architect: gpt-5.5
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: architect
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Refactor migration plan
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    dependencyMap: object
+    compatibility: object
+    migration: object
+    cleanup: object
+    validation: object
+    review: string
+    runtime: object
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/run-migration-validation.js
+    kind: script
+  - path: scripts/archive-migration.js
+    kind: script
+  - path: prompts/map-dependencies.md
+    kind: prompt
+  - path: prompts/design-compatibility.md
+    kind: prompt
+  - path: prompts/migrate-callers.md
+    kind: prompt
+  - path: prompts/cleanup.md
+    kind: prompt
+  - path: prompts/review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+sequence:
+  - node:
+      id: precheckTaskContract
+      type: script
+      script:
+        language: js
+        file: scripts/precheck-task-contract.js
+      writes:
+        - /task
+        - /runtime
+        - /review
+        - /validation
+  - node:
+      id: mapDependencies
+      type: agent
+      agent: task
+      model:
+        role: architect
+      reads:
+        - /task
+      prompt:
+        template:
+          file: prompts/map-dependencies.md
+          bindings:
+            task:
+              state: /task
+      writes:
+        - /dependencyMap
+  - node:
+      id: designCompatibilityLayer
+      type: agent
+      agent: task
+      model:
+        role: architect
+      reads:
+        - /task
+        - /dependencyMap
+      prompt:
+        template:
+          file: prompts/design-compatibility.md
+          bindings:
+            task:
+              state: /task
+            dependencyMap:
+              state: /dependencyMap
+      writes:
+        - /compatibility
+  - template:
+      kind: retry_until
+      body:
+        sequence:
+          - node:
+              id: migrateCallers
+              type: agent
+              agent: task
+              model:
+                role: builder
+              reads:
+                - /task
+                - /dependencyMap
+                - /compatibility
+                - /validation
+                - /review
+              prompt:
+                template:
+                  file: prompts/migrate-callers.md
+                  bindings:
+                    task:
+                      state: /task
+                    dependencyMap:
+                      state: /dependencyMap
+                    compatibility:
+                      state: /compatibility
+                    validation:
+                      state: /validation
+                    review:
+                      state: /review
+              writes:
+                - /migration
+          - node:
+              id: runMigrationValidation
+              type: script
+              reads:
+                - /task
+                - /migration
+              script:
+                language: js
+                file: scripts/run-migration-validation.js
+              writes:
+                - /validation
+          - node:
+              id: cleanupDeadPath
+              type: agent
+              agent: task
+              model:
+                role: builder
+              reads:
+                - /task
+                - /dependencyMap
+                - /compatibility
+                - /migration
+                - /validation
+                - /review
+              prompt:
+                template:
+                  file: prompts/cleanup.md
+                  bindings:
+                    task:
+                      state: /task
+                    dependencyMap:
+                      state: /dependencyMap
+                    compatibility:
+                      state: /compatibility
+                    migration:
+                      state: /migration
+                    validation:
+                      state: /validation
+                    review:
+                      state: /review
+              writes:
+                - /cleanup
+      review:
+        id: migrationReview
+        type: review
+        agent: reviewer
+        model:
+          role: reviewer
+        reads:
+          - /task
+          - /dependencyMap
+          - /compatibility
+          - /migration
+          - /cleanup
+          - /validation
+        prompt:
+          template:
+            file: prompts/review.md
+            bindings:
+              task:
+                state: /task
+              dependencyMap:
+                state: /dependencyMap
+              compatibility:
+                state: /compatibility
+              migration:
+                state: /migration
+              cleanup:
+                state: /cleanup
+              validation:
+                state: /validation
+        gates:
+          - continue
+          - finish
+        fallbackVerdict: continue
+        writes:
+          - /review
+      retryWhen: outputs.migrationReview.verdict == "continue"
+  - node:
+      id: archiveMigration
+      type: script
+      reads:
+        - /task
+        - /dependencyMap
+        - /compatibility
+        - /migration
+        - /cleanup
+        - /validation
+        - /review
+      script:
+        language: js
+        file: scripts/archive-migration.js
+      writes:
+        - /archive
+```

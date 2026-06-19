@@ -1,0 +1,160 @@
+const broadChangePattern =
+	/\b(repo[- ]?wide|whole[- ]?repo|whole[- ]?repository|global format|formatter migration|mechanical migration|format all|large refactor|mass update)\b/iu;
+
+async function runGit(args) {
+	const child = Bun.spawn(["git", ...args], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const stdoutPromise = new Response(child.stdout).text();
+	const stderrPromise = new Response(child.stderr).text();
+	const exitCode = await child.exited;
+	const stdout = await stdoutPromise;
+	const stderr = await stderrPromise;
+	return { exitCode, stdout, stderr };
+}
+
+function parseNumstat(text) {
+	const files = [];
+	let added = 0;
+	let deleted = 0;
+	let binaryFiles = 0;
+	for (const line of text.split(/\r?\n/u)) {
+		if (!line.trim()) continue;
+		const [rawAdded, rawDeleted, ...pathParts] = line.split("\t");
+		const file = pathParts.join("\t");
+		if (!file) continue;
+		const fileAdded = Number(rawAdded);
+		const fileDeleted = Number(rawDeleted);
+		if (!Number.isFinite(fileAdded) || !Number.isFinite(fileDeleted)) {
+			binaryFiles += 1;
+			files.push({ file, added: 0, deleted: 0, binary: true });
+			continue;
+		}
+		added += fileAdded;
+		deleted += fileDeleted;
+		files.push({ file, added: fileAdded, deleted: fileDeleted });
+	}
+	return {
+		added,
+		deleted,
+		total: added + deleted,
+		fileCount: files.length,
+		binaryFiles,
+		files,
+	};
+}
+
+function changedPathFromStatus(line) {
+	const path = line.slice(3).trim();
+	const renameArrow = " -> ";
+	return path.includes(renameArrow) ? path.split(renameArrow).at(-1)?.trim() ?? path : path;
+}
+
+function isWorkflowArtifactPath(path) {
+	return (
+		path === "task.md" ||
+		path === "manifest-entry.json" ||
+		path === "monitor-assignment.json" ||
+		path === "evidence-ledger.jsonl" ||
+		path === "progress.md" ||
+		path.startsWith("workflow-output/") ||
+		path.startsWith("transcripts/")
+	);
+}
+
+let taskText = "";
+try {
+	taskText = await Bun.file("task.md").text();
+} catch {
+	taskText = "";
+}
+
+const broadChangeAllowed = broadChangePattern.test(taskText);
+const status = await runGit(["status", "--short", "--untracked-files=all"]);
+const regularDiff = await runGit(["diff", "--numstat"]);
+const semanticDiff = await runGit(["diff", "-w", "--numstat"]);
+
+if (regularDiff.exitCode !== 0 || semanticDiff.exitCode !== 0 || status.exitCode !== 0) {
+	const diagnostic = {
+		verdict: "REPAIR",
+		reasons: ["git diff discipline guard could not inspect repository state"],
+		statusExitCode: status.exitCode,
+		regularExitCode: regularDiff.exitCode,
+		semanticExitCode: semanticDiff.exitCode,
+		stderr: [status.stderr, regularDiff.stderr, semanticDiff.stderr].filter(Boolean).join("\n").slice(0, 1200),
+		checkedAtMs: Date.now(),
+	};
+	return {
+		summary: "diff discipline guard requires repair: repository diff inspection failed",
+		data: diagnostic,
+		statePatch: [{ op: "set", path: "/humanize/diffGuard", value: diagnostic }],
+	};
+}
+
+const regular = parseNumstat(regularDiff.stdout);
+const semantic = parseNumstat(semanticDiff.stdout);
+const statusLines = status.stdout
+	.split(/\r?\n/u)
+	.map(line => line.trimEnd())
+	.filter(line => line.length > 0);
+const untrackedFiles = statusLines.filter(line => line.startsWith("?? ")).map(changedPathFromStatus);
+const untrackedProjectFiles = untrackedFiles.filter(path => !isWorkflowArtifactPath(path));
+const semanticRatio = regular.total === 0 ? 1 : semantic.total / regular.total;
+const mechanicalOverhead = Math.max(0, regular.total - semantic.total);
+const reasons = [];
+
+if (!broadChangeAllowed && regular.fileCount >= 20) {
+	reasons.push(`changed ${regular.fileCount} files without an explicit repo-wide task contract`);
+}
+
+if (!broadChangeAllowed && regular.total >= 600 && mechanicalOverhead >= 400 && semanticRatio <= 0.4) {
+	reasons.push(
+		`diff looks mechanically broad: ${regular.total} changed lines, ${semantic.total} semantic lines with -w, ${mechanicalOverhead} whitespace/style overhead`,
+	);
+}
+
+if (!broadChangeAllowed && regular.total >= 4000) {
+	reasons.push(`diff is too large for a bounded RLCR implementation round: ${regular.total} changed lines`);
+}
+
+if (!broadChangeAllowed && untrackedProjectFiles.length > 10) {
+	reasons.push(`created ${untrackedProjectFiles.length} untracked project files without an explicit generated-artifact contract`);
+}
+
+const verdict = reasons.length === 0 ? "PASS" : "REPAIR";
+const diagnostic = {
+	verdict,
+	reasons,
+	broadChangeAllowed,
+	regular: {
+		added: regular.added,
+		deleted: regular.deleted,
+		total: regular.total,
+		fileCount: regular.fileCount,
+		binaryFiles: regular.binaryFiles,
+		files: regular.files.slice(0, 40),
+	},
+	semantic: {
+		added: semantic.added,
+		deleted: semantic.deleted,
+		total: semantic.total,
+		fileCount: semantic.fileCount,
+		binaryFiles: semantic.binaryFiles,
+		files: semantic.files.slice(0, 40),
+	},
+	mechanicalOverhead,
+	semanticRatio,
+	untrackedFiles: untrackedFiles.slice(0, 40),
+	untrackedProjectFiles: untrackedProjectFiles.slice(0, 40),
+	checkedAtMs: Date.now(),
+};
+
+return {
+	summary:
+		verdict === "PASS"
+			? `diff discipline guard passed: ${regular.fileCount} files, ${regular.total} lines`
+			: `diff discipline guard requires repair: ${reasons.join("; ")}`,
+	data: diagnostic,
+	statePatch: [{ op: "set", path: "/humanize/diffGuard", value: diagnostic }],
+};

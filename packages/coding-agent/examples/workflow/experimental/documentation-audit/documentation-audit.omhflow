@@ -1,0 +1,288 @@
+---
+name: documentation-audit
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    writer: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: writer
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Documentation audit
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    inventory: object
+    apiDocsAudit: object
+    tutorialAudit: object
+    examplesAudit: object
+    auditDigest: object
+    audit: object
+    patch: object
+    validation: object
+    review: string
+    runtime: object
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/compact-audit-findings.js
+    kind: script
+  - path: scripts/run-doc-validation.js
+    kind: script
+  - path: scripts/archive-docs.js
+    kind: script
+  - path: prompts/inventory.md
+    kind: prompt
+  - path: prompts/audit-api.md
+    kind: prompt
+  - path: prompts/audit-tutorials.md
+    kind: prompt
+  - path: prompts/audit-examples.md
+    kind: prompt
+  - path: prompts/consolidate.md
+    kind: prompt
+  - path: prompts/patch-docs.md
+    kind: prompt
+  - path: prompts/review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+sequence:
+  - node:
+      id: precheckTaskContract
+      type: script
+      script:
+        language: js
+        file: scripts/precheck-task-contract.js
+      writes:
+        - /task
+        - /runtime
+        - /review
+        - /validation
+  - node:
+      id: inventoryDocs
+      type: agent
+      agent: task
+      model:
+        role: writer
+      reads:
+        - /task
+      prompt:
+        template:
+          file: prompts/inventory.md
+          bindings:
+            task:
+              state: /task
+      writes:
+        - /inventory
+  - template:
+      kind: retry_until
+      body:
+        sequence:
+          - parallel:
+              - node:
+                  id: auditApiDocs
+                  type: agent
+                  agent: task
+                  model:
+                    role: writer
+                  reads:
+                    - /task
+                    - /inventory
+                    - /review
+                  prompt:
+                    template:
+                      file: prompts/audit-api.md
+                      bindings:
+                        task:
+                          state: /task
+                        inventory:
+                          state: /inventory
+                        review:
+                          state: /review
+                  writes:
+                    - /apiDocsAudit
+              - node:
+                  id: auditTutorials
+                  type: agent
+                  agent: task
+                  model:
+                    role: writer
+                  reads:
+                    - /task
+                    - /inventory
+                    - /review
+                  prompt:
+                    template:
+                      file: prompts/audit-tutorials.md
+                      bindings:
+                        task:
+                          state: /task
+                        inventory:
+                          state: /inventory
+                        review:
+                          state: /review
+                  writes:
+                    - /tutorialAudit
+              - node:
+                  id: auditExamples
+                  type: agent
+                  agent: task
+                  model:
+                    role: writer
+                  reads:
+                    - /task
+                    - /inventory
+                    - /review
+                  prompt:
+                    template:
+                      file: prompts/audit-examples.md
+                      bindings:
+                        task:
+                          state: /task
+                        inventory:
+                          state: /inventory
+                        review:
+                          state: /review
+                  writes:
+                    - /examplesAudit
+            join:
+              id: compactAuditFindings
+              type: script
+              script:
+                language: js
+                file: scripts/compact-audit-findings.js
+              reads:
+                - /task
+                - /inventory
+                - /apiDocsAudit
+                - /tutorialAudit
+                - /examplesAudit
+              writes:
+                - /auditDigest
+          - node:
+              id: consolidateAudit
+              type: agent
+              agent: task
+              model:
+                role: writer
+              reads:
+                - /task
+                - /inventory
+                - /auditDigest
+              prompt:
+                template:
+                  file: prompts/consolidate.md
+                  bindings:
+                    task:
+                      state: /task
+                    inventory:
+                      state: /inventory
+                    auditDigest:
+                      state: /auditDigest
+              writes:
+                - /audit
+          - node:
+              id: patchDocs
+              type: agent
+              agent: task
+              model:
+                role: writer
+              reads:
+                - /task
+                - /inventory
+                - /audit
+                - /validation
+                - /review
+              prompt:
+                template:
+                  file: prompts/patch-docs.md
+                  bindings:
+                    task:
+                      state: /task
+                    inventory:
+                      state: /inventory
+                    audit:
+                      state: /audit
+                    validation:
+                      state: /validation
+                    review:
+                      state: /review
+              writes:
+                - /patch
+          - node:
+              id: runDocsValidation
+              type: script
+              reads:
+                - /task
+                - /patch
+              script:
+                language: js
+                file: scripts/run-doc-validation.js
+              writes:
+                - /validation
+      review:
+        id: consistencyReview
+        type: review
+        agent: reviewer
+        model:
+          role: reviewer
+        reads:
+          - /task
+          - /inventory
+          - /audit
+          - /patch
+          - /validation
+        prompt:
+          template:
+            file: prompts/review.md
+            bindings:
+              task:
+                state: /task
+              inventory:
+                state: /inventory
+              audit:
+                state: /audit
+              patch:
+                state: /patch
+              validation:
+                state: /validation
+        gates:
+          - continue
+          - finish
+        fallbackVerdict: continue
+        writes:
+          - /review
+      retryWhen: outputs.consistencyReview.verdict == "continue"
+  - node:
+      id: archiveDocs
+      type: script
+      reads:
+        - /task
+        - /audit
+        - /patch
+        - /validation
+        - /review
+      script:
+        language: js
+        file: scripts/archive-docs.js
+      writes:
+        - /archive
+```

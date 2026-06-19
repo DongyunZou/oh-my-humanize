@@ -1,0 +1,194 @@
+---
+name: release-hardening
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    releaser: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: releaser
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Release hardening
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    scope: object
+    changelog: object
+    compatibility: object
+    checks: object
+    repair: object
+    review: string
+    runtime: object
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/run-release-checks.js
+    kind: script
+  - path: scripts/archive-release.js
+    kind: script
+  - path: prompts/release.md
+    kind: prompt
+  - path: prompts/changelog-audit.md
+    kind: prompt
+  - path: prompts/compatibility-audit.md
+    kind: prompt
+  - path: prompts/repair-release.md
+    kind: prompt
+  - path: prompts/release-review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+nodes:
+  - id: precheckTaskContract
+    type: script
+    script:
+      language: js
+      file: scripts/precheck-task-contract.js
+    writes:
+      - /task
+      - /runtime
+  - id: freezeScope
+    type: agent
+    agent: task
+    model:
+      role: releaser
+    reads:
+      - /task
+    prompt:
+      file: prompts/release.md
+    writes:
+      - /scope
+  - id: changelogAudit
+    type: agent
+    agent: task
+    model:
+      role: releaser
+    reads:
+      - /task
+      - /scope
+    prompt:
+      file: prompts/changelog-audit.md
+    writes:
+      - /changelog
+  - id: compatibilityAudit
+    type: agent
+    agent: task
+    model:
+      role: releaser
+    reads:
+      - /task
+      - /scope
+    prompt:
+      file: prompts/compatibility-audit.md
+    writes:
+      - /compatibility
+  - id: repairRelease
+    type: agent
+    agent: task
+    model:
+      role: releaser
+    reads:
+      - /task
+      - /scope
+      - /changelog
+      - /compatibility
+      - /checks
+      - /review
+      - /summary
+    prompt:
+      template:
+        file: prompts/repair-release.md
+        bindings:
+          reviewSummary:
+            output:
+              node: releaseReview
+              path: /summary
+              activation: latest-completed
+    writes:
+      - /repair
+  - id: runReleaseChecks
+    type: script
+    reads:
+      - /task
+      - /scope
+      - /changelog
+      - /compatibility
+      - /repair
+    script:
+      language: js
+      file: scripts/run-release-checks.js
+    writes:
+      - /checks
+  - id: releaseReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /task
+      - /scope
+      - /changelog
+      - /compatibility
+      - /checks
+      - /repair
+    prompt:
+      file: prompts/release-review.md
+    writes:
+      - /review
+    gates:
+      - continue
+      - finish
+    fallbackVerdict: continue
+
+
+  - id: archiveRelease
+    type: script
+    reads:
+      - /task
+      - /scope
+      - /checks
+      - /review
+    script:
+      language: js
+      file: scripts/archive-release.js
+    writes:
+      - /archive
+edges:
+  - from: precheckTaskContract
+    to: freezeScope
+  - from: freezeScope
+    to: changelogAudit
+  - from: changelogAudit
+    to: compatibilityAudit
+  - from: compatibilityAudit
+    to: runReleaseChecks
+  - from: repairRelease
+    to: runReleaseChecks
+  - from: runReleaseChecks
+    to: releaseReview
+  - from: releaseReview
+    to: repairRelease
+    when: outputs.releaseReview.verdict == "continue"
+    label: review requests release hardening repair
+  - from: releaseReview
+    to: archiveRelease
+    when: outputs.releaseReview.verdict != "continue"
+    label: release gate accepted
+```

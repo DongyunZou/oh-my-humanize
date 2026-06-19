@@ -1,0 +1,213 @@
+---
+name: bug-triage-repro-fix
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    investigator: gpt-5.5
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: investigator
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Bug triage reproduce fix
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    bug: object
+    repro: object
+    cause: object
+    patch: object
+    regression: object
+    review: string
+    runtime: object
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/run-reproduction.js
+    kind: script
+  - path: scripts/run-regression.js
+    kind: script
+  - path: scripts/archive-bugfix.js
+    kind: script
+  - path: prompts/triage.md
+    kind: prompt
+  - path: prompts/isolate-cause.md
+    kind: prompt
+  - path: prompts/patch-fix.md
+    kind: prompt
+  - path: prompts/fix-review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+nodes:
+  - id: precheckTaskContract
+    type: script
+    script:
+      language: js
+      file: scripts/precheck-task-contract.js
+    writes:
+      - /task
+      - /runtime
+  - id: classifyBug
+    type: agent
+    agent: task
+    model:
+      role: investigator
+    reads:
+      - /task
+    prompt:
+      file: prompts/triage.md
+    writes:
+      - /bug
+  - id: runReproduction
+    type: script
+    reads:
+      - /task
+      - /bug
+    script:
+      language: js
+      file: scripts/run-reproduction.js
+    writes:
+      - /repro
+  - id: isolateCause
+    type: agent
+    agent: task
+    model:
+      role: investigator
+    reads:
+      - /task
+      - /bug
+      - /repro
+    prompt:
+      file: prompts/isolate-cause.md
+    writes:
+      - /cause
+  - id: initialPatchFix
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /task
+      - /bug
+      - /repro
+      - /cause
+    prompt:
+      template:
+        file: prompts/patch-fix.md
+        bindings:
+          previousReviewSummary:
+            inline: "No fix review has run yet. Implement the smallest coherent fix that satisfies the task contract and preserves rollback clarity."
+    writes:
+      - /patch
+  - id: patchFix
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /task
+      - /bug
+      - /repro
+      - /cause
+      - /review
+      - /summary
+    prompt:
+      template:
+        file: prompts/patch-fix.md
+        bindings:
+          previousReviewSummary:
+            output:
+              node: fixReview
+              path: /summary
+              activation: latest-completed
+    writes:
+      - /patch
+  - id: runRegression
+    type: script
+    reads:
+      - /task
+      - /patch
+    script:
+      language: js
+      file: scripts/run-regression.js
+    writes:
+      - /regression
+  - id: fixReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /task
+      - /bug
+      - /repro
+      - /cause
+      - /patch
+      - /regression
+    prompt:
+      file: prompts/fix-review.md
+    writes:
+      - /review
+    gates:
+      - continue
+      - finish
+    fallbackVerdict: continue
+
+
+  - id: archiveBugfix
+    type: script
+    reads:
+      - /task
+      - /bug
+      - /repro
+      - /cause
+      - /patch
+      - /regression
+      - /review
+    script:
+      language: js
+      file: scripts/archive-bugfix.js
+    writes:
+      - /archive
+edges:
+  - from: precheckTaskContract
+    to: classifyBug
+  - from: classifyBug
+    to: runReproduction
+  - from: runReproduction
+    to: isolateCause
+  - from: isolateCause
+    to: initialPatchFix
+  - from: initialPatchFix
+    to: runRegression
+  - from: patchFix
+    to: runRegression
+  - from: runRegression
+    to: fixReview
+  - from: fixReview
+    to: patchFix
+    when: outputs.fixReview.verdict == "continue"
+    label: review requests another fix
+  - from: fixReview
+    to: archiveBugfix
+    when: outputs.fixReview.verdict != "continue"
+    label: review accepted fix
+```

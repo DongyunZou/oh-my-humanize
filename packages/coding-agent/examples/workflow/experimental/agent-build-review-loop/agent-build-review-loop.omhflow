@@ -1,0 +1,162 @@
+---
+name: agent-build-review-loop
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Agent Build/Review Loop
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    progress: object
+    implementation: object
+    verdict: string
+    archive: object
+    semanticGuard: object
+    runtime: object
+resources:
+  - path: scripts/initialize-loop.js
+    kind: script
+  - path: scripts/semantic-archive-guard.js
+    kind: script
+  - path: scripts/archive-loop.js
+    kind: script
+  - path: prompts/build-round.md
+    kind: prompt
+  - path: prompts/review-round.md
+    kind: prompt
+capabilities:
+  tools:
+    - eval
+    - bash
+  agents:
+    - task
+    - reviewer
+nodes:
+  - id: initializeLoop
+    type: script
+    script:
+      language: js
+      file: scripts/initialize-loop.js
+    writes:
+      - /progress
+      - /runtime
+      - /semanticGuard
+  - id: initialBuildRound
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /progress
+    prompt:
+      template:
+        file: prompts/build-round.md
+        bindings:
+          previousReviewVerdict:
+            inline: initial
+          previousReviewSummary:
+            inline: "No previous review has run yet. Complete the first bounded build round from task.md."
+    writes:
+      - /implementation
+  - id: reviewRound
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /progress
+      - /implementation
+    prompt:
+      file: prompts/review-round.md
+    writes:
+      - /verdict
+    gates:
+      - complete
+      - continue
+    fallbackVerdict: continue
+  - id: buildRound
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /progress
+      - /summary
+      - /data
+      - /semanticGuard
+    prompt:
+      template:
+        file: prompts/build-round.md
+        bindings:
+          previousReviewVerdict:
+            output:
+              node: reviewRound
+              path: /data/verdict
+              activation: latest-completed
+          previousReviewSummary:
+            output:
+              node: reviewRound
+              path: /summary
+              activation: latest-completed
+          semanticGuardSummary:
+            state: /semanticGuard
+    writes:
+      - /implementation
+
+
+  - id: semanticArchiveGuard
+    type: script
+    script:
+      language: js
+      timeoutMs: 60000
+      file: scripts/semantic-archive-guard.js
+    writes:
+      - /semanticGuard
+
+  - id: archiveLoop
+    type: script
+    script:
+      language: js
+      timeoutMs: 60000
+      file: scripts/archive-loop.js
+    writes:
+      - /archive
+edges:
+  - from: initializeLoop
+    to: initialBuildRound
+  - from: initialBuildRound
+    to: reviewRound
+  - from: buildRound
+    to: reviewRound
+  - from: reviewRound
+    to: buildRound
+    when: outputs.reviewRound.verdict == "continue"
+    label: review requests another build
+  - from: reviewRound
+    to: semanticArchiveGuard
+    when: outputs.reviewRound.verdict != "continue"
+    label: review accepted
+  - from: semanticArchiveGuard
+    to: buildRound
+    when: outputs.semanticArchiveGuard.verdict == "REPAIR"
+    label: semantic guard requests repair
+  - from: semanticArchiveGuard
+    to: archiveLoop
+    when: outputs.semanticArchiveGuard.verdict == "PASS"
+    label: semantic guard passed
+```

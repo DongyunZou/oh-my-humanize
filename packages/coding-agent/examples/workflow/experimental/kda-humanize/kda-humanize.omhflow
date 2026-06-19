@@ -1,0 +1,200 @@
+---
+name: kda-humanize
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 30000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# KDA Humanize
+
+```yaml workflow
+imports:
+  humanize:
+    path: ./kda-humanize/humanize-rlcr-subflow.omhflow
+capabilities:
+  agents:
+    - task
+    - reviewer
+  tools:
+    - eval
+resources:
+  - path: scripts/load-task-contract.js
+    kind: script
+  - path: prompts/workspace-inspection.md
+    kind: prompt
+  - path: prompts/draft-plan.md
+    kind: prompt
+  - path: prompts/candidate.md
+    kind: prompt
+  - path: prompts/validation.md
+    kind: prompt
+  - path: prompts/promotion.md
+    kind: prompt
+  - path: scripts/record-agent-artifact.js
+    kind: script
+  - path: scripts/compact-validation-context.js
+    kind: script
+  - path: scripts/record-evidence.js
+    kind: script
+sequence:
+  - node:
+      id: loadTaskContract
+      type: script
+      script:
+        language: js
+        file: scripts/load-task-contract.js
+      writes:
+        - /taskContract
+        - /kda
+  - node:
+      id: inspectWorkspace
+      type: agent
+      agent: task
+      model:
+        role: builder
+      reads:
+        - /taskContract
+      writes:
+        - /workspace
+      prompt:
+        template:
+          file: prompts/workspace-inspection.md
+          bindings:
+            taskContract:
+              state: /taskContract
+  - node:
+      id: recordWorkspace
+      type: script
+      script:
+        language: js
+        file: scripts/record-agent-artifact.js
+      writes:
+        - /workspace
+  - node:
+      id: draftPlan
+      type: agent
+      agent: task
+      model:
+        role: builder
+      reads:
+        - /taskContract
+        - /workspace
+      writes:
+        - /plan
+      prompt:
+        template:
+          file: prompts/draft-plan.md
+          bindings:
+            taskContract:
+              state: /taskContract
+            workspace:
+              state: /workspace
+  - node:
+      id: recordPlan
+      type: script
+      script:
+        language: js
+        file: scripts/record-agent-artifact.js
+      writes:
+        - /plan
+  - use: humanize
+  - template:
+      kind: retry_until
+      body:
+        sequence:
+          - node:
+              id: implementCandidate
+              type: agent
+              agent: task
+              model:
+                role: builder
+              reads:
+                - /taskContract
+                - /plan
+                - /finalizeSummary
+              writes:
+                - /candidate
+              prompt:
+                template:
+                  file: prompts/candidate.md
+                  bindings:
+                    taskContract:
+                      state: /taskContract
+                    plan:
+                      state: /plan
+                    humanizeHandoff:
+                      state: /finalizeSummary
+          - node:
+              id: compactValidationContext
+              type: script
+              script:
+                language: js
+                file: scripts/compact-validation-context.js
+              reads:
+                - /taskContract
+                - /plan
+                - /candidate
+                - /finalizeSummary
+              writes:
+                - /validationContext
+      review:
+        id: validateCandidate
+        type: review
+        agent: reviewer
+        model:
+          role: reviewer
+        reads:
+          - /validationContext
+        prompt:
+          template:
+            file: prompts/validation.md
+            bindings:
+              validationContext:
+                state: /validationContext
+        gates:
+          - revise
+          - promote
+        fallbackVerdict: revise
+      retryWhen: outputs.validateCandidate.verdict == "revise"
+  - node:
+      id: recordEvidence
+      type: script
+      script:
+        language: js
+        file: scripts/record-evidence.js
+      reads:
+        - /taskContract
+        - /plan
+        - /candidate
+        - /finalizeSummary
+      writes:
+        - /evidence
+  - node:
+      id: promotionDecision
+      type: review
+      agent: reviewer
+      model:
+        role: reviewer
+      reads:
+        - /evidence
+      prompt:
+        template:
+          file: prompts/promotion.md
+          bindings:
+            evidence:
+              state: /evidence
+      gates:
+        - reject
+        - promote
+```

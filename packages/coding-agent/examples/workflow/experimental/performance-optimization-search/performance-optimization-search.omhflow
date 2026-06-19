@@ -1,0 +1,264 @@
+---
+name: performance-optimization-search
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    optimizer: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: optimizer
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Performance optimization search
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    task: object
+    runtime: object
+    baseline: object
+    hypotheses: object
+    algorithmic: object
+    caching: object
+    io: object
+    benchmark: object
+    selection: object
+    review: string
+    archive: object
+resources:
+  - path: scripts/precheck-task-contract.js
+    kind: script
+  - path: scripts/capture-baseline.js
+    kind: script
+  - path: scripts/run-benchmark-validation.js
+    kind: script
+  - path: scripts/finalize-performance-selection.js
+    kind: script
+  - path: scripts/archive-performance.js
+    kind: script
+  - path: prompts/hypotheses.md
+    kind: prompt
+  - path: prompts/optimization.md
+    kind: prompt
+  - path: prompts/perf-review.md
+    kind: prompt
+capabilities:
+  tools:
+    - bash
+    - eval
+  agents:
+    - task
+    - reviewer
+sequence:
+  - node:
+      id: precheckTaskContract
+      type: script
+      script:
+        language: js
+        file: scripts/precheck-task-contract.js
+      writes:
+        - /task
+        - /runtime
+        - /review
+  - node:
+      id: captureBaseline
+      type: script
+      script:
+        language: js
+        timeoutMs: 600000
+        file: scripts/capture-baseline.js
+      reads:
+        - /task
+      writes:
+        - /baseline
+  - template:
+      kind: retry_until
+      body:
+        sequence:
+          - node:
+              id: planHypotheses
+              type: agent
+              agent: task
+              model:
+                role: optimizer
+              reads:
+                - /task
+                - /baseline
+                - /review
+              prompt:
+                template:
+                  file: prompts/hypotheses.md
+                  bindings:
+                    task:
+                      state: /task
+                    baseline:
+                      state: /baseline
+                    review:
+                      state: /review
+              writes:
+                - /hypotheses
+          - parallel:
+              - node:
+                  id: tryAlgorithmicChange
+                  type: agent
+                  agent: task
+                  model:
+                    role: optimizer
+                  reads:
+                    - /task
+                    - /baseline
+                    - /hypotheses
+                    - /review
+                  prompt:
+                    template:
+                      file: prompts/optimization.md
+                      bindings:
+                        strategy:
+                          inline: algorithmic
+                        task:
+                          state: /task
+                        baseline:
+                          state: /baseline
+                        hypotheses:
+                          state: /hypotheses
+                        review:
+                          state: /review
+                  writes:
+                    - /algorithmic
+              - node:
+                  id: tryCachingChange
+                  type: agent
+                  agent: task
+                  model:
+                    role: optimizer
+                  reads:
+                    - /task
+                    - /baseline
+                    - /hypotheses
+                    - /review
+                  prompt:
+                    template:
+                      file: prompts/optimization.md
+                      bindings:
+                        strategy:
+                          inline: caching
+                        task:
+                          state: /task
+                        baseline:
+                          state: /baseline
+                        hypotheses:
+                          state: /hypotheses
+                        review:
+                          state: /review
+                  writes:
+                    - /caching
+              - node:
+                  id: tryIOChange
+                  type: agent
+                  agent: task
+                  model:
+                    role: optimizer
+                  reads:
+                    - /task
+                    - /baseline
+                    - /hypotheses
+                    - /review
+                  prompt:
+                    template:
+                      file: prompts/optimization.md
+                      bindings:
+                        strategy:
+                          inline: io
+                        task:
+                          state: /task
+                        baseline:
+                          state: /baseline
+                        hypotheses:
+                          state: /hypotheses
+                        review:
+                          state: /review
+                  writes:
+                    - /io
+            join:
+              id: benchmarkCandidates
+              type: script
+              script:
+                language: js
+                timeoutMs: 600000
+                file: scripts/run-benchmark-validation.js
+              reads:
+                - /task
+                - /baseline
+                - /algorithmic
+                - /caching
+                - /io
+              writes:
+                - /benchmark
+      review:
+        id: perfReview
+        type: review
+        agent: reviewer
+        model:
+          role: reviewer
+        reads:
+          - /task
+          - /baseline
+          - /hypotheses
+          - /algorithmic
+          - /caching
+          - /io
+          - /benchmark
+        prompt:
+          template:
+            file: prompts/perf-review.md
+            bindings:
+              task:
+                state: /task
+              baseline:
+                state: /baseline
+              hypotheses:
+                state: /hypotheses
+              benchmark:
+                state: /benchmark
+        writes:
+          - /review
+        gates:
+          - continue
+          - finish
+        fallbackVerdict: continue
+      retryWhen: outputs.perfReview.verdict == "continue"
+  - node:
+      id: finalizePerformanceSelection
+      type: script
+      script:
+        language: js
+        file: scripts/finalize-performance-selection.js
+      reads:
+        - /task
+        - /benchmark
+        - /review
+      writes:
+        - /selection
+  - node:
+      id: archivePerformance
+      type: script
+      script:
+        language: js
+        file: scripts/archive-performance.js
+      reads:
+        - /task
+        - /baseline
+        - /benchmark
+        - /selection
+        - /review
+      writes:
+        - /archive
+```

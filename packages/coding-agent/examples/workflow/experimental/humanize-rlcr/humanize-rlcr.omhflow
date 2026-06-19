@@ -1,0 +1,277 @@
+---
+name: humanize-rlcr
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 30000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Humanize RLCR
+
+This flow models the core Humanize loop:
+
+1. Plan compliance and plan understanding.
+2. Goal tracker initialization.
+3. Implementation rounds reviewed by Codex-style summary review until complete.
+4. Code review rounds until no review issues remain.
+5. Final alignment and finalize.
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    humanize: object
+    /humanize/operatorGate/decision: string
+    verdict: string
+resources:
+  - path: prompts/plan-understanding-quiz.md
+    kind: prompt
+  - path: prompts/implementation-round.md
+    kind: prompt
+  - path: prompts/codex-summary-review.md
+    kind: prompt
+  - path: prompts/code-review-fix.md
+    kind: prompt
+  - path: prompts/codex-code-review.md
+    kind: prompt
+  - path: prompts/final-alignment-check.md
+    kind: prompt
+  - path: scripts/plan-compliance-precheck.js
+    kind: script
+  - path: scripts/record-operator-gate.js
+    kind: script
+  - path: scripts/operator-gate-exit.js
+    kind: script
+  - path: scripts/init-goal-tracker.js
+    kind: script
+  - path: scripts/write-round-summary.js
+    kind: script
+  - path: scripts/diff-discipline-guard.js
+    kind: script
+  - path: scripts/enter-review-phase.js
+    kind: script
+  - path: scripts/finalize.js
+    kind: script
+capabilities:
+  agents:
+    - task
+    - reviewer
+  tools:
+    - ask
+    - eval
+    - bash
+migrations:
+  - from: implementation-loop
+    to: review-loop
+    frontierMapping:
+      codexSummaryReview: enterReviewPhase
+nodes:
+  - id: planCompliancePrecheck
+    type: script
+    script:
+      language: js
+      file: scripts/plan-compliance-precheck.js
+    writes:
+      - /humanize
+  - id: planUnderstandingQuiz
+    type: human
+    prompt:
+      template:
+        file: prompts/plan-understanding-quiz.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+  - id: recordOperatorGate
+    type: script
+    script:
+      language: js
+      file: scripts/record-operator-gate.js
+    reads:
+      - /humanize
+    writes:
+      - /humanize
+  - id: operatorGateExit
+    type: script
+    script:
+      language: js
+      file: scripts/operator-gate-exit.js
+    reads:
+      - /humanize
+    writes:
+      - /humanize
+  - id: initializeGoalTracker
+    type: script
+    script:
+      language: js
+      file: scripts/init-goal-tracker.js
+    writes:
+      - /humanize
+  - id: implementRound
+    type: agent
+    agent: task
+    model:
+      role: builder
+    prompt:
+      template:
+        file: prompts/implementation-round.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+  - id: writeRoundSummary
+    type: script
+    script:
+      language: js
+      file: scripts/write-round-summary.js
+    writes:
+      - /humanize
+  - id: diffDisciplineGuard
+    type: script
+    script:
+      language: js
+      file: scripts/diff-discipline-guard.js
+    reads:
+      - /humanize
+    writes:
+      - /humanize
+  - id: codexSummaryReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    prompt:
+      template:
+        file: prompts/codex-summary-review.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+    gates:
+      - CONTINUE
+      - COMPLETE
+    fallbackVerdict: CONTINUE
+
+
+  - id: enterReviewPhase
+    type: script
+    script:
+      language: js
+      file: scripts/enter-review-phase.js
+    writes:
+      - /humanize
+  - id: fixReviewIssues
+    type: agent
+    agent: task
+    model:
+      role: builder
+    prompt:
+      template:
+        file: prompts/code-review-fix.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+  - id: codexCodeReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    prompt:
+      template:
+        file: prompts/codex-code-review.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+    gates:
+      - ISSUES
+      - CLEAN
+  - id: finalAlignmentCheck
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    prompt:
+      template:
+        file: prompts/final-alignment-check.md
+        bindings:
+          humanize:
+            state: /humanize
+    reads:
+      - /humanize
+    gates:
+      - finish
+      - rework
+    fallbackVerdict: rework
+  - id: finalize
+    type: script
+    script:
+      language: js
+      file: scripts/finalize.js
+    writes:
+      - /humanize
+edges:
+  - from: planCompliancePrecheck
+    to: planUnderstandingQuiz
+  - from: planUnderstandingQuiz
+    to: recordOperatorGate
+  - from: recordOperatorGate
+    to: initializeGoalTracker
+    when: state.humanize.operatorGate.decision == "proceed"
+  - from: recordOperatorGate
+    to: operatorGateExit
+    when: state.humanize.operatorGate.decision != "proceed"
+  - from: initializeGoalTracker
+    to: implementRound
+  - from: implementRound
+    to: diffDisciplineGuard
+  - from: diffDisciplineGuard
+    to: implementRound
+    when: outputs.diffDisciplineGuard.verdict == "REPAIR"
+    label: diff guard repair
+  - from: diffDisciplineGuard
+    to: writeRoundSummary
+    when: outputs.diffDisciplineGuard.verdict == "PASS"
+    label: diff guard pass
+  - from: writeRoundSummary
+    to: codexSummaryReview
+  - from: codexSummaryReview
+    to: implementRound
+    when: outputs.codexSummaryReview.verdict != "COMPLETE"
+  - from: codexSummaryReview
+    to: enterReviewPhase
+    when: outputs.codexSummaryReview.verdict == "COMPLETE"
+    label: summary review accepted
+  - from: enterReviewPhase
+    to: codexCodeReview
+  - from: fixReviewIssues
+    to: codexCodeReview
+  - from: codexCodeReview
+    to: fixReviewIssues
+    when: outputs.codexCodeReview.verdict == "ISSUES"
+  - from: codexCodeReview
+    to: finalAlignmentCheck
+    when: outputs.codexCodeReview.verdict != "ISSUES"
+  - from: finalAlignmentCheck
+    to: fixReviewIssues
+    when: outputs.finalAlignmentCheck.verdict == "rework"
+  - from: finalAlignmentCheck
+    to: finalize
+    when: outputs.finalAlignmentCheck.verdict == "finish"
+```
