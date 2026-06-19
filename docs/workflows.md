@@ -127,12 +127,14 @@ must remain active for more than eight hours to count as long-running. Shorter
 runs are useful smoke evidence, but they are not long-running validation.
 
 In the workflow graph, expect the implementation loop to revisit the build and
-summary-review nodes until the reviewer returns `COMPLETE`. If long-running
-evidence was requested and the eight-hour floor is still pending, the flow moves
-to a lightweight hold/check loop instead of asking the builder to keep expanding
-the patch. Once the floor is satisfied, the code-review loop runs until the
-reviewer returns `CLEAN`. Node badges show how many times each node has fired,
-which is the useful signal for long-running RLCR work.
+summary-review nodes until the reviewer returns `COMPLETE`. The flow must not
+keep itself alive with sleep, hold, or duration-check nodes after semantic work
+is done. Long-running credit belongs to the external audit layer: transcript and
+artifact review must prove sustained useful work over time before a run counts
+as eight-hour evidence. Once the summary reviewer accepts the implementation,
+the code-review loop runs until the reviewer returns `CLEAN`. Node badges show
+how many times each node has fired, but firing counts alone are never promotion
+evidence without concrete project deltas and validation artifacts.
 
 For a bounded smoke run without opening the TUI, stop after the first script
 activation so the headless command verifies resolution, freeze, and runtime
@@ -218,8 +220,9 @@ interrupt, approve changes, or restart attempts.
 ```
 
 `/workflow start <flow-or-path>` accepts a named verified built-in or installed
-flow, a direct `.omhflow` path, a workflow YAML file, or a directory containing
-`workflow.yml`.
+flow, or a direct `.omhflow` artifact path. Start requires a production freeze,
+so raw workflow YAML files and `workflow.yml` package directories are parser and
+authoring inputs, not launchable workflow runs.
 
 ### Workflow Dashboard
 

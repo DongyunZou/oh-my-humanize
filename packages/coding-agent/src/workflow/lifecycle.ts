@@ -700,6 +700,7 @@ export function completeWorkflowAttempt(
 	host: WorkflowLifecycleStoreHost,
 	options: CompleteWorkflowAttemptOptions,
 ): void {
+	assertWorkflowAttemptTerminalTransitionAllowed(host, options.attemptId, "completed");
 	const event: WorkflowAttemptCompletedEvent = {
 		event: "attempt_completed",
 		attemptId: options.attemptId,
@@ -709,6 +710,7 @@ export function completeWorkflowAttempt(
 }
 
 export function failWorkflowAttempt(host: WorkflowLifecycleStoreHost, options: FailWorkflowAttemptOptions): void {
+	assertWorkflowAttemptTerminalTransitionAllowed(host, options.attemptId, "failed");
 	appendLifecycleEvent(host, {
 		event: "attempt_failed",
 		attemptId: options.attemptId,
@@ -1059,6 +1061,27 @@ function restartFrontierCandidates(
 
 function pushUnique(values: string[], value: string): void {
 	if (!values.includes(value)) values.push(value);
+}
+
+function assertWorkflowAttemptTerminalTransitionAllowed(
+	host: WorkflowLifecycleStoreHost,
+	attemptId: string,
+	targetStatus: "completed" | "failed",
+): void {
+	const { attempt } = expectWorkflowAttempt(host, attemptId, targetStatus);
+	if (attempt.status === "completed" || attempt.status === "failed" || attempt.status === "stopped") {
+		throw new WorkflowLifecycleError(
+			`Workflow attempt cannot enter ${targetStatus} from terminal state: ${attempt.id} (${attempt.status})`,
+		);
+	}
+	const runningActivationIds = attempt.activations
+		.filter(activation => activation.status === "running")
+		.map(activation => activation.id);
+	if (runningActivationIds.length > 0) {
+		throw new WorkflowLifecycleError(
+			`Workflow attempt cannot enter ${targetStatus} while activations are running: ${attempt.id} (${runningActivationIds.join(", ")})`,
+		);
+	}
 }
 
 function expectWorkflowFamily(host: WorkflowLifecycleStoreHost, familyId: string): WorkflowRunFamilySnapshot {

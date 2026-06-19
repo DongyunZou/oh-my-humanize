@@ -2085,7 +2085,7 @@ describe("workflow graph view rendering", () => {
 
 		expect(text).toContain("Operator rail");
 		expect(text).toContain("◉ monitor buildUi");
-		expect(text).toContain("◆ hub");
+		expect(text).toContain("hub ←←/observe");
 		expect(text).toContain("↵ steer");
 		expect(text).toContain("! interrupt");
 		expect(text).toContain("■ stop");
@@ -2237,7 +2237,7 @@ describe("workflow graph view rendering", () => {
 		expect(text).toContain("On-flight");
 		expect(text).toContain("diagram");
 		expect(text).toContain("Controls");
-		expect(text).toContain("◉ monitor build-4  ◆ hub  ↵ steer  ! interrupt  ■ stop  ± change");
+		expect(text).toContain("◉ monitor build-4  hub ←←/observe  ↵ steer  ! interrupt  ■ stop  ± change");
 		expect(text).toContain("diagram rows hidden");
 		expect(text).toContain("9m12s");
 		expect(text).toContain("Refresh");
@@ -2435,6 +2435,31 @@ describe("workflow graph view rendering", () => {
 			expect(snapshot.familyId).toBe("live-family");
 			expect(snapshot.view.currentAttempt.id).toBe("attempt-live");
 			expect(snapshot.renderedText).toContain("Workflow graph: live-family");
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("records workflow monitor health fields for read-only run supervision", async () => {
+		const root = path.resolve("temp", "workflow-monitor-history", String(Bun.nanoseconds()));
+		try {
+			const view = singleNodeView("running");
+			view.nodes[0]!.status = "running";
+			view.actions = ["Stop attempt: /workflow stop attempt-live --deadline-ms 30000"];
+			const snapshotPath = await writeWorkflowGraphMonitorSnapshot(view, {
+				agentDir: path.join(root, "agent"),
+				now: new Date("2026-01-02T03:04:05.006Z"),
+			});
+
+			const snapshot = await Bun.file(snapshotPath).json();
+			expect(snapshot.health).toEqual({
+				persistedStatus: "running",
+				processLive: false,
+				detached: true,
+				runningNodeIds: ["build"],
+				runningAgentActivationIds: [],
+				latestCheckpointId: null,
+			});
 		} finally {
 			await fs.rm(root, { recursive: true, force: true });
 		}

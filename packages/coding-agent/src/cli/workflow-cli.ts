@@ -13,7 +13,7 @@ import type { WorkflowDefinition } from "../workflow/definition";
 import { type FlowFreeze, freezeWorkflowArtifact } from "../workflow/freeze";
 import type { RuntimeBindingSnapshot } from "../workflow/lifecycle";
 import { reconstructWorkflowFamilies } from "../workflow/lifecycle";
-import { loadWorkflowArtifact, loadWorkflowPackage, WorkflowPackageError } from "../workflow/package-loader";
+import { loadWorkflowArtifact, WorkflowPackageError } from "../workflow/package-loader";
 import { reconstructWorkflowRuns, type WorkflowRunStoreHost } from "../workflow/run-store";
 import { runWorkflow } from "../workflow/runner";
 import { workflowRuntimeBindingUnavailableError } from "../workflow/runtime-binding";
@@ -360,17 +360,19 @@ async function handleUninstall(command: WorkflowCommandArgs): Promise<void> {
 }
 
 async function loadWorkflowStartPackage(workflowPath: string): Promise<WorkflowStartPackage> {
-	if (path.extname(workflowPath) === ".omhflow") {
-		const artifact = await loadWorkflowArtifact(workflowPath);
-		const freeze = await freezeWorkflowArtifact(artifact);
-		return {
-			rootPath: freeze.resourceDir,
-			workflowPath: freeze.flowPath,
-			definition: freeze.definition,
-			freeze,
-		};
+	if (path.extname(workflowPath) !== ".omhflow") {
+		throw new WorkflowPackageError(
+			"Workflow start requires a frozen .omhflow artifact; use a distributable <flow>.omhflow file and same-name resource directory.",
+		);
 	}
-	return loadWorkflowPackage(workflowPath);
+	const artifact = await loadWorkflowArtifact(workflowPath);
+	const freeze = await freezeWorkflowArtifact(artifact);
+	return {
+		rootPath: freeze.resourceDir,
+		workflowPath: freeze.flowPath,
+		definition: freeze.definition,
+		freeze,
+	};
 }
 
 function defaultWorkflowStartNodeIds(definition: WorkflowStartPackage["definition"]): string[] {

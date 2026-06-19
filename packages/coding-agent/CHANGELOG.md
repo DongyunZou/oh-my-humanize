@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed workflow long-running guidance so the eight-hour validation floor is an external audit/evidence rule, not a reason for flows to keep themselves alive with sleep, hold, or duration-check nodes.
+- Changed workflow start to require frozen `.omhflow` artifacts instead of raw authoring YAML packages.
+
+### Fixed
+
+- Fixed detached `/workflow stop` requests so a persisted running attempt that is not attached to the current process records only `stop_requested` and no longer synthesizes abort/checkpoint evidence.
+- Fixed workflow lifecycle terminal transitions so attempts cannot be completed or failed while activations are still running.
+- Fixed workflow monitor snapshots to include read-only health evidence for persisted status, detached running work, active agents, and checkpoint state.
+
 ## [16.0.9] - 2026-06-18
 
 ### Added

@@ -7,6 +7,7 @@ import {
 	approveWorkflowChangeRequest,
 	completeWorkflowAttempt,
 	createWorkflowCheckpoint,
+	failWorkflowAttempt,
 	proposeWorkflowChangeRequest,
 	reconstructWorkflowFamilies,
 	recordWorkflowChangeRequestApplied,
@@ -425,6 +426,49 @@ describe("workflow lifecycle event store", () => {
 			"Workflow attempt cannot be stopped: attempt-1 (completed)",
 		);
 		expect(host.entries).toHaveLength(entryCount);
+	});
+
+	it("rejects terminal attempt transitions while activations are running or the attempt is terminal", () => {
+		const host = createHost();
+		const freeze = createFreeze("flowfreeze:a", ["build"]);
+
+		startWorkflowFamily(host, { familyId: "family-1" });
+		recordWorkflowFreeze(host, freeze, { familyId: "family-1" });
+		startWorkflowAttempt(host, {
+			familyId: "family-1",
+			attemptId: "attempt-1",
+			freezeId: freeze.id,
+			startNodeId: "build",
+			runtimeBindingSnapshot: binding("binding-1"),
+		});
+		appendWorkflowAttemptActivationStarted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			nodeId: "build",
+			parentActivationIds: [],
+		});
+		const runningEntryCount = host.entries.length;
+
+		expect(() => completeWorkflowAttempt(host, { attemptId: "attempt-1" })).toThrow(
+			"Workflow attempt cannot enter completed while activations are running: attempt-1 (activation-1)",
+		);
+		expect(() => failWorkflowAttempt(host, { attemptId: "attempt-1", error: "failed" })).toThrow(
+			"Workflow attempt cannot enter failed while activations are running: attempt-1 (activation-1)",
+		);
+		expect(host.entries).toHaveLength(runningEntryCount);
+
+		appendWorkflowAttemptActivationCompleted(host, {
+			attemptId: "attempt-1",
+			activationId: "activation-1",
+			output: { summary: "built" },
+		});
+		completeWorkflowAttempt(host, { attemptId: "attempt-1" });
+		const terminalEntryCount = host.entries.length;
+
+		expect(() => failWorkflowAttempt(host, { attemptId: "attempt-1", error: "late failure" })).toThrow(
+			"Workflow attempt cannot enter failed from terminal state: attempt-1 (completed)",
+		);
+		expect(host.entries).toHaveLength(terminalEntryCount);
 	});
 
 	it("rejects checkpoints until the attempt is stopped and all activations have settled", () => {

@@ -10,7 +10,6 @@ import { parseCommandArgs } from "../../utils/command-args";
 import { workflowAgentTaskIdForNode } from "../../workflow/agent-task-id";
 import { resolveWorkflowFlowSpec } from "../../workflow/artifact-registry";
 import { parseWorkflowChangeRequestFile } from "../../workflow/change-request-file";
-import { evaluateWorkflowCondition } from "../../workflow/condition";
 import type {
 	WorkflowDefinition,
 	WorkflowEdge,
@@ -38,9 +37,7 @@ import {
 	type WorkflowLifecycleInspection,
 } from "../../workflow/inspection";
 import {
-	appendWorkflowAttemptActivationAborted,
 	approveWorkflowChangeRequest,
-	createWorkflowCheckpoint,
 	findRunningWorkflowCheckpointResumeAttempt,
 	type ProposeWorkflowChangeRequestOptions,
 	proposeWorkflowChangeRequest,
@@ -65,7 +62,7 @@ import {
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "../../workflow/model-resolution";
 import { parseWorkflowMonitorDisplayMode, workflowMonitorDisplayModeLabel } from "../../workflow/monitor-display-mode";
 import type { WorkflowNodeRuntimeHost } from "../../workflow/node-runtime";
-import { loadWorkflowArtifact, loadWorkflowPackage, type WorkflowArtifact } from "../../workflow/package-loader";
+import { loadWorkflowArtifact, type WorkflowArtifact, WorkflowPackageError } from "../../workflow/package-loader";
 import { applyWorkflowGraphPatch } from "../../workflow/patches";
 import { reconstructWorkflowRuns } from "../../workflow/run-store";
 import {
@@ -76,7 +73,6 @@ import {
 import { workflowRuntimeBindingUnavailableError } from "../../workflow/runtime-binding";
 import { DEFAULT_WORKFLOW_MAX_RUNTIME_MS } from "../../workflow/runtime-timeout";
 import type { WorkflowActivation } from "../../workflow/scheduler";
-import { applyWorkflowStatePatch } from "../../workflow/state";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
 import { createMarketplaceManager } from "./marketplace-manager";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./parse";
@@ -758,60 +754,23 @@ async function handleStopCommand(rest: string, runtime: SlashCommandRuntime): Pr
 	if (active !== undefined) {
 		return stopActiveWorkflowAttempt(runtime, family, attempt, active, parsed.deadlineMs ?? 30_000);
 	}
-	const checkpointId = `${attempt.id}:checkpoint-${family.checkpoints.length + 1}`;
-	const runningActivations = attempt.activations.filter(activation => activation.status === "running");
-	const runningActivationIds = new Set(runningActivations.map(activation => activation.id));
 	const deadlineMs = parsed.deadlineMs ?? 30_000;
 	requestWorkflowAttemptStop(runtime.sessionManager, {
 		attemptId: attempt.id,
 		deadlineMs,
 		reason: "slash command stop",
 	});
-	const settledAttempt = await waitForWorkflowStopDeadline(
-		runtime,
-		family.id,
-		attempt.id,
-		runningActivationIds,
-		deadlineMs,
-	);
-	for (const activation of settledAttempt.activations) {
-		if (!runningActivationIds.has(activation.id) || activation.status !== "running") continue;
-		appendWorkflowAttemptActivationAborted(runtime.sessionManager, {
-			attemptId: attempt.id,
-			activationId: activation.id,
-			nodeId: activation.nodeId,
-			reason: "stop deadline elapsed",
-		});
-	}
-	const checkpointFamily = reconstructWorkflowFamilies(runtime.sessionManager.getBranch()).find(
-		candidate => candidate.id === family.id,
-	);
-	const checkpointAttempt =
-		checkpointFamily?.attempts.find(candidate => candidate.id === attempt.id) ?? settledAttempt;
-	const checkpointFreeze = checkpointFamily?.freezes.find(freeze => freeze.id === checkpointAttempt.freezeId);
-	const completedActivationIds = checkpointAttempt.activations
-		.filter(activation => activation.status === "completed")
-		.map(activation => activation.id);
-	const abortedActivationIds = checkpointAttempt.activations
-		.filter(activation => activation.status === "aborted")
-		.map(activation => activation.id);
-	const frontierNodeIds = deriveStopFrontierNodeIds(checkpointAttempt, checkpointFreeze, runningActivationIds);
-	const checkpoint = createWorkflowCheckpoint(runtime.sessionManager, {
-		checkpointId,
-		familyId: checkpointFamily?.id ?? family.id,
-		attemptId: attempt.id,
-		completedActivationIds,
-		abortedActivationIds,
-		frontierNodeIds,
-		state: deriveLifecycleAttemptState(checkpointAttempt),
-		sourceMapping: checkpointSourceMapping(checkpointFamily ?? family, attempt.id, frontierNodeIds),
-	});
 	await flushWorkflowLifecycle(runtime);
 	const updatedFamily = reconstructWorkflowFamilies(runtime.sessionManager.getBranch()).find(
 		candidate => candidate.id === family.id,
 	);
-	const sections = [formatWorkflowCheckpoint(checkpoint)];
-	await runtime.output(sections.join("\n\n"));
+	await runtime.output(
+		[
+			`Workflow stop requested for detached attempt: ${attempt.id}`,
+			"OMP cannot confirm activation aborts or create a checkpoint because this attempt is not attached to this process.",
+			"Resume or inspect the session that owns the running workflow, then stop it there to produce confirmed lifecycle evidence.",
+		].join("\n"),
+	);
 	if (updatedFamily) await emitWorkflowGraphViews([buildWorkflowGraphViewForRuntime(updatedFamily, runtime)], runtime);
 	return commandConsumed();
 }
@@ -1081,17 +1040,19 @@ function nextWorkflowRestartAttemptId(family: WorkflowRunFamilySnapshot): string
 }
 
 async function loadWorkflowStartPackage(workflowPath: string): Promise<WorkflowStartPackage> {
-	if (path.extname(workflowPath) === ".omhflow") {
-		const artifact = await loadWorkflowArtifact(workflowPath);
-		const freeze = await freezeWorkflowArtifact(artifact);
-		return {
-			rootPath: freeze.resourceDir,
-			workflowPath: freeze.flowPath,
-			definition: freeze.definition,
-			freeze,
-		};
+	if (path.extname(workflowPath) !== ".omhflow") {
+		throw new WorkflowPackageError(
+			"Workflow start requires a frozen .omhflow artifact; use a distributable <flow>.omhflow file and same-name resource directory.",
+		);
 	}
-	return loadWorkflowPackage(workflowPath);
+	const artifact = await loadWorkflowArtifact(workflowPath);
+	const freeze = await freezeWorkflowArtifact(artifact);
+	return {
+		rootPath: freeze.resourceDir,
+		workflowPath: freeze.flowPath,
+		definition: freeze.definition,
+		freeze,
+	};
 }
 
 function defaultWorkflowStartNodeIds(definition: WorkflowDefinition): string[] {
@@ -1572,11 +1533,10 @@ function unregisterActiveWorkflowAttempt(runtime: SlashCommandRuntime, attemptId
 function watchWorkflowAttemptCompletion(runtime: SlashCommandRuntime, active: ActiveWorkflowAttempt): void {
 	void active.finished.finally(async () => {
 		try {
+			unregisterActiveWorkflowAttempt(runtime, active.attemptId);
 			await flushWorkflowLifecycle(runtime);
 		} catch (error) {
 			await runtime.output(`Workflow attempt persistence failed: ${active.attemptId} - ${errorMessage(error)}`);
-		} finally {
-			unregisterActiveWorkflowAttempt(runtime, active.attemptId);
 		}
 	});
 }
@@ -1674,9 +1634,23 @@ export function buildWorkflowGraphViewForRuntime(
 	runtime: Pick<SlashCommandRuntime, "sessionManager" | "getWorkflowAgentProgressById">,
 ): WorkflowGraphView {
 	return buildWorkflowGraphView(family, {
-		liveAttemptIds: new Set(activeWorkflowAttemptMap(runtime).keys()),
+		liveAttemptIds: activeWorkflowAttemptIdsForFamily(runtime, family),
 		activeAgentProgressById: runtime.getWorkflowAgentProgressById?.(),
 	});
+}
+
+function activeWorkflowAttemptIdsForFamily(
+	runtime: Pick<SlashCommandRuntime, "sessionManager">,
+	family: WorkflowRunFamilySnapshot,
+): Set<string> {
+	const activeAttemptIds = new Set(activeWorkflowAttemptMap(runtime).keys());
+	const liveAttemptIds = new Set<string>();
+	for (const attempt of family.attempts) {
+		if (!activeAttemptIds.has(attempt.id)) continue;
+		if (attempt.status !== "running" && attempt.status !== "stop_requested") continue;
+		liveAttemptIds.add(attempt.id);
+	}
+	return liveAttemptIds;
 }
 
 function activeWorkflowAttemptMap(
@@ -2266,110 +2240,6 @@ function isSupervisorWorkflowActor(actor: string): boolean {
 	return actor === "supervisor" || actor.startsWith("supervisor:");
 }
 
-async function waitForWorkflowStopDeadline(
-	runtime: SlashCommandRuntime,
-	familyId: string,
-	attemptId: string,
-	runningActivationIds: Set<string>,
-	deadlineMs: number,
-): Promise<WorkflowRunAttemptSnapshot> {
-	let current = findWorkflowAttempt(
-		reconstructWorkflowFamilies(runtime.sessionManager.getBranch()),
-		familyId,
-		attemptId,
-	);
-	if (!current) throw new Error(`Workflow attempt not found: ${attemptId}`);
-	if (runningActivationIds.size === 0 || deadlineMs <= 0) return current;
-	const deadlineAt = Date.now() + deadlineMs;
-	while (Date.now() < deadlineAt) {
-		current = findWorkflowAttempt(
-			reconstructWorkflowFamilies(runtime.sessionManager.getBranch()),
-			familyId,
-			attemptId,
-		);
-		if (!current) throw new Error(`Workflow attempt not found: ${attemptId}`);
-		if (workflowStopActivationsSettled(current, runningActivationIds)) return current;
-		const remainingMs = deadlineAt - Date.now();
-		if (remainingMs <= 0) break;
-		await Bun.sleep(Math.min(10, remainingMs));
-	}
-	current = findWorkflowAttempt(reconstructWorkflowFamilies(runtime.sessionManager.getBranch()), familyId, attemptId);
-	if (!current) throw new Error(`Workflow attempt not found: ${attemptId}`);
-	return current;
-}
-
-function findWorkflowAttempt(
-	families: WorkflowRunFamilySnapshot[],
-	familyId: string,
-	attemptId: string,
-): WorkflowRunAttemptSnapshot | undefined {
-	return families.find(family => family.id === familyId)?.attempts.find(attempt => attempt.id === attemptId);
-}
-
-function workflowStopActivationsSettled(
-	attempt: WorkflowRunAttemptSnapshot,
-	runningActivationIds: Set<string>,
-): boolean {
-	for (const activationId of runningActivationIds) {
-		const activation = attempt.activations.find(candidate => candidate.id === activationId);
-		if (!activation || activation.status === "running") return false;
-	}
-	return true;
-}
-
-function deriveStopFrontierNodeIds(
-	attempt: WorkflowRunAttemptSnapshot,
-	freeze: FlowFreeze | undefined,
-	runningActivationIds: Set<string>,
-): string[] {
-	const state = deriveLifecycleAttemptState(attempt);
-	const outputs = deriveLifecycleAttemptOutputs(attempt);
-	const frontierNodeIds: string[] = [];
-	if (attempt.activations.length === 0 && runningActivationIds.size === 0) {
-		for (const nodeId of attempt.startNodeIds ?? [attempt.startNodeId]) pushUnique(frontierNodeIds, nodeId);
-		return frontierNodeIds;
-	}
-	for (const activation of attempt.activations) {
-		if (!runningActivationIds.has(activation.id)) continue;
-		if (activation.status === "completed" && freeze) {
-			for (const nodeId of eligibleSuccessorNodeIds(freeze.definition, activation.nodeId, state, outputs)) {
-				pushUnique(frontierNodeIds, nodeId);
-			}
-			continue;
-		}
-		if (activation.status === "running" || activation.status === "aborted" || activation.status === "failed") {
-			pushUnique(frontierNodeIds, activation.nodeId);
-		}
-	}
-	return frontierNodeIds;
-}
-
-function eligibleSuccessorNodeIds(
-	definition: WorkflowDefinition,
-	nodeId: string,
-	state: Record<string, unknown>,
-	outputs: Record<string, unknown>,
-): string[] {
-	const nodeIds: string[] = [];
-	for (const edge of definition.edges) {
-		if (edge.from !== nodeId) continue;
-		if (edge.condition && !evaluateWorkflowCondition(edge.condition.source, { state, outputs })) continue;
-		pushUnique(nodeIds, edge.to);
-	}
-	return nodeIds;
-}
-
-function deriveLifecycleAttemptOutputs(attempt: WorkflowRunAttemptSnapshot): Record<string, unknown> {
-	const outputs: Record<string, unknown> = {};
-	for (const activation of attempt.activations) {
-		if (activation.status !== "completed") continue;
-		if (activation.output?.data !== undefined) {
-			outputs[activation.nodeId] = activation.output.data;
-		}
-	}
-	return outputs;
-}
-
 function pushUnique(values: string[], value: string): void {
 	if (!values.includes(value)) values.push(value);
 }
@@ -2395,34 +2265,6 @@ function checkpointCompletedActivations(
 		activations.push(completed);
 	}
 	return activations;
-}
-
-function deriveLifecycleAttemptState(attempt: WorkflowRunAttemptSnapshot): Record<string, unknown> {
-	const state: Record<string, unknown> = {};
-	for (const activation of attempt.activations) {
-		if (activation.status !== "completed" || !activation.output?.statePatch) continue;
-		applyWorkflowStatePatch(state, activation.output.statePatch);
-	}
-	return state;
-}
-
-function checkpointSourceMapping(
-	family: WorkflowRunFamilySnapshot,
-	attemptId: string,
-	frontierNodeIds: string[],
-): Record<string, string> {
-	const approvedMappings = family.changeRequests
-		.filter(
-			request =>
-				request.status === "approved" && (request.attemptId === undefined || request.attemptId === attemptId),
-		)
-		.map(request => request.frontierMapping);
-	return Object.fromEntries(
-		frontierNodeIds.map(nodeId => [
-			nodeId,
-			approvedMappings.find(mapping => mapping[nodeId] !== undefined)?.[nodeId] ?? nodeId,
-		]),
-	);
 }
 
 function formatWorkflowCheckpoint(checkpoint: WorkflowCheckpointSnapshot): string {

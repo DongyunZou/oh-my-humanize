@@ -78,6 +78,42 @@ describe("workflow CLI", () => {
 		expect(errorOutput).not.toContain("WorkflowPackageError");
 	});
 
+	it("rejects headless starts from non-artifact workflow packages", async () => {
+		using tempDir = TempDir.createSync("@omp-workflow-cli-start-artifact-");
+		const root = tempDir.path();
+		await Bun.write(
+			`${root}/workflow.yml`,
+			["name: raw-start", "version: 1", "nodes:", "  build:", "    type: script", "edges: []", ""].join("\n"),
+		);
+		const originalExitCode = process.exitCode;
+		const stdout: string[] = [];
+		const stderr: string[] = [];
+		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
+			stdout.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			return true;
+		});
+		vi.spyOn(process.stderr, "write").mockImplementation(chunk => {
+			stderr.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+			return true;
+		});
+		process.exitCode = undefined;
+		try {
+			await runWorkflowCommand({
+				action: "start",
+				args: [root],
+				flags: { cwd: root, runId: "raw-start" },
+			});
+		} finally {
+			process.exitCode = originalExitCode ?? 0;
+		}
+
+		expect(stdout.join("")).toBe("");
+		const errorOutput = stderr.join("");
+		expect(errorOutput).toContain("Workflow start requires a frozen .omhflow artifact");
+		expect(errorOutput).not.toContain("workflow-cli.ts");
+		expect(errorOutput).not.toContain("WorkflowPackageError");
+	});
+
 	it("passes frozen data resources to headless shell script nodes", async () => {
 		using tempDir = TempDir.createSync("@omp-workflow-cli-resources-");
 		const root = tempDir.path();

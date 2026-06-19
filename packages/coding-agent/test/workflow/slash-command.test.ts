@@ -456,19 +456,41 @@ edges:
 
 	it("starts a workflow package through an injected runtime host", async () => {
 		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "slash-start-demo"), { recursive: true });
 		await Bun.write(
-			path.join(dir, "workflow.yml"),
-			`
+			path.join(dir, "slash-start-demo.omhflow"),
+			`---
+name: slash-start-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Slash Start Demo
+
+\`\`\`yaml workflow
 name: slash-start-demo
 version: 1
 nodes:
   build:
     type: script
+    script:
+      language: js
+      inline: |
+        return { summary: "built" };
   finish:
     type: script
+    script:
+      language: js
+      inline: |
+        return { summary: "finished" };
 edges:
   - from: build
     to: finish
+\`\`\`
 `,
 		);
 		const entries: CapturedEntry[] = [];
@@ -479,9 +501,15 @@ edges:
 				return { summary: `ran ${input.node.id}` };
 			},
 		};
-		const { output, runtime } = createRuntime(entries, runtimeHost);
+		const { output, runtime } = createRuntime(entries, runtimeHost, {
+			availableModels: [openAiModel],
+			activeModel: openAiModel,
+		});
 
-		const result = await executeAcpBuiltinSlashCommand(`/workflow start ${dir} --run-id run-1`, runtime);
+		const result = await executeAcpBuiltinSlashCommand(
+			`/workflow start ${path.join(dir, "slash-start-demo.omhflow")} --run-id run-1`,
+			runtime,
+		);
 
 		expect(result).toEqual({ consumed: true });
 		expect(calls).toEqual(["build", "finish"]);
@@ -496,12 +524,12 @@ edges:
 		]);
 	});
 
-	it("rejects workflow starts when required runtime capabilities are unavailable", async () => {
+	it("rejects workflow starts from non-artifact workflow packages", async () => {
 		const dir = await createTempDir();
 		await Bun.write(
 			path.join(dir, "workflow.yml"),
 			`
-name: missing-capability-demo
+name: raw-workflow-demo
 version: 1
 nodes:
   build:
@@ -510,10 +538,64 @@ edges: []
 `,
 		);
 		const entries: CapturedEntry[] = [];
+		const calls: string[] = [];
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => {
+				calls.push(input.node.id);
+				return { summary: `ran ${input.node.id}` };
+			},
+		};
+		const { output, runtime } = createRuntime(entries, runtimeHost);
+
+		expect(await executeAcpBuiltinSlashCommand(`/workflow start ${dir} --run-id raw-run`, runtime)).toEqual({
+			consumed: true,
+		});
+
+		expect(calls).toEqual([]);
+		expect(output.at(-1)).toContain("Workflow start requires a frozen .omhflow artifact");
+		expect(reconstructWorkflowRuns(entries)).toEqual([]);
+		expect(reconstructWorkflowFamilies(entries)).toEqual([]);
+	});
+
+	it("rejects workflow starts when required runtime capabilities are unavailable", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "missing-capability-demo"), { recursive: true });
+		await Bun.write(
+			path.join(dir, "missing-capability-demo.omhflow"),
+			`---
+name: missing-capability-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Missing Capability Demo
+
+\`\`\`yaml workflow
+name: missing-capability-demo
+version: 1
+nodes:
+  build:
+    type: script
+    script:
+      language: js
+      inline: |
+        return { summary: "built" };
+edges: []
+\`\`\`
+`,
+		);
+		const entries: CapturedEntry[] = [];
 		const { output, runtime } = createRuntime(entries, {});
 
 		expect(
-			await executeAcpBuiltinSlashCommand(`/workflow start ${dir} --run-id run-missing-capability`, runtime),
+			await executeAcpBuiltinSlashCommand(
+				`/workflow start ${path.join(dir, "missing-capability-demo.omhflow")} --run-id run-missing-capability`,
+				runtime,
+			),
 		).toEqual({
 			consumed: true,
 		});
@@ -571,15 +653,33 @@ edges: []
 
 	it("rejects duplicate workflow start run ids before launching nodes", async () => {
 		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "slash-start-duplicate-demo"), { recursive: true });
 		await Bun.write(
-			path.join(dir, "workflow.yml"),
-			`
+			path.join(dir, "slash-start-duplicate-demo.omhflow"),
+			`---
+name: slash-start-duplicate-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Slash Start Duplicate Demo
+
+\`\`\`yaml workflow
 name: slash-start-duplicate-demo
 version: 1
 nodes:
   build:
     type: script
+    script:
+      language: js
+      inline: |
+        return { summary: "built" };
 edges: []
+\`\`\`
 `,
 		);
 		const entries: CapturedEntry[] = [];
@@ -592,11 +692,16 @@ edges: []
 		};
 		const { output, runtime } = createRuntime(entries, runtimeHost);
 
-		expect(await executeAcpBuiltinSlashCommand(`/workflow start ${dir} --run-id run-duplicate`, runtime)).toEqual({
+		const flowPath = path.join(dir, "slash-start-duplicate-demo.omhflow");
+		expect(
+			await executeAcpBuiltinSlashCommand(`/workflow start ${flowPath} --run-id run-duplicate`, runtime),
+		).toEqual({
 			consumed: true,
 		});
 		calls.length = 0;
-		expect(await executeAcpBuiltinSlashCommand(`/workflow start ${dir} --run-id run-duplicate`, runtime)).toEqual({
+		expect(
+			await executeAcpBuiltinSlashCommand(`/workflow start ${flowPath} --run-id run-duplicate`, runtime),
+		).toEqual({
 			consumed: true,
 		});
 
@@ -607,35 +712,64 @@ edges: []
 
 	it("passes workflow start activation limits to bounded loop runs", async () => {
 		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "bounded-loop-demo"), { recursive: true });
 		await Bun.write(
-			path.join(dir, "workflow.yml"),
-			`
+			path.join(dir, "bounded-loop-demo.omhflow"),
+			`---
+name: bounded-loop-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Bounded Loop Demo
+
+\`\`\`yaml workflow
 name: bounded-loop-demo
 version: 1
 nodes:
   build:
-    type: script
+    type: agent
+    agent: task
+    prompt: Build one bounded round.
   review:
-    type: script
+    type: review
+    agent: task
+    prompt: Review one bounded round and return continue.
+    gates:
+      - continue
+    fallbackVerdict: continue
 edges:
   - from: build
     to: review
   - from: review
     to: build
+    when: outputs.review.verdict == "continue"
+\`\`\`
 `,
 		);
 		const entries: CapturedEntry[] = [];
 		const calls: string[] = [];
 		const runtimeHost: WorkflowNodeRuntimeHost = {
-			runScriptNode: async input => {
+			runAgentNode: async input => {
 				calls.push(input.node.id);
 				return { summary: `ran ${input.node.id}` };
 			},
+			runReviewNode: async input => {
+				calls.push(input.node.id);
+				return { summary: `ran ${input.node.id}`, verdict: "continue" };
+			},
 		};
-		const { output, runtime } = createRuntime(entries, runtimeHost);
+		const { output, runtime } = createRuntime(entries, runtimeHost, {
+			availableModels: [openAiModel],
+			activeModel: openAiModel,
+		});
 
 		const result = await executeAcpBuiltinSlashCommand(
-			`/workflow start ${dir} --run-id run-loop --max-activations 3 --max-node-activations 2`,
+			`/workflow start ${path.join(dir, "bounded-loop-demo.omhflow")} --run-id run-loop --max-activations 3 --max-node-activations 2`,
 			runtime,
 		);
 
@@ -2160,9 +2294,28 @@ edges: []
 
 	it("starts agent workflows through the TUI session task runner", async () => {
 		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "slash-agent-demo"), { recursive: true });
 		await Bun.write(
-			path.join(dir, "workflow.yml"),
-			`
+			path.join(dir, "slash-agent-demo.omhflow"),
+			`---
+name: slash-agent-demo
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    builder: openai/gpt-4o
+  defaults:
+    agent: builder
+  unavailable: fail
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Slash Agent Demo
+
+\`\`\`yaml workflow
 name: slash-agent-demo
 version: 1
 models:
@@ -2177,6 +2330,7 @@ nodes:
     agent: task
     prompt: Implement the workflow feature.
 edges: []
+\`\`\`
 `,
 		);
 		const entries: CapturedEntry[] = [];
@@ -2185,9 +2339,12 @@ edges: []
 			requestedTask = request.task;
 			return { exitCode: 0, output: "agent completed" };
 		};
-		const { output, runtime } = createTuiRuntime(entries, dir, runner);
+		const { output, workflowMonitorComponents, runtime } = createTuiRuntime(entries, dir, runner);
 
-		const result = await executeBuiltinSlashCommand(`/workflow start ${dir} --run-id run-1`, runtime);
+		const result = await executeBuiltinSlashCommand(
+			`/workflow start ${path.join(dir, "slash-agent-demo.omhflow")} --run-id run-1`,
+			runtime,
+		);
 
 		expect(result).toBe(true);
 		expect(requestedTask).toEqual({
@@ -2196,9 +2353,8 @@ edges: []
 			role: "Builder · Build",
 			assignment: "Implement the workflow feature.",
 		});
-		expect(output[0]).toContain("Workflow run: run-1");
-		expect(output[0]).toContain("Activations: 1 completed");
-		expect(output[0]).toContain("activation-1 build openai/gpt-4o (workflow-default)");
+		expect(output).toEqual(["Workflow monitor active: run-1 (family run-1:family)."]);
+		expect(workflowMonitorComponents).toHaveLength(1);
 		const runs = reconstructWorkflowRuns(entries);
 		expect(runs[0]?.activations[0]?.output).toEqual({
 			summary: "agent completed",
@@ -2463,7 +2619,7 @@ edges: []
 		);
 	});
 
-	it("stops a running lifecycle attempt, checkpoints it, and restarts from a freeze", async () => {
+	it("requests stop for a detached lifecycle attempt without checkpointing it", async () => {
 		const entries: CapturedEntry[] = [];
 		const freezeA = createFreeze("flowfreeze:a", ["build", "review"]);
 		const freezeB = createFreeze("flowfreeze:b", ["verify"]);
@@ -2509,48 +2665,25 @@ edges: []
 			actor: "human:sihao",
 		});
 		recordWorkflowFreeze(host, freezeB, { familyId: "family-1" });
-		const calls: string[] = [];
-		const runtimeHost: WorkflowNodeRuntimeHost = {
-			runScriptNode: async input => {
-				calls.push(input.node.id);
-				return { summary: `ran ${input.node.id}` };
-			},
-		};
-		const { output, runtime } = createRuntime(entries, runtimeHost);
+		const { output, runtime } = createRuntime(entries);
 
 		expect(await executeAcpBuiltinSlashCommand("/workflow stop attempt-1 --deadline-ms 5", runtime)).toEqual({
 			consumed: true,
 		});
-		expect(
-			await executeAcpBuiltinSlashCommand("/workflow apply-change change-1 --freeze-id flowfreeze:b", runtime),
-		).toEqual({
-			consumed: true,
-		});
-		expect(
-			await executeAcpBuiltinSlashCommand(
-				"/workflow restart attempt-1:checkpoint-1 --freeze-id flowfreeze:b",
-				runtime,
-			),
-		).toEqual({
-			consumed: true,
-		});
 
 		const families = reconstructWorkflowFamilies(entries);
-		expect(calls).toEqual(["verify"]);
-		expect(output.some(entry => entry.includes("Workflow checkpoint: attempt-1:checkpoint-1"))).toBeTrue();
-		expect(output.some(entry => entry.includes("Workflow restart attempt: attempt-2"))).toBeTrue();
+		expect(
+			output.some(entry => entry.includes("Workflow stop requested for detached attempt: attempt-1")),
+		).toBeTrue();
+		expect(output.some(entry => entry.includes("Workflow checkpoint: attempt-1:checkpoint-1"))).toBeFalse();
 		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.freezeId, attempt.status])).toEqual([
-			["attempt-1", "flowfreeze:a", "stopped"],
-			["attempt-2", "flowfreeze:b", "completed"],
+			["attempt-1", "flowfreeze:a", "stop_requested"],
 		]);
-		expect(families[0]?.checkpoints[0]).toMatchObject({
-			id: "attempt-1:checkpoint-1",
-			completedActivationIds: ["activation-1"],
-			abortedActivationIds: ["activation-2"],
-			frontierNodeIds: ["review"],
-			state: { build: { status: "built" } },
-			sourceMapping: { review: "verify" },
-		});
+		expect(families[0]?.attempts[0]?.activations.map(activation => [activation.id, activation.status])).toEqual([
+			["activation-1", "completed"],
+			["activation-2", "running"],
+		]);
+		expect(families[0]?.checkpoints).toEqual([]);
 		expect(families[0]?.changeRequests).toMatchObject([
 			{
 				id: "change-1",
@@ -2589,13 +2722,16 @@ edges: []
 
 		const family = reconstructWorkflowFamilies(entries)[0];
 		expect(
-			output.some(entry => entry.includes("Workflow checkpoint: workflow-abc123:attempt-1:checkpoint-1")),
+			output.some(entry =>
+				entry.includes("Workflow stop requested for detached attempt: workflow-abc123:attempt-1"),
+			),
 		).toBeTrue();
-		expect(family?.attempts[0]?.status).toBe("stopped");
-		expect(family?.checkpoints[0]).toMatchObject({
-			id: "workflow-abc123:attempt-1:checkpoint-1",
-			frontierNodeIds: ["build"],
-		});
+		expect(
+			output.some(entry => entry.includes("Workflow checkpoint: workflow-abc123:attempt-1:checkpoint-1")),
+		).toBeFalse();
+		expect(family?.attempts[0]?.status).toBe("stop_requested");
+		expect(family?.attempts[0]?.activations[0]?.status).toBe("running");
+		expect(family?.checkpoints).toEqual([]);
 	});
 
 	it("rejects ambiguous displayed attempt ids", async () => {
@@ -2653,7 +2789,7 @@ edges: []
 		expect(reconstructWorkflowFamilies(entries)[0]?.attempts[0]?.status).toBe("running");
 	});
 
-	it("persists workflow-only checkpoints so printed resume ids reopen", async () => {
+	it("does not advertise checkpoint resume ids for detached stop requests", async () => {
 		const cwd = await createTempDir();
 		const sessionDir = path.join(cwd, "sessions");
 		const manager = SessionManager.create(cwd, sessionDir);
@@ -2705,26 +2841,17 @@ edges: []
 				await executeAcpBuiltinSlashCommand("/workflow stop attempt-resume-checkpoint --deadline-ms 1", runtime),
 			).toEqual({ consumed: true });
 
-			const match = await resolveResumableSession(manager.getSessionId(), cwd, sessionDir);
-			expect(match?.session.id).toBe(manager.getSessionId());
-			expect(match?.session.messageCount).toBe(0);
+			const family = reconstructWorkflowFamilies(manager.getBranch())[0];
+			expect(output.join("\n")).toContain("Workflow stop requested for detached attempt: attempt-resume-checkpoint");
 			expect(
 				output.some(entry => entry.includes("Workflow checkpoint: attempt-resume-checkpoint:checkpoint-1")),
-			).toBeTrue();
-
-			if (!match) throw new Error("Expected workflow-only session to be resumable");
-			const reopened = await SessionManager.open(match.session.path, sessionDir);
-			try {
-				const families = reconstructWorkflowFamilies(reopened.getBranch());
-				expect(families[0]?.checkpoints[0]).toMatchObject({
-					id: "attempt-resume-checkpoint:checkpoint-1",
-					completedActivationIds: ["activation-1"],
-					abortedActivationIds: ["activation-2"],
-					frontierNodeIds: ["review"],
-				});
-			} finally {
-				await reopened.close();
-			}
+			).toBeFalse();
+			expect(family?.attempts[0]?.status).toBe("stop_requested");
+			expect(family?.attempts[0]?.activations.map(activation => [activation.id, activation.status])).toEqual([
+				["activation-1", "completed"],
+				["activation-2", "running"],
+			]);
+			expect(family?.checkpoints).toEqual([]);
 		} finally {
 			await manager.close();
 		}
@@ -2831,12 +2958,10 @@ edges:
 		}
 	});
 
-	it("explains when a restart checkpoint exists in another resumable session", async () => {
+	it("does not synthesize checkpoint evidence when stopping a detached attempt", async () => {
 		const cwd = await createTempDir();
 		const sessionDir = path.join(cwd, "sessions");
 		const origin = SessionManager.create(cwd, sessionDir);
-		let originClosed = false;
-		const checkpointId = "attempt-cross-session:checkpoint-1";
 		try {
 			const freeze = createFreeze("flowfreeze:cross-session", ["build", "review"]);
 			startWorkflowFamily(origin, { familyId: "family-cross-session" });
@@ -2884,7 +3009,63 @@ edges:
 			).toEqual({
 				consumed: true,
 			});
-			expect(stopOutput.some(entry => entry.includes(`Workflow checkpoint: ${checkpointId}`))).toBeTrue();
+			expect(stopOutput.join("\n")).toContain("Workflow stop requested for detached attempt: attempt-cross-session");
+			const families = reconstructWorkflowFamilies(origin.getBranch());
+			expect(families[0]?.attempts[0]?.status).toBe("stop_requested");
+			expect(families[0]?.attempts[0]?.activations.map(activation => [activation.id, activation.status])).toEqual([
+				["activation-build", "completed"],
+				["activation-review", "running"],
+			]);
+			expect(families[0]?.checkpoints).toEqual([]);
+		} finally {
+			await origin.close();
+		}
+	});
+
+	it("explains when a restart checkpoint exists in another resumable session", async () => {
+		const cwd = await createTempDir();
+		const sessionDir = path.join(cwd, "sessions");
+		const origin = SessionManager.create(cwd, sessionDir);
+		let originClosed = false;
+		const checkpointId = "attempt-cross-session:checkpoint-1";
+		try {
+			const freeze = createFreeze("flowfreeze:cross-session", ["build", "review"]);
+			startWorkflowFamily(origin, { familyId: "family-cross-session" });
+			recordWorkflowFreeze(origin, freeze, { familyId: "family-cross-session" });
+			startWorkflowAttempt(origin, {
+				familyId: "family-cross-session",
+				attemptId: "attempt-cross-session",
+				freezeId: freeze.id,
+				startNodeId: "build",
+				runtimeBindingSnapshot: binding("binding-cross-session"),
+			});
+			appendWorkflowAttemptActivationStarted(origin, {
+				attemptId: "attempt-cross-session",
+				activationId: "activation-build",
+				nodeId: "build",
+				parentActivationIds: [],
+			});
+			appendWorkflowAttemptActivationCompleted(origin, {
+				attemptId: "attempt-cross-session",
+				activationId: "activation-build",
+				output: { summary: "built" },
+			});
+			requestWorkflowAttemptStop(origin, {
+				attemptId: "attempt-cross-session",
+				deadlineMs: 1,
+				reason: "fixture stopped",
+			});
+			createWorkflowCheckpoint(origin, {
+				checkpointId,
+				familyId: "family-cross-session",
+				attemptId: "attempt-cross-session",
+				completedActivationIds: ["activation-build"],
+				abortedActivationIds: [],
+				frontierNodeIds: ["review"],
+				state: {},
+				sourceMapping: { review: "review" },
+			});
+			await origin.ensureOnDisk();
 			await origin.close();
 			originClosed = true;
 
@@ -4061,7 +4242,7 @@ edges:
 		});
 	}, 8_000);
 
-	it("waits until the stop deadline before aborting running lifecycle activations", async () => {
+	it("does not abort detached running activations when requesting stop with a deadline", async () => {
 		const entries: CapturedEntry[] = [];
 		const freeze = createFreeze(
 			"flowfreeze:a",
@@ -4100,37 +4281,21 @@ edges:
 			parentActivationIds: [],
 		});
 		const { output, runtime } = createRuntime(entries);
-		const completion = (async () => {
-			await Bun.sleep(5);
-			appendWorkflowAttemptActivationCompleted(host, {
-				attemptId: "attempt-deadline",
-				activationId: "activation-build",
-				output: {
-					summary: "built before stop deadline",
-					statePatch: [{ op: "set", path: "/build/status", value: "complete" }],
-				},
-			});
-		})();
 
 		expect(await executeAcpBuiltinSlashCommand("/workflow stop attempt-deadline --deadline-ms 50", runtime)).toEqual({
 			consumed: true,
 		});
-		await completion;
 
 		const family = reconstructWorkflowFamilies(entries)[0];
-		expect(output.some(entry => entry.includes("Workflow checkpoint: attempt-deadline:checkpoint-1"))).toBeTrue();
-		expect(family?.attempts.map(attempt => [attempt.id, attempt.status])).toEqual([["attempt-deadline", "stopped"]]);
-		expect(family?.attempts[0]?.activations.map(activation => [activation.id, activation.status])).toEqual([
-			["activation-build", "completed"],
+		expect(output.join("\n")).toContain("Workflow stop requested for detached attempt: attempt-deadline");
+		expect(output.some(entry => entry.includes("Workflow checkpoint: attempt-deadline:checkpoint-1"))).toBeFalse();
+		expect(family?.attempts.map(attempt => [attempt.id, attempt.status])).toEqual([
+			["attempt-deadline", "stop_requested"],
 		]);
-		expect(family?.checkpoints[0]).toMatchObject({
-			id: "attempt-deadline:checkpoint-1",
-			completedActivationIds: ["activation-build"],
-			abortedActivationIds: [],
-			frontierNodeIds: ["review"],
-			state: { build: { status: "complete" } },
-			sourceMapping: { review: "review" },
-		});
+		expect(family?.attempts[0]?.activations.map(activation => [activation.id, activation.status])).toEqual([
+			["activation-build", "running"],
+		]);
+		expect(family?.checkpoints).toEqual([]);
 	});
 
 	it("restarts from checkpoint with a frontier mapping approved after the checkpoint was saved", async () => {
@@ -4767,7 +4932,7 @@ edges:
 		expect(reconstructWorkflowFamilies(entries)[0]?.checkpoints).toEqual([]);
 	});
 
-	it("checkpoints a persisted running attempt with no activations at its start node", async () => {
+	it("requests stop for a detached persisted attempt with no activations", async () => {
 		const entries: CapturedEntry[] = [];
 		const freeze = createFreeze("flowfreeze:empty-activation-stop", ["build", "review"]);
 		const host = createHostFromEntries(entries);
@@ -4791,11 +4956,10 @@ edges:
 		const family = reconstructWorkflowFamilies(entries)[0];
 		expect(
 			output.some(entry => entry.includes("Workflow checkpoint: attempt-empty-activation:checkpoint-1")),
-		).toBeTrue();
-		expect(family?.checkpoints[0]).toMatchObject({
-			frontierNodeIds: ["build"],
-			sourceMapping: { build: "build" },
-		});
+		).toBeFalse();
+		expect(output.join("\n")).toContain("Workflow stop requested for detached attempt: attempt-empty-activation");
+		expect(family?.attempts[0]?.status).toBe("stop_requested");
+		expect(family?.checkpoints).toEqual([]);
 	});
 
 	it("rejects restart when checkpoint frontier cannot be mapped into the selected freeze", async () => {
@@ -5189,6 +5353,76 @@ edges: []
 		expect(managerOutput).not.toContain("/agents");
 
 		releaseAgents.resolve();
+		await Bun.sleep(10);
+	});
+
+	it("does not expose Agent Hub controls for stale active attempts that are persisted terminal", async () => {
+		const dir = await createTempDir();
+		await fs.mkdir(path.join(dir, "stale-active-terminal"), { recursive: true });
+		await Bun.write(
+			path.join(dir, "stale-active-terminal.omhflow"),
+			`---
+name: stale-active-terminal
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Stale Active Terminal
+
+\`\`\`yaml workflow
+nodes:
+  buildRound:
+    type: agent
+    agent: task
+    prompt: Build the current round.
+edges: []
+\`\`\`
+`,
+		);
+		const entries: CapturedEntry[] = [];
+		const buildStarted = Promise.withResolvers<void>();
+		const releaseBuild = Promise.withResolvers<void>();
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async () => {
+				buildStarted.resolve();
+				await releaseBuild.promise;
+				return { summary: "built late" };
+			},
+		};
+		const { output, runtime } = createRuntime(entries, runtimeHost);
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow start ${path.join(dir, "stale-active-terminal.omhflow")} --run-id stale-active-terminal --family-id family-stale-active-terminal --background`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		await buildStarted.promise;
+		appendWorkflowAttemptActivationCompleted(runtime.sessionManager, {
+			attemptId: "stale-active-terminal:attempt-1",
+			activationId: "activation-1",
+			output: { summary: "manually settled by persisted lifecycle" },
+		});
+		completeWorkflowAttempt(runtime.sessionManager, {
+			attemptId: "stale-active-terminal:attempt-1",
+			summary: "persisted terminal while active map is stale",
+		});
+
+		expect(
+			await executeAcpBuiltinSlashCommand("/workflow manager --family-id family-stale-active-terminal", runtime),
+		).toEqual({ consumed: true });
+
+		const managerOutput = output.at(-1) ?? "";
+		expect(managerOutput).toContain("Run: attempt-1 completed");
+		expect(managerOutput).not.toContain("Agent Hub");
+		expect(managerOutput).not.toContain("watch/intervene buildRound");
+		expect(managerOutput).not.toContain("/workflow interrupt stale-active-terminal:attempt-1");
+
+		releaseBuild.resolve();
 		await Bun.sleep(10);
 	});
 

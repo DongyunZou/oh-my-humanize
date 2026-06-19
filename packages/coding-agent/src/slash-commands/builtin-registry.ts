@@ -355,7 +355,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 				usage: "collapse|compact|show|status|help",
 			},
 			{ name: "freeze", description: "Freeze a workflow artifact", usage: "<flow-or-path>" },
-			{ name: "start", description: "Start a workflow package", usage: "<flow-or-path>" },
+			{ name: "start", description: "Start a frozen workflow artifact", usage: "<flow-or-path>" },
 			{ name: "request-change", description: "Propose a workflow change", usage: "<file>" },
 			{ name: "approve-change", description: "Approve a workflow change", usage: "<change-request-id>" },
 			{ name: "reject-change", description: "Reject a workflow change", usage: "<change-request-id>" },
