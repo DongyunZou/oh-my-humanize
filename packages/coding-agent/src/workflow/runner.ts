@@ -371,15 +371,18 @@ async function executeAndPersistActivation(
 			throw new WorkflowRunnerError(modelAudit.error);
 		}
 		const executionSignal = context.nodeAbortSignal ?? context.signal;
-		const rawOutput = await executeWorkflowNode(nodeForExecution, activation, options.runtimeHost, {
-			modelOverride: modelOverrideFromAudit(modelAudit),
-			signal: executionSignal,
-			context: {
-				state: context.state,
-				completedActivations: context.completedActivations,
-			},
-			resourceDir,
-		});
+		const rawOutput = await awaitWorkflowNodeExecution(
+			executeWorkflowNode(nodeForExecution, activation, options.runtimeHost, {
+				modelOverride: modelOverrideFromAudit(modelAudit),
+				signal: executionSignal,
+				context: {
+					state: context.state,
+					completedActivations: context.completedActivations,
+				},
+				resourceDir,
+			}),
+			executionSignal,
+		);
 		const output = validateWorkflowActivationOutput(materializeSingleWriteData(node, rawOutput), {
 			allowedWritePaths: node.writes,
 			stateSchema: options.definition.stateSchema,
@@ -424,6 +427,37 @@ async function executeAndPersistActivation(
 		appendLifecycleActivationFailed(options, activation, message);
 		throw error;
 	}
+}
+
+function awaitWorkflowNodeExecution<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+	if (signal === undefined) return operation;
+	const { promise, resolve, reject } = Promise.withResolvers<T>();
+	let settled = false;
+	let abortTimer: NodeJS.Timeout | undefined;
+	const settle = (fn: () => void): void => {
+		if (settled) return;
+		settled = true;
+		if (abortTimer !== undefined) {
+			clearTimeout(abortTimer);
+			abortTimer = undefined;
+		}
+		signal.removeEventListener("abort", onAbort);
+		fn();
+	};
+	const onAbort = (): void => {
+		if (abortTimer !== undefined) return;
+		abortTimer = setTimeout(() => {
+			const reason = workflowNodeAbortReason(signal) ?? "workflow activation aborted";
+			settle(() => reject(new Error(reason)));
+		}, 0);
+	};
+	signal.addEventListener("abort", onAbort, { once: true });
+	operation.then(
+		output => settle(() => resolve(output)),
+		error => settle(() => reject(error)),
+	);
+	if (signal.aborted) onAbort();
+	return promise;
 }
 
 function materializeSingleWriteData(node: WorkflowNode, output: WorkflowActivationOutput): WorkflowActivationOutput {

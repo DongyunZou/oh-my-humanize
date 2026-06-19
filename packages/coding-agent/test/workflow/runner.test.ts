@@ -561,6 +561,68 @@ edges:
 		]);
 	});
 
+	it("checkpoints deadline-aborted lifecycle activations even when the runtime ignores abort", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
+		const stopController = new AbortController();
+		const nodeAbortController = new AbortController();
+		const started = Promise.withResolvers<void>();
+		const never = Promise.withResolvers<never>();
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async () => {
+				started.resolve();
+				return await never.promise;
+			},
+			runReviewNode: async () => ({ summary: "review should not run", verdict: "finish" }),
+		};
+
+		const resultPromise = runWorkflow({
+			host,
+			definition,
+			runId: "run-node-abort-ignored",
+			startNodeId: "build",
+			runtimeHost,
+			signal: stopController.signal,
+			nodeAbortSignal: nodeAbortController.signal,
+			lifecycle: {
+				familyId: "family-node-abort-ignored",
+				attemptId: "attempt-node-abort-ignored-1",
+				freeze: createFreeze("flowfreeze:node-abort-ignored", definition),
+				runtimeBindingSnapshot: binding("binding-node-abort-ignored"),
+			},
+		});
+		await started.promise;
+
+		stopController.abort("workflow stop requested");
+		nodeAbortController.abort("stop deadline elapsed");
+		const result = await Promise.race([resultPromise, Bun.sleep(100).then(() => "timeout" as const)]);
+		if (result === "timeout") {
+			throw new Error("workflow stop did not checkpoint when the node runtime ignored abort");
+		}
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["build", "aborted"],
+		]);
+		const families = reconstructWorkflowFamilies(host.getBranch());
+		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.status, attempt.error])).toEqual([
+			["attempt-node-abort-ignored-1", "stopped", undefined],
+		]);
+		expect(families[0]?.attempts[0]?.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["build", "aborted"],
+		]);
+		expect(families[0]?.checkpoints).toMatchObject([
+			{
+				id: "attempt-node-abort-ignored-1:checkpoint-1",
+				attemptId: "attempt-node-abort-ignored-1",
+				completedActivationIds: [],
+				abortedActivationIds: ["activation-1"],
+				frontierNodeIds: ["build"],
+				state: {},
+				sourceMapping: { build: "build" },
+			},
+		]);
+	});
+
 	it("checkpoints lifecycle attempts when max runtime elapses", async () => {
 		const host = createHost();
 		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
