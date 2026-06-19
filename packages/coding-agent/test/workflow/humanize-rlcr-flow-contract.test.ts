@@ -1,4 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 
 interface WorkflowActivationOutput {
@@ -37,10 +39,53 @@ interface ScriptResult {
 	statePatch: OperatorGateStatePatch[];
 }
 
+interface DiffGuardPatch {
+	op: "set";
+	path: string;
+	value: {
+		verdict?: string;
+		reasons?: string[];
+		untrackedProjectFiles?: string[];
+	};
+}
+
+interface DiffGuardResult {
+	summary: string;
+	data: {
+		verdict: string;
+		reasons: string[];
+		untrackedProjectFiles: string[];
+	};
+	statePatch: DiffGuardPatch[];
+}
+
+interface FinalizeResult {
+	summary: string;
+	statePatch: Array<{
+		op: "set";
+		path: string;
+		value: {
+			archiveFile?: string;
+			inventoryFile?: string;
+			patchInventory?: {
+				stagedProjectFiles?: string[];
+				unstagedProjectFiles?: string[];
+				untrackedProjectFiles?: string[];
+			};
+		};
+	}>;
+}
+
 const AsyncFunctionConstructor = Object.getPrototypeOf(async () => {}).constructor as new (
 	workflowContextName: string,
 	code: string,
 ) => (workflowContext: WorkflowContext) => Promise<ScriptResult>;
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+	await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+});
 
 describe("humanize-rlcr flow contract", () => {
 	it("accepts canary evidence-class acknowledgement as an explicit proceed gate", async () => {
@@ -73,6 +118,48 @@ describe("humanize-rlcr flow contract", () => {
 			reasons: ["approval is not an explicit proceed decision"],
 		});
 	});
+
+	it("requires repair when an implementation creates an untracked project deliverable", async () => {
+		const repo = await createGitRepo();
+		await Bun.write(path.join(repo, "task.md"), "Objective:\nAdd one tracked test file.\n");
+		await Bun.write(path.join(repo, "existing.txt"), "baseline\n");
+		await runCommand(["git", "add", "task.md", "existing.txt"], repo);
+		await runCommand(["git", "commit", "-m", "init"], repo);
+		await Bun.write(path.join(repo, "new-test.txt"), "real test content\n");
+
+		const result = await runDiffDisciplineGuard(repo);
+
+		expect(result.data.verdict).toBe("REPAIR");
+		expect(result.data.untrackedProjectFiles).toContain("new-test.txt");
+		expect(result.data.reasons.join("\n")).toContain("untracked project files must be staged or explicitly excluded");
+	});
+
+	it("finalizes with a durable archive and combined staged unstaged untracked patch inventory", async () => {
+		const repo = await createGitRepo();
+		await fs.mkdir(path.join(repo, "workflow-output"), { recursive: true });
+		await Bun.write(path.join(repo, "task.md"), "Objective:\nCapture final patch evidence.\n");
+		await Bun.write(path.join(repo, "staged.txt"), "old\n");
+		await Bun.write(path.join(repo, "unstaged.txt"), "old\n");
+		await runCommand(["git", "add", "task.md", "staged.txt", "unstaged.txt"], repo);
+		await runCommand(["git", "commit", "-m", "init"], repo);
+		await Bun.write(path.join(repo, "staged.txt"), "new\n");
+		await Bun.write(path.join(repo, "unstaged.txt"), "new\n");
+		await Bun.write(path.join(repo, "untracked.txt"), "new\n");
+		await Bun.write(path.join(repo, "workflow-output", "validation-final.txt"), "validation passed\n");
+		await runCommand(["git", "add", "staged.txt"], repo);
+
+		const result = await runFinalize(repo);
+		const final = result.statePatch.find(patch => patch.path === "/humanize/final")?.value;
+
+		expect(final?.archiveFile).toBe("workflow-output/final-humanize-rlcr-archive.md");
+		expect(final?.inventoryFile).toBe("workflow-output/final-humanize-rlcr-inventory.json");
+		expect(final?.patchInventory?.stagedProjectFiles).toContain("staged.txt");
+		expect(final?.patchInventory?.unstagedProjectFiles).toContain("unstaged.txt");
+		expect(final?.patchInventory?.untrackedProjectFiles).toContain("untracked.txt");
+		expect(await Bun.file(path.join(repo, "workflow-output", "final-humanize-rlcr-archive.md")).text()).toContain(
+			"validation-final.txt",
+		);
+	});
 });
 
 async function runRecordOperatorGate(response: string): Promise<ScriptResult> {
@@ -95,4 +182,80 @@ async function runRecordOperatorGate(response: string): Promise<ScriptResult> {
 			},
 		],
 	});
+}
+
+async function runDiffDisciplineGuard(cwd: string): Promise<DiffGuardResult> {
+	const scriptPath = path.resolve(
+		import.meta.dir,
+		"../../examples/workflow/experimental/humanize-rlcr/humanize-rlcr/scripts/diff-discipline-guard.js",
+	);
+	const script = await Bun.file(scriptPath).text();
+	const execute = new AsyncFunctionConstructor("workflowContext", script) as unknown as (
+		workflowContext: WorkflowContext,
+	) => Promise<DiffGuardResult>;
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(cwd);
+		return await execute({
+			activation: { id: "activation-diff-guard" },
+			completedActivations: [],
+		});
+	} finally {
+		process.chdir(originalCwd);
+	}
+}
+
+async function runFinalize(cwd: string): Promise<FinalizeResult> {
+	const scriptPath = path.resolve(
+		import.meta.dir,
+		"../../examples/workflow/experimental/humanize-rlcr/humanize-rlcr/scripts/finalize.js",
+	);
+	const script = await Bun.file(scriptPath).text();
+	const execute = new AsyncFunctionConstructor("workflowContext", script) as unknown as (
+		workflowContext: WorkflowContext & {
+			state: {
+				humanize: {
+					operatorGate: { recordedAtMs: number };
+					ledger: { currentRound: number; openIssues: unknown[]; queuedIssues: unknown[] };
+				};
+			};
+		},
+	) => Promise<FinalizeResult>;
+	const originalCwd = process.cwd();
+	try {
+		process.chdir(cwd);
+		return await execute({
+			activation: { id: "activation-finalize" },
+			completedActivations: [],
+			state: {
+				humanize: {
+					operatorGate: { recordedAtMs: Date.now() },
+					ledger: { currentRound: 2, openIssues: [], queuedIssues: [] },
+				},
+			},
+		});
+	} finally {
+		process.chdir(originalCwd);
+	}
+}
+
+async function createGitRepo(): Promise<string> {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "omh-humanize-contract-"));
+	tempDirs.push(dir);
+	await runCommand(["git", "init"], dir);
+	await runCommand(["git", "config", "user.email", "test@example.com"], dir);
+	await runCommand(["git", "config", "user.name", "Test User"], dir);
+	return dir;
+}
+
+async function runCommand(command: string[], cwd: string): Promise<void> {
+	const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" });
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	if (exitCode !== 0) {
+		throw new Error(`command failed (${exitCode}): ${command.join(" ")}\n${stdout}\n${stderr}`);
+	}
 }

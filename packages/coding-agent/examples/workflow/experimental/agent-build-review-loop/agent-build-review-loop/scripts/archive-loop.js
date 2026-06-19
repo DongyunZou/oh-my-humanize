@@ -1,15 +1,17 @@
 const archivePath = "workflow-output/final-agent-loop-archive.md";
 const taskText = await readRequiredTaskText();
 const progressText = await readOptionalText("progress.md");
+const reviewRoute = workflowContext.state?.reviewRoute && typeof workflowContext.state.reviewRoute === "object" ? workflowContext.state.reviewRoute : {};
+const isRejectArchive = reviewRoute.decision === "reject";
 const verifyCommand = requiredTaskValidationCommand(taskText);
 assertSafeVerificationCommand(verifyCommand);
 const evidenceFiles = await loopEvidenceFiles();
 const roundCount = Math.max(progressRoundCount(progressText), evidenceRoundCount(evidenceFiles));
-if (roundCount === 0) {
+if (roundCount === 0 && !isRejectArchive) {
 	throw new Error("agent-build-review-loop cannot archive without at least one ROUND entry in progress.md");
 }
 const changedFiles = await changedProjectFiles();
-if (changedFiles.length === 0 && !allowsNoChange(taskText)) {
+if (changedFiles.length === 0 && !allowsNoChange(taskText) && !isRejectArchive) {
 	throw new Error("agent-build-review-loop cannot archive without project changes unless task.md explicitly allows No-Code/No-Change");
 }
 if (evidenceFiles.length === 0) {
@@ -32,9 +34,15 @@ const archive = [
 	"",
 	"## Loop Health",
 	"",
+	`- Terminal decision: ${isRejectArchive ? "reject" : "complete"}`,
+	`- Review route: ${reviewRoute.reason ?? "not recorded"}`,
 	`- Recorded rounds: ${roundCount}`,
 	`- Changed files: ${changedFiles.length}`,
 	`- Evidence files: ${evidenceFiles.length}`,
+	"",
+	"## Review Route",
+	"",
+	JSON.stringify(reviewRoute, null, 2),
 	"",
 	"## Changed Files",
 	"",
@@ -70,6 +78,8 @@ return {
 				evidenceFiles,
 				roundCount,
 				changedFiles,
+				terminalDecision: isRejectArchive ? "reject" : "complete",
+				reviewRoute,
 				taskHash: String(Bun.hash(taskText)),
 			},
 		},
@@ -155,7 +165,7 @@ async function loopEvidenceFiles() {
 	try {
 		const glob = new Bun.Glob("workflow-output/**");
 		for await (const file of glob.scan({ cwd: process.cwd(), onlyFiles: true })) {
-			if (/^workflow-output\/round-\d+(?:-|\/)/u.test(file)) files.push(file);
+			if (/^workflow-output\/(?:round-\d+(?:-|\/)|setup[-_]?blocker)/u.test(file)) files.push(file);
 		}
 	} catch {
 		return [];

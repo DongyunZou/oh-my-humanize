@@ -27,9 +27,13 @@ stateSchema:
     verdict: string
     archive: object
     semanticGuard: object
+    reviewRoute: object
+    /reviewRoute/decision: string
     runtime: object
 resources:
   - path: scripts/initialize-loop.js
+    kind: script
+  - path: scripts/classify-review-route.js
     kind: script
   - path: scripts/semantic-archive-guard.js
     kind: script
@@ -89,6 +93,14 @@ nodes:
       - complete
       - continue
     fallbackVerdict: continue
+  - id: classifyReviewRoute
+    type: script
+    script:
+      language: js
+      timeoutMs: 60000
+      file: scripts/classify-review-route.js
+    writes:
+      - /reviewRoute
   - id: buildRound
     type: agent
     agent: task
@@ -144,13 +156,19 @@ edges:
   - from: buildRound
     to: reviewRound
   - from: reviewRound
+    to: classifyReviewRoute
+  - from: classifyReviewRoute
     to: buildRound
-    when: outputs.reviewRound.verdict == "continue"
+    when: state.reviewRoute.decision == "continue"
     label: review requests another build
-  - from: reviewRound
+  - from: classifyReviewRoute
     to: semanticArchiveGuard
-    when: outputs.reviewRound.verdict != "continue"
+    when: state.reviewRoute.decision == "complete"
     label: review accepted
+  - from: classifyReviewRoute
+    to: archiveLoop
+    when: state.reviewRoute.decision == "reject"
+    label: setup blocker rejected
   - from: semanticArchiveGuard
     to: buildRound
     when: outputs.semanticArchiveGuard.verdict == "REPAIR"

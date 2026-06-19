@@ -118,8 +118,12 @@ if (!broadChangeAllowed && regular.total >= 4000) {
 	reasons.push(`diff is too large for a bounded RLCR implementation round: ${regular.total} changed lines`);
 }
 
-if (!broadChangeAllowed && untrackedProjectFiles.length > 10) {
-	reasons.push(`created ${untrackedProjectFiles.length} untracked project files without an explicit generated-artifact contract`);
+if (!broadChangeAllowed && untrackedProjectFiles.length > 0) {
+	reasons.push(
+		`untracked project files must be staged or explicitly excluded before review: ${untrackedProjectFiles
+			.slice(0, 8)
+			.join(", ")}`,
+	);
 }
 
 const verdict = reasons.length === 0 ? "PASS" : "REPAIR";
