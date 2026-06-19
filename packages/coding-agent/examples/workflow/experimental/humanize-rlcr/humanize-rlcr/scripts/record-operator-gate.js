@@ -102,5 +102,10 @@ function hasConnectionAcknowledgement(text) {
 }
 
 function hasLongRunningAcknowledgement(text) {
-	return /\b(long[-\s]?running|8\s*(?:h|hour|hours)|eight\s+hours?|5\s*(?:d|day|days)|five\s+days?|minimum)\b/u.test(text);
+	return (
+		/\b(long[-\s]?running|8\s*(?:h|hour|hours)|eight\s+hours?|5\s*(?:d|day|days)|five\s+days?|minimum)\b/u.test(text) ||
+		/\b(canary(?:[-\s]?grade)?|short semantic evidence|short evidence|not (?:an? )?(?:8\s*(?:h|hour|hours)|eight\s+hours?)|enlarge the next (?:real )?task|no (?:sleep|hold|no-op|timer|duration padding))\b/u.test(
+			text,
+		)
+	);
 }
