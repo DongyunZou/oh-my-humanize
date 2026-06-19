@@ -729,9 +729,8 @@ function drawWorkflowGraphLoopbackPath(lines: string[], path: WorkflowGraphLoopb
 	if (path.sourceLine === path.targetLine) {
 		drawWorkflowGraphLoopBranch(lines, path.sourceLine, path.sourceRight, path.railColumn, path.nodeBoxes);
 		drawWorkflowGraphConnectorAtColumn(lines, path.sourceLine, path.railColumn, {
-			up: true,
-			down: true,
 			left: true,
+			arrowRight: true,
 		});
 		return;
 	}
@@ -806,6 +805,7 @@ function drawWorkflowGraphConnectorAtColumn(
 		right: existing.right || directions.right === true,
 		arrowDown: existing.arrowDown || directions.arrowDown === true,
 		arrowUp: existing.arrowUp || directions.arrowUp === true,
+		arrowRight: existing.arrowRight || directions.arrowRight === true,
 		doubleVertical: existing.doubleVertical,
 	};
 	lines[lineIndex] = putWorkflowGraphTextAtColumn(
@@ -832,6 +832,7 @@ function workflowGraphConnectorCellFromChar(char: string | undefined): WorkflowG
 		right: false,
 		arrowDown: false,
 		arrowUp: false,
+		arrowRight: false,
 	};
 	switch (char) {
 		case "▲":
@@ -843,6 +844,11 @@ function workflowGraphConnectorCellFromChar(char: string | undefined): WorkflowG
 			cell.up = true;
 			cell.down = true;
 			cell.arrowDown = true;
+			break;
+		case "▶":
+			cell.left = true;
+			cell.right = true;
+			cell.arrowRight = true;
 			break;
 		case "│":
 			cell.up = true;
@@ -951,6 +957,7 @@ function workflowGraphConnectorCellToChar(
 ): string {
 	if (cell.arrowUp) return "▲";
 	if (cell.arrowDown) return "▼";
+	if (cell.arrowRight) return "▶";
 	if (occluded) {
 		if (cell.left || cell.right) return "┄";
 		if (cell.up || cell.down) return "┆";
@@ -1080,6 +1087,7 @@ interface ConnectorCell {
 	right: boolean;
 	arrowDown: boolean;
 	arrowUp: boolean;
+	arrowRight: boolean;
 }
 
 type ConnectorDirection = "up" | "down" | "left" | "right";
@@ -1095,6 +1103,7 @@ function createConnectorGrid(rows: number, width: number): ConnectorGrid {
 			right: false,
 			arrowDown: false,
 			arrowUp: false,
+			arrowRight: false,
 		})),
 	);
 }
@@ -1141,6 +1150,7 @@ function connectorRowToString(row: ConnectorCell[]): string {
 function connectorCellToChar(cell: ConnectorCell): string {
 	if (cell.arrowUp) return "▲";
 	if (cell.arrowDown) return "▼";
+	if (cell.arrowRight) return "▶";
 	const { up, down, left, right } = cell;
 	if (up && down && left && right) return "┼";
 	if (up && down && left) return "┤";

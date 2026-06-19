@@ -38,10 +38,12 @@ describe("renderWorkflowGraphDiagram", () => {
 	it("renders arrowheads for directed forward, skipped, and loopback routes", () => {
 		const loopbackDiagram = renderWorkflowGraphDiagram(loopbackOcclusionView(), { width: 100 }).join("\n");
 		const skippedDiagram = renderWorkflowGraphDiagram(skippedForwardEdgeView(), { width: 82 }).join("\n");
+		const selfLoopDiagram = renderWorkflowGraphDiagram(selfLoopView(), { width: 100 }).join("\n");
 
 		expect(loopbackDiagram).toContain("▼");
 		expect(loopbackDiagram).toContain("▲");
 		expect(skippedDiagram).toMatch(/▼\s+to c/u);
+		expect(selfLoopDiagram).toContain("▶");
 	});
 });
 
@@ -103,6 +105,18 @@ function skippedForwardEdgeView(): WorkflowGraphView {
 			{ from: "b", to: "c" },
 			{ from: "a", to: "c" },
 		],
+		lineage: [],
+		actions: [],
+	};
+}
+
+function selfLoopView(): WorkflowGraphView {
+	return {
+		familyId: "self-loop",
+		changes: { approved: 0, proposed: 0, rejected: 0 },
+		topology: { parallelFanOuts: 0, branchPoints: 1, joins: 1, loops: 1, subflows: 0 },
+		nodes: [{ id: "review", kind: "Reviewer", status: "running", activationCount: 2, focused: true }],
+		edges: [{ from: "review", to: "review", condition: "retry" }],
 		lineage: [],
 		actions: [],
 	};
