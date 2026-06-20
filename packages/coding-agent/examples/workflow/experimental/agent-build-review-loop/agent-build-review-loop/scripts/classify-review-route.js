@@ -149,7 +149,11 @@ function parseRoundCount(text) {
 }
 
 function mentionsPassingValidation(text) {
-	return /\b(?:validation|checks?|test(?:s| suite)?|declared command)\b.{0,160}\bpass(?:ed|es|ing)?\b/ius.test(text);
+	return (
+		/\b(?:validation|checks?|test(?:s| suite)?|declared command)\b.{0,160}\bpass(?:ed|es|ing)?\b/ius.test(
+			text,
+		) || /\bvalidation\b.{0,160}\b(?:exit[_ -]?code|exit status)\s*=?\s*0\b/ius.test(text)
+	);
 }
 
 function mentionsOnlyMissingArchiveEvidence(text) {
@@ -188,9 +192,10 @@ function mentionsTaskAcceptanceStillMissing(text) {
 
 function mentionsScopeOrBuildRepairStillNeeded(text) {
 	return (
-		/\banother\s+build(?:\/review)?(?:\/archive)?\s+(?:round|route|cycle)\s+(?:is\s+)?(?:still\s+)?needed\b/iu.test(
+		(/\banother\s+build(?:\/review)?(?:\/archive)?\s+(?:round|route|cycle)\s+(?:is\s+)?(?:still\s+)?needed\b/iu.test(
 			text,
-		) ||
+		) &&
+			!mentionsArchiveOnlyNextRoute(text)) ||
 		/\b(?:scope|evidence)\s+gaps?\b.{0,120}\b(?:resolve|repair|fix|needed|rather than archive)\b/ius.test(
 			text,
 		) ||
@@ -198,6 +203,15 @@ function mentionsScopeOrBuildRepairStillNeeded(text) {
 			text,
 		) ||
 		/\boutside\b.{0,120}\b(?:scope|task[- ]declared)\b/ius.test(text)
+	);
+}
+
+function mentionsArchiveOnlyNextRoute(text) {
+	return (
+		mentionsOnlyMissingArchiveEvidence(text) &&
+		/\banother\s+build(?:\/review)?(?:\/archive)?\s+(?:round|route|cycle)\s+(?:is\s+)?(?:still\s+)?needed\b.{0,180}\b(?:semantic[- ]?archive[- ]?guard|semanticArchiveGuard|archiveLoop|archive loop|archive output)\b/ius.test(
+			text,
+		)
 	);
 }
 

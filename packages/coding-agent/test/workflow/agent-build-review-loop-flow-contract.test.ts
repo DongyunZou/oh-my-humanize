@@ -594,6 +594,36 @@ describe("agent-build-review-loop flow contract", () => {
 		expect(result.data.reason).toContain("semantic archive guard");
 	});
 
+	it("routes archive-only next-route wording after task-required round minimum", async () => {
+		const cwd = await createTempDir();
+		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
+		await Bun.write(path.join(cwd, "task.md"), "Produce at least twelve meaningful build/review cycles.\n");
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			Array.from(
+				{ length: 14 },
+				(_, index) =>
+					`ROUND ${index + 1}: completed Vite asset surface ${index + 1}; validation=./workflow-output/run-validation.sh; result=pass`,
+			).join("\n"),
+		);
+
+		const result = await runReviewRouteClassifier(cwd, {
+			verdict: "continue",
+			summary:
+				"continue: progress.md has 14 ROUND entries and the latest round-14 validation summary reports exit_code=0, but the task-required completion evidence is still incomplete because semantic-archive-guard.json and archive output are absent. Another build/review route is needed to produce semanticArchiveGuard/archiveLoop evidence before the result can be accepted as complete.",
+		});
+
+		expect(result.data).toMatchObject({
+			decision: "complete",
+			reviewVerdict: "continue",
+			requiredRoundCount: 12,
+			setupBlockerEvidenceFiles: [],
+			externalValidationBlockerEvidenceFiles: [],
+			terminalBlockerEvidenceFiles: [],
+		});
+		expect(result.data.reason).toContain("semantic archive guard");
+	});
+
 	it("keeps building when reviewer says task-specific acceptance is not met after required rounds", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
