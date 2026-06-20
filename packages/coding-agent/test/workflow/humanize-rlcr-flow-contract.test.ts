@@ -176,6 +176,58 @@ describe("humanize-rlcr flow contract", () => {
 		});
 	});
 
+	it("requires repair for untracked project deliverables even when broad changes are allowed", async () => {
+		const repo = await createGitRepo();
+		await Bun.write(
+			path.join(repo, "task.md"),
+			[
+				"Objective:",
+				"Perform a repo-wide characterization task.",
+				"",
+				"Diff Gate:",
+				"Repo-wide changes are allowed, but project deliverables must be tracked before review.",
+				"",
+			].join("\n"),
+		);
+		await Bun.write(path.join(repo, "existing.txt"), "baseline\n");
+		await runCommand(["git", "add", "task.md", "existing.txt"], repo);
+		await runCommand(["git", "commit", "-m", "init"], repo);
+		await Bun.write(path.join(repo, "new-cross-crate-test.rs"), "real test content\n");
+
+		const result = await runDiffDisciplineGuard(repo);
+
+		expect(result.data.verdict).toBe("REPAIR");
+		expect(result.data.untrackedProjectFiles).toContain("new-cross-crate-test.rs");
+		expect(result.data.reasons.join("\n")).toContain("untracked project files must be staged or explicitly excluded");
+	});
+
+	it("does not treat out-of-scope broad churn text as broad change permission", async () => {
+		const repo = await createGitRepo();
+		await Bun.write(
+			path.join(repo, "task.md"),
+			[
+				"Objective:",
+				"Add focused tests for routing behavior.",
+				"",
+				"Out of scope: repo-wide formatting, broad rewrite, and mechanical migration.",
+				"",
+			].join("\n"),
+		);
+		for (let index = 0; index < 20; index += 1) {
+			await Bun.write(path.join(repo, `file-${index}.txt`), "baseline\n");
+		}
+		await runCommand(["git", "add", "."], repo);
+		await runCommand(["git", "commit", "-m", "init"], repo);
+		for (let index = 0; index < 20; index += 1) {
+			await Bun.write(path.join(repo, `file-${index}.txt`), `baseline\nfocused change ${index}\n`);
+		}
+
+		const result = await runDiffDisciplineGuard(repo);
+
+		expect(result.data.verdict).toBe("REPAIR");
+		expect(result.data.reasons.join("\n")).toContain("without an explicit repo-wide task contract");
+	});
+
 	it("enforces a task-declared whitespace churn budget", async () => {
 		const repo = await createGitRepo();
 		await Bun.write(

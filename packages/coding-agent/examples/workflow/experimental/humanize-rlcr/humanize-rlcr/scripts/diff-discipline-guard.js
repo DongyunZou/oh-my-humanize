@@ -1,5 +1,9 @@
 const broadChangePattern =
-	/\b(repo[- ]?wide|whole[- ]?repo|whole[- ]?repository|global format|formatter migration|mechanical migration|format all|large refactor|mass update)\b/iu;
+	/\b(repo[- ]?wide|whole[- ]?repo|whole[- ]?repository|global format|formatter migration|mechanical migration|format all|large refactor|mass update|broad(?:[- ]+\w+){0,3}[- ]?(?:churn|rewrite|refactor|change|changes|formatting))\b/iu;
+const broadChangeAllowancePattern =
+	/\b(allow|allowed|allows|may|can|expected|required|requires|perform|include|includes|scope includes)\b/iu;
+const broadChangeDenialPattern =
+	/\b(out[- ]of[- ]scope|out of scope|without|reject|rejecting|avoid|stop if|must not|do not|don't|forbid|forbidden|prohibit|prohibited|no)\b/iu;
 const state = workflowContext.state && typeof workflowContext.state === "object" ? workflowContext.state : {};
 const humanize = state.humanize && typeof state.humanize === "object" ? state.humanize : {};
 const ledger = humanize.ledger && typeof humanize.ledger === "object" ? humanize.ledger : {};
@@ -75,7 +79,7 @@ try {
 	taskText = "";
 }
 
-const broadChangeAllowed = broadChangePattern.test(taskText);
+const broadChangeAllowed = declaresBroadChangeAllowance(taskText);
 const mechanicalOverheadBudget = declaredMechanicalOverheadBudget(taskText);
 const status = await runGit(["status", "--short", "--untracked-files=all"]);
 const regularDiff = await runGit(["diff", "--numstat"]);
@@ -140,7 +144,7 @@ if (!broadChangeAllowed && regular.total >= 4000) {
 	reasons.push(`diff is too large for a bounded RLCR implementation round: ${regular.total} changed lines`);
 }
 
-if (!broadChangeAllowed && untrackedProjectFiles.length > 0) {
+if (untrackedProjectFiles.length > 0) {
 	reasons.push(
 		`untracked project files must be staged or explicitly excluded before review: ${untrackedProjectFiles
 			.slice(0, 8)
@@ -220,4 +224,15 @@ function declaredMechanicalOverheadBudget(text) {
 	const percent = Number(percentMatch[1]);
 	if (!Number.isFinite(percent) || percent < 0 || percent > 99) return undefined;
 	return percent / 100;
+}
+
+function declaresBroadChangeAllowance(text) {
+	if (!text.trim()) return false;
+	for (const rawLine of text.split(/\r?\n/u)) {
+		const line = rawLine.trim();
+		if (!line || !broadChangePattern.test(line)) continue;
+		if (broadChangeDenialPattern.test(line)) continue;
+		if (broadChangeAllowancePattern.test(line)) return true;
+	}
+	return false;
 }
