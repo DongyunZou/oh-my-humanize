@@ -242,7 +242,7 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 	});
 
-	it("does not promote continue reviews into archive completion", async () => {
+	it("routes downstream-finalization-only continue reviews to semantic guard after required rounds", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(
@@ -265,12 +265,12 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
-			reason: "review requested another build round",
+			reason: "review requested downstream finalization rather than more build work",
 		});
 		await expect(Bun.file(path.join(cwd, "workflow-output", "review-route-1.json")).json()).resolves.toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 		});
 	});
@@ -433,7 +433,7 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 	});
 
-	it("keeps archive-readiness-only continue reviews in the build loop", async () => {
+	it("routes archive-readiness-only continue reviews to downstream finalization", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(
@@ -451,16 +451,16 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 			setupBlockerEvidenceFiles: [],
 			externalValidationBlockerEvidenceFiles: [],
 			terminalBlockerEvidenceFiles: [],
 		});
-		expect(result.data.reason).toContain("another build round");
+		expect(result.data.reason).toContain("downstream finalization");
 	});
 
-	it("keeps terminal-evidence-only continue reviews in the build loop", async () => {
+	it("routes terminal-evidence-only continue reviews to downstream finalization", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(
@@ -478,16 +478,16 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 			setupBlockerEvidenceFiles: [],
 			externalValidationBlockerEvidenceFiles: [],
 			terminalBlockerEvidenceFiles: [],
 		});
-		expect(result.data.reason).toContain("another build round");
+		expect(result.data.reason).toContain("downstream finalization");
 	});
 
-	it("keeps satisfied-round-minimum continue reviews in the build loop", async () => {
+	it("routes satisfied-round-minimum finalization-only reviews to downstream finalization", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(
@@ -505,16 +505,16 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 			setupBlockerEvidenceFiles: [],
 			externalValidationBlockerEvidenceFiles: [],
 			terminalBlockerEvidenceFiles: [],
 		});
-		expect(result.data.reason).toContain("another build round");
+		expect(result.data.reason).toContain("downstream finalization");
 	});
 
-	it("keeps archive-only continue evidence gaps in the build loop", async () => {
+	it("routes archive-only continue evidence gaps to downstream finalization", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(
@@ -532,13 +532,13 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 			setupBlockerEvidenceFiles: [],
 			externalValidationBlockerEvidenceFiles: [],
 			terminalBlockerEvidenceFiles: [],
 		});
-		expect(result.data.reason).toContain("another build round");
+		expect(result.data.reason).toContain("downstream finalization");
 	});
 
 	it("keeps building when task-required round minimum is not satisfied", async () => {
@@ -597,7 +597,7 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 	});
 
-	it("keeps archive-only continue gaps after task-required round minimum", async () => {
+	it("routes archive-only continue gaps after task-required round minimum to downstream finalization", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(path.join(cwd, "task.md"), "Produce at least four meaningful build/review cycles.\n");
@@ -618,16 +618,16 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 			setupBlockerEvidenceFiles: [],
 			externalValidationBlockerEvidenceFiles: [],
 			terminalBlockerEvidenceFiles: [],
 		});
-		expect(result.data.reason).toContain("another build round");
+		expect(result.data.reason).toContain("downstream finalization");
 	});
 
-	it("keeps archive-only next-route continue wording after task-required round minimum", async () => {
+	it("routes archive-only next-route continue wording after task-required round minimum to downstream finalization", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
 		await Bun.write(path.join(cwd, "task.md"), "Produce at least twelve meaningful build/review cycles.\n");
@@ -647,14 +647,14 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 
 		expect(result.data).toMatchObject({
-			decision: "continue",
+			decision: "complete",
 			reviewVerdict: "continue",
 			requiredRoundCount: 12,
 			setupBlockerEvidenceFiles: [],
 			externalValidationBlockerEvidenceFiles: [],
 			terminalBlockerEvidenceFiles: [],
 		});
-		expect(result.data.reason).toContain("another build round");
+		expect(result.data.reason).toContain("downstream finalization");
 	});
 
 	it("keeps building when reviewer says task-specific acceptance is not met after required rounds", async () => {
@@ -991,6 +991,12 @@ describe("agent-build-review-loop flow contract", () => {
 		const archive = await Bun.file(path.join(cwd, "workflow-output", "final-agent-loop-reject.md")).text();
 		expect(archive).toContain("Terminal decision: reject");
 		expect(archive).toContain("setup-blocker-evidence.json");
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			flow: "agent-build-review-loop",
+			status: "rejected",
+			terminal: true,
+			final_artifact: "workflow-output/final-agent-loop-reject.md",
+		});
 	});
 
 	it("writes a rejected archive and fails when setup-blocker evidence only lives in review summary", async () => {
@@ -1009,6 +1015,12 @@ describe("agent-build-review-loop flow contract", () => {
 		expect(archive).toContain("Terminal decision: reject");
 		expect(archive).toContain("reviewRound:summary");
 		expect(archive).toContain("setup blocker evidence is terminal");
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			flow: "agent-build-review-loop",
+			status: "rejected",
+			terminal: true,
+			final_artifact: "workflow-output/final-agent-loop-reject.md",
+		});
 	});
 
 	it("reserves review-route artifacts for the classifier node", async () => {
@@ -1035,6 +1047,19 @@ describe("agent-build-review-loop flow contract", () => {
 		expect(prompt).toContain("validation-attempt-<k>-stdout.txt");
 		expect(prompt).toContain("validation-attempt-<k>-stderr.txt");
 		expect(prompt).toContain("must not overwrite");
+	});
+
+	it("keeps downstream finalization artifacts out of reviewer-triggered build work", async () => {
+		const prompt = await Bun.file(
+			path.resolve(
+				import.meta.dir,
+				"../../examples/workflow/experimental/agent-build-review-loop/agent-build-review-loop/prompts/review-round.md",
+			),
+		).text();
+
+		expect(prompt).toContain("Do not return `continue` merely because finalization artifacts");
+		expect(prompt).toContain("produced by downstream workflow nodes");
+		expect(prompt).toContain("return `complete`");
 	});
 });
 

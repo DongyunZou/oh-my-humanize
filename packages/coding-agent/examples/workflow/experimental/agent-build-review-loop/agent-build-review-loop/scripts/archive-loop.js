@@ -105,6 +105,14 @@ const archive = [
 ].join("\n");
 
 await Bun.write(archivePath, archive);
+await writeTupleState({
+	status: isRejectArchive ? "rejected" : "completed",
+	finalArtifact: archivePath,
+	reviewRoute,
+	roundCount,
+	changedFiles,
+	evidenceFiles: archivedEvidenceFiles,
+});
 
 if (isRejectArchive) {
 	throw new Error(`agent-build-review-loop rejected: ${reviewRoute.reason ?? "review route rejected"}; see ${archivePath}`);
@@ -130,6 +138,23 @@ return {
 		},
 	],
 };
+
+async function writeTupleState({ status, finalArtifact, reviewRoute, roundCount, changedFiles, evidenceFiles }) {
+	const state = {
+		flow: "agent-build-review-loop",
+		status,
+		terminal: true,
+		final_artifact: finalArtifact,
+		reason: reviewRoute.reason ?? "",
+		review_decision: reviewRoute.decision ?? "",
+		review_verdict: reviewRoute.reviewVerdict ?? "",
+		round_count: roundCount,
+		changed_files: changedFiles,
+		evidence_files: evidenceFiles,
+		checked_at_ms: Date.now(),
+	};
+	await Bun.write("workflow-output/tuple-state.json", `${JSON.stringify(state, null, 2)}\n`);
+}
 
 async function readOptionalText(filePath) {
 	try {

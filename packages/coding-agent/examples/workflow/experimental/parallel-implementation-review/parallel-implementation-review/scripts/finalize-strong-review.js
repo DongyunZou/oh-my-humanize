@@ -23,6 +23,26 @@ const payload = {
 
 await Bun.write(finalReviewArtifact, `${JSON.stringify(payload, null, 2)}\n`);
 await Bun.write(finalArchiveArtifact, archiveText({ taskText, payload, finalReviewArtifact, finalArchiveArtifact }));
+await Bun.write(
+	"workflow-output/tuple-state.json",
+	`${JSON.stringify(
+		{
+			tuple_id: tupleId,
+			flow: "parallel-implementation-review",
+			status: verdict === "promote" ? "completed" : "rejected",
+			terminal: true,
+			verdict,
+			final_artifact: finalReviewArtifact,
+			archive_artifact: finalArchiveArtifact,
+			evidence_contract_verdict: payload.evidence_contract?.verdict ?? payload.evidence_contract?.status ?? "unknown",
+			changed_files: changedFiles,
+			evidence_files: evidenceFiles,
+			checked_at_ms: Date.now(),
+		},
+		null,
+		2,
+	)}\n`,
+);
 
 return {
 	summary: `final strong review archived with verdict ${verdict}`,

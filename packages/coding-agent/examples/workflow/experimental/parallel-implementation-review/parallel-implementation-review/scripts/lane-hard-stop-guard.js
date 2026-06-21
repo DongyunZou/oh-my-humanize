@@ -13,6 +13,23 @@ const diagnostic = {
 await Bun.write(artifactPath, `${JSON.stringify(diagnostic, null, 2)}\n`);
 
 if (hardStopArtifacts.length > 0) {
+	await Bun.write(
+		"workflow-output/tuple-state.json",
+		`${JSON.stringify(
+			{
+				tuple_id: tupleId,
+				flow: "parallel-implementation-review",
+				status: "hard_stop",
+				terminal: true,
+				reason: "parallel lane hard stop reported",
+				terminal_artifacts: hardStopArtifacts,
+				guard_artifact: artifactPath,
+				checked_at_ms: Date.now(),
+			},
+			null,
+			2,
+		)}\n`,
+	);
 	throw new Error(`parallel lane hard stop reported; see ${artifactPath}`);
 }
 

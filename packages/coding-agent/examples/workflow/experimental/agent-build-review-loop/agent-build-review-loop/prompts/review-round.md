@@ -20,6 +20,13 @@ Acceptance criteria:
   or not met.
 - Return `continue` if the newest round did not make a real source, test,
   documentation, or task artifact improvement.
+- Do not return `continue` merely because finalization artifacts such as
+  `semantic-archive-guard.json`, archive output, `archiveLoop` evidence, or a
+  project-only changed-file inventory do not exist yet. Those artifacts are
+  produced by downstream workflow nodes after this review route. When the
+  build/review minimum, task-specific acceptance criteria, and verification
+  requirements are otherwise satisfied, return `complete` and let the route
+  classifier send the flow to downstream finalization.
 - Return `continue` if validation or build work leaves task-specific byproduct
   files in the project root that indicate a source, test, script, or docs bug.
   Task-local workflow artifacts such as `task.md`, `progress.md`,

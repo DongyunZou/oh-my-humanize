@@ -79,6 +79,13 @@ describe("parallel-implementation-review flow contract", () => {
 		});
 		expect(await fileExists(path.join(cwd, "workflow-output", "final-review-P06-T06-test.json"))).toBe(true);
 		expect(await fileExists(path.join(cwd, "workflow-output", "strong-review-P06-T06-test.json"))).toBe(false);
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			tuple_id: "P06-T06-test",
+			flow: "parallel-implementation-review",
+			status: "completed",
+			terminal: true,
+			final_artifact: "workflow-output/final-review-P06-T06-test.json",
+		});
 	});
 
 	it("allows integration review when no lane reports a hard stop", async () => {
@@ -117,6 +124,13 @@ describe("parallel-implementation-review flow contract", () => {
 			tuple_id: "P06-T06-test",
 			producer_node: "laneHardStopGuard",
 			status: "hard_stop",
+		});
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			tuple_id: "P06-T06-test",
+			flow: "parallel-implementation-review",
+			status: "hard_stop",
+			terminal: true,
+			terminal_artifacts: ["workflow-output/lane-hard-stop-P06-T06-test.json"],
 		});
 	});
 });

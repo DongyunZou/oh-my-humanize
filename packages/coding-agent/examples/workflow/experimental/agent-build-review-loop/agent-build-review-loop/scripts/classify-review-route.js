@@ -3,19 +3,30 @@ const reviewVerdict = normalizeVerdict(review.data?.verdict ?? review.summary);
 const reviewSummary = typeof review.summary === "string" ? review.summary : "";
 const reviewRound = completedActivationCount("reviewRound");
 const taskText = await readOptionalText("task.md");
+const progressText = await readOptionalText("progress.md");
 const requiredRoundCount = taskRequiredRoundCount(taskText);
+const completedRoundCount = progressRoundCount(progressText);
 const setupBlockerEvidenceFiles = await findSetupBlockerEvidenceFiles(reviewSummary);
 const externalValidationBlockerEvidenceFiles = await findRepeatedExternalValidationBlockerEvidenceFiles(taskText);
 const terminalBlockerEvidenceFiles = uniqueSorted([
 	...setupBlockerEvidenceFiles,
 	...externalValidationBlockerEvidenceFiles,
 ]);
+const downstreamFinalizationOnly =
+	reviewVerdict === "continue" &&
+	completedRoundCount >= requiredRoundCount &&
+	isDownstreamFinalizationOnlyReview(reviewSummary);
 
 let decision = reviewVerdict === "continue" ? "continue" : "complete";
 let reason =
 	decision === "continue"
 		? "review requested another build round"
 		: "review accepted the current implementation evidence";
+
+if (downstreamFinalizationOnly) {
+	decision = "complete";
+	reason = "review requested downstream finalization rather than more build work";
+}
 
 if (terminalBlockerEvidenceFiles.length > 0) {
 	decision = "reject";
@@ -32,6 +43,8 @@ const route = {
 	reviewVerdict,
 	reviewSummary,
 	requiredRoundCount,
+	completedRoundCount,
+	downstreamFinalizationOnly,
 	setupBlockerEvidenceFiles,
 	externalValidationBlockerEvidenceFiles,
 	terminalBlockerEvidenceFiles,
@@ -117,6 +130,40 @@ function parseRoundCount(text) {
 		["twenty", 20],
 	]);
 	return words.get(text.toLowerCase()) ?? null;
+}
+
+function progressRoundCount(text) {
+	return [...text.matchAll(/^\s*ROUND\s+\d+\s*:/gimu)].length;
+}
+
+function isDownstreamFinalizationOnlyReview(text) {
+	return mentionsDownstreamFinalization(text) && !mentionsBuildOwnedGap(text);
+}
+
+function mentionsDownstreamFinalization(text) {
+	return (
+		/\bsemantic[- ]?archive[- ]?guard\b/iu.test(text) ||
+		/\bsemanticArchiveGuard\b/u.test(text) ||
+		/\barchiveLoop\b/u.test(text) ||
+		/\barchive[- ]?output\b/iu.test(text) ||
+		/\bfinal archive\b/iu.test(text) ||
+		/\bterminal evidence\b/iu.test(text) ||
+		/\bproject-only changed-file inventory\b/iu.test(text) ||
+		/\bpost-round route selection\b/iu.test(text) ||
+		/\bdownstream archive nodes?\b/iu.test(text)
+	);
+}
+
+function mentionsBuildOwnedGap(text) {
+	return (
+		/\btask-specific acceptance\b.{0,120}\b(?:not yet met|not met|unmet)\b/ius.test(text) ||
+		/\bacceptance criteria\b.{0,120}\b(?:not yet met|not met|unmet)\b/ius.test(text) ||
+		/\b(?:scope\/evidence|scope and evidence|scope)\s+gaps?\b/iu.test(text) ||
+		/\b(?:outside|escapes?)\b.{0,120}\b(?:task\.md'?s?\s+declared\s+)?allowed paths?\b/ius.test(text) ||
+		/\bcurrent diff\b.{0,120}\boutside\b/ius.test(text) ||
+		/\bno corresponding source or behavioral-test improvement\b/iu.test(text) ||
+		/\bimplementation needs another focused fix\b/iu.test(text)
+	);
 }
 
 async function findSetupBlockerEvidenceFiles(reviewSummary) {
