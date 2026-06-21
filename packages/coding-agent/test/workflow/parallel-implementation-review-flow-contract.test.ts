@@ -288,6 +288,19 @@ describe("parallel-implementation-review flow contract", () => {
 		]);
 	});
 
+	it("keeps integration review read-only while the materializer owns durable evidence writes", async () => {
+		const prompt = await Bun.file(
+			path.join(
+				import.meta.dir,
+				"../../examples/workflow/experimental/parallel-implementation-review/parallel-implementation-review/prompts/integration-review.md",
+			),
+		).text();
+
+		expect(prompt).toContain("materializeIntegrationReview");
+		expect(prompt).toContain("Do not write `workflow-output/integration-review-<tuple-id>.json`");
+		expect(prompt).not.toContain("Before yielding, write `workflow-output/integration-review-<tuple-id>.json`");
+	});
+
 	it("requires rollback evidence to cover every changed project file after parallel lanes join", async () => {
 		const cwd = await createTempDir();
 		await initGitRepo(cwd);

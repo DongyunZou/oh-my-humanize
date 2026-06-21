@@ -33,16 +33,17 @@ Docs / operator evidence lane:
 
 Summarize changed files, verification evidence, unresolved risks, lane/workspace
 conflicts, and the highest-priority follow-up for the final strong reviewer.
-This node records integration evidence; it does not decide promotion and must
-not create final promotion artifacts such as `workflow-output/final-review.*`
-or `workflow-output/final-archive.*`.
+This node records integration evidence in its review output; it does not decide
+promotion and must not create final promotion artifacts such as
+`workflow-output/final-review.*` or `workflow-output/final-archive.*`.
 It must also not write `workflow-output/validation-<tuple-id>.json` or
 `workflow-output/evidence-contract-guard-<tuple-id>.json`; the following
 workflow program nodes own those artifacts.
 
-Before yielding, write `workflow-output/integration-review-<tuple-id>.json`,
-where `<tuple-id>` is the tuple from `monitor-assignment.json`,
-`manifest-entry.json`, or `task.md`. The JSON must include:
+Do not write `workflow-output/integration-review-<tuple-id>.json`. The following
+`materializeIntegrationReview` workflow program node owns durable integration
+review evidence writes and will persist your completed review output. Your
+review output must include:
 
 - tracked and untracked project/control changes from `git status --short
   --untracked-files=all`;
