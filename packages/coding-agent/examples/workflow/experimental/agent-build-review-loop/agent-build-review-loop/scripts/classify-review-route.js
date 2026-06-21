@@ -19,6 +19,10 @@ const downstreamFinalizationOnly =
 	reviewVerdict === "continue" &&
 	completedRoundCount >= requiredRoundCount &&
 	isDownstreamFinalizationOnlyReview(reviewSummary);
+const completionSatisfiedButContinued =
+	reviewVerdict === "continue" &&
+	completedRoundCount >= requiredRoundCount &&
+	isCompletionSatisfiedReview(reviewSummary);
 
 let decision = reviewVerdict === "continue" ? "continue" : "complete";
 let reason =
@@ -26,9 +30,11 @@ let reason =
 		? "review requested another build round"
 		: "review accepted the current implementation evidence";
 
-if (downstreamFinalizationOnly) {
+if (downstreamFinalizationOnly || completionSatisfiedButContinued) {
 	decision = "complete";
-	reason = "review requested downstream finalization rather than more build work";
+	reason = downstreamFinalizationOnly
+		? "review requested downstream finalization rather than more build work"
+		: "review continuation contradicted completion satisfied evidence";
 }
 
 if (terminalBlockerEvidenceFiles.length > 0) {
@@ -48,6 +54,7 @@ const route = {
 	requiredRoundCount,
 	completedRoundCount,
 	downstreamFinalizationOnly,
+	completionSatisfiedButContinued,
 	setupBlockerEvidenceFiles,
 	externalValidationBlockerEvidenceFiles,
 	terminalBlockerEvidenceFiles,
@@ -141,6 +148,29 @@ function progressRoundCount(text) {
 
 function isDownstreamFinalizationOnlyReview(text) {
 	return mentionsDownstreamFinalization(text) && !mentionsBuildOwnedGap(text);
+}
+
+function isCompletionSatisfiedReview(text) {
+	if (mentionsBuildOwnedGap(text)) return false;
+	return mentionsCompletionSatisfied(text) && !mentionsCompletionNegation(text);
+}
+
+function mentionsCompletionSatisfied(text) {
+	return (
+		/\b(?:task|work|implementation|result)\s+is\s+complete\b/iu.test(text) ||
+		/\b(?:acceptance criteria|acceptance|task-specific acceptance)\b.{0,120}\b(?:satisfied|met|complete)\b/ius.test(
+			text,
+		) ||
+		/\bsatisfying the contract\b/iu.test(text)
+	);
+}
+
+function mentionsCompletionNegation(text) {
+	return (
+		/\b(?:not|never|no longer|without)\b.{0,80}\b(?:complete|satisfied|met|ready|accepted)\b/ius.test(text) ||
+		/\b(?:incomplete|unsatisfied|unmet)\b/iu.test(text) ||
+		/\b(?:not yet|still not)\b.{0,80}\b(?:complete|satisfied|met|ready|accepted)\b/ius.test(text)
+	);
 }
 
 function mentionsDownstreamFinalization(text) {

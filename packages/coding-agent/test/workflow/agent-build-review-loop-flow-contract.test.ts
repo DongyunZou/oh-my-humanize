@@ -35,6 +35,7 @@ interface ReviewRouteResult {
 		reviewDecisionTrailFile?: string;
 		reviewVerdict?: string;
 		reviewSummary?: string;
+		completionSatisfiedButContinued?: boolean;
 	};
 	statePatch: Array<{
 		op: "set";
@@ -592,6 +593,45 @@ describe("agent-build-review-loop flow contract", () => {
 			terminalBlockerEvidenceFiles: [],
 		});
 		expect(result.data.reason).toContain("downstream finalization");
+	});
+
+	it("routes task-complete continue reviews to downstream finalization after required rounds", async () => {
+		const cwd = await createTempDir();
+		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
+		await Bun.write(
+			path.join(cwd, "task.md"),
+			[
+				"Complete at least three meaningful build/review cycles.",
+				"Validation Command:",
+				"./workflow-output/run-validation.sh",
+			].join("\n"),
+		);
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			[
+				"ROUND 1: fixed progress evidence capture; validation=./workflow-output/run-validation.sh; result=pass",
+				"ROUND 2: added transcript regression coverage; validation=./workflow-output/run-validation.sh; result=pass",
+				"ROUND 3: tightened output artifact guard; validation=./workflow-output/run-validation.sh; result=pass",
+			].join("\n"),
+		);
+
+		const result = await runReviewRouteClassifier(cwd, {
+			verdict: "continue",
+			summary:
+				"The task is complete: progress.md has 3 lines beginning with ROUND, satisfying the contract's three concrete semantic work packages; the latest declared validation evidence records ./workflow-output/run-validation.sh passing; and round 3 added real source/test/evidence improvements without disallowed task-specific byproducts. Downstream finalization/archive artifacts are not required for this review-route completion decision.",
+		});
+
+		expect(result.data).toMatchObject({
+			decision: "complete",
+			reviewVerdict: "continue",
+			requiredRoundCount: 3,
+			completedRoundCount: 3,
+			completionSatisfiedButContinued: true,
+			setupBlockerEvidenceFiles: [],
+			externalValidationBlockerEvidenceFiles: [],
+			terminalBlockerEvidenceFiles: [],
+		});
+		expect(result.data.reason).toContain("completion satisfied");
 	});
 
 	it("routes satisfied-round-minimum finalization-only reviews to downstream finalization", async () => {
