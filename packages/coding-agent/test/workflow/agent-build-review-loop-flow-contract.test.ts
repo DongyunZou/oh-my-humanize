@@ -843,6 +843,83 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 	});
 
+	it("requires repair when the final validation attempt only has canonical logs", async () => {
+		const cwd = await createTempDir();
+		await fs.mkdir(path.join(cwd, "workflow-output", "round-1"), { recursive: true });
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			"ROUND 1: changed asset tests; validation=./workflow-output/run-validation.sh; result=pass\n",
+		);
+		await Bun.write(
+			path.join(cwd, "workflow-output", "round-1", "validation-attempt-1-stdout.txt"),
+			"first attempt stdout\n",
+		);
+		await Bun.write(
+			path.join(cwd, "workflow-output", "round-1", "validation-attempt-1-stderr.txt"),
+			"first attempt stderr\n",
+		);
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stdout.txt"), "latest stdout\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stderr.txt"), "latest stderr\n");
+		await Bun.write(
+			path.join(cwd, "workflow-output", "round-1", "validation-summary.txt"),
+			[
+				"Round 1 validation attempts",
+				"",
+				"Attempt 1:",
+				"- Logs: workflow-output/round-1/validation-attempt-1-stdout.txt and workflow-output/round-1/validation-attempt-1-stderr.txt",
+				"- Result: fail",
+				"",
+				"Attempt 2:",
+				"- Logs: workflow-output/round-1/validation-stdout.txt and workflow-output/round-1/validation-stderr.txt",
+				"- Result: pass",
+			].join("\n"),
+		);
+
+		const result = await runSemanticArchiveGuard(cwd);
+
+		expect(result.verdict).toBe("REPAIR");
+		const finding = result.data.findings.find(
+			item => item.reason === "validation rerun evidence is missing immutable attempt stdout/stderr logs",
+		);
+		expect(finding).toMatchObject({
+			file: "workflow-output/round-1",
+			missingFiles: [
+				"workflow-output/round-1/validation-attempt-2-stdout.txt",
+				"workflow-output/round-1/validation-attempt-2-stderr.txt",
+			],
+		});
+	});
+
+	it("rejects archiving when the final validation attempt only has canonical logs", async () => {
+		const cwd = await createTempDir();
+		await fs.mkdir(path.join(cwd, "workflow-output", "round-1"), { recursive: true });
+		await Bun.write(
+			path.join(cwd, "task.md"),
+			"Validation Command:\n./workflow-output/run-validation.sh\n\nNo-Code Allowed: yes\n",
+		);
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			"ROUND 1: changed asset tests; validation=./workflow-output/run-validation.sh; result=pass\n",
+		);
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-attempt-1-stdout.txt"), "fail\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-attempt-1-stderr.txt"), "err\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stdout.txt"), "pass\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stderr.txt"), "\n");
+		await Bun.write(
+			path.join(cwd, "workflow-output", "round-1", "validation-summary.txt"),
+			[
+				"Attempt 1:",
+				"- Logs: workflow-output/round-1/validation-attempt-1-stdout.txt and workflow-output/round-1/validation-attempt-1-stderr.txt",
+				"Attempt 2:",
+				"- Logs: workflow-output/round-1/validation-stdout.txt and workflow-output/round-1/validation-stderr.txt",
+			].join("\n"),
+		);
+
+		await expect(runArchiveLoop(cwd, { decision: "complete" })).rejects.toThrow(
+			"validation rerun evidence lacks immutable attempt logs",
+		);
+	});
+
 	it("requires repair when changed project files escape task allowed paths", async () => {
 		const cwd = await createTempDir();
 		await initGitRepo(cwd);
@@ -1047,6 +1124,8 @@ describe("agent-build-review-loop flow contract", () => {
 		expect(prompt).toContain("validation-attempt-<k>-stdout.txt");
 		expect(prompt).toContain("validation-attempt-<k>-stderr.txt");
 		expect(prompt).toContain("must not overwrite");
+		expect(prompt).toContain("including the final/latest attempt");
+		expect(prompt).toContain("Canonical latest logs do not count");
 	});
 
 	it("keeps downstream finalization artifacts out of reviewer-triggered build work", async () => {

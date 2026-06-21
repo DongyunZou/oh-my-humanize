@@ -161,18 +161,23 @@ async function missingValidationArtifactFindings(progressText) {
 async function missingValidationAttemptRetentionFindings() {
 	const findings = [];
 	const files = await workflowOutputFiles();
-	const rerunRoundDirs = new Set();
+	const requiredAttemptsByRound = new Map();
 	for (const file of files) {
 		const roundDir = roundEvidenceDir(file);
 		if (!roundDir) continue;
 		const text = await readOptionalText(file);
-		if (mentionsMultipleValidationAttempts(text)) rerunRoundDirs.add(roundDir);
+		const attempts = requiredValidationAttempts(text);
+		if (attempts.length > 0) addRequiredAttempts(requiredAttemptsByRound, roundDir, attempts);
 	}
-	for (const roundDir of Array.from(rerunRoundDirs).sort((left, right) => left.localeCompare(right, "en"))) {
-		if (completeValidationAttemptLogCount(files, roundDir) >= 2) continue;
+	for (const [roundDir, attempts] of Array.from(requiredAttemptsByRound.entries()).sort((left, right) =>
+		left[0].localeCompare(right[0], "en"),
+	)) {
+		const missingFiles = missingValidationAttemptLogFiles(files, roundDir, attempts);
+		if (missingFiles.length === 0) continue;
 		findings.push({
 			file: roundDir,
 			reason: "validation rerun evidence is missing immutable attempt stdout/stderr logs",
+			missingFiles,
 			policy:
 				"Every validation rerun in a round must preserve per-attempt raw logs as validation-attempt-K-stdout.txt and validation-attempt-K-stderr.txt before updating canonical latest logs.",
 		});
@@ -323,27 +328,50 @@ function usesNondurableValidationArtifact(text) {
 }
 
 function mentionsMultipleValidationAttempts(text) {
-	return VALIDATION_RERUN_PATTERNS.some(pattern => pattern.test(text));
+	return explicitValidationAttemptNumbers(text).length >= 2 || VALIDATION_RERUN_PATTERNS.some(pattern => pattern.test(text));
 }
 
-function completeValidationAttemptLogCount(files, roundDir) {
-	const attempts = new Map();
-	const prefix = `${roundDir}/validation-attempt-`;
-	for (const file of files) {
-		if (!file.startsWith(prefix)) continue;
-		const match = /^(\d+)-(stdout|stderr)\.txt$/u.exec(file.slice(prefix.length));
-		if (!match) continue;
-		const attempt = match[1] ?? "";
-		const stream = match[2] ?? "";
-		const streams = attempts.get(attempt) ?? new Set();
-		streams.add(stream);
-		attempts.set(attempt, streams);
+function requiredValidationAttempts(text) {
+	const attempts = explicitValidationAttemptNumbers(text);
+	if (attempts.length >= 2) return attempts;
+	if (!VALIDATION_RERUN_PATTERNS.some(pattern => pattern.test(text))) return [];
+	return [1, 2];
+}
+
+function explicitValidationAttemptNumbers(text) {
+	const attempts = new Set();
+	for (const match of text.matchAll(/\battempt\s+#?(\d+)\s*:/giu)) {
+		addPositiveAttempt(attempts, match[1]);
 	}
-	let completeCount = 0;
-	for (const streams of attempts.values()) {
-		if (streams.has("stdout") && streams.has("stderr")) completeCount += 1;
+	for (const match of text.matchAll(/\bvalidation-attempt-(\d+)-(?:stdout|stderr)\.txt\b/giu)) {
+		addPositiveAttempt(attempts, match[1]);
 	}
-	return completeCount;
+	return Array.from(attempts).sort((left, right) => left - right);
+}
+
+function addPositiveAttempt(attempts, value) {
+	const attempt = Number(value);
+	if (Number.isInteger(attempt) && attempt > 0) attempts.add(attempt);
+}
+
+function addRequiredAttempts(requiredAttemptsByRound, roundDir, attempts) {
+	const required = requiredAttemptsByRound.get(roundDir) ?? new Set();
+	for (const attempt of attempts) {
+		required.add(attempt);
+	}
+	requiredAttemptsByRound.set(roundDir, required);
+}
+
+function missingValidationAttemptLogFiles(files, roundDir, attempts) {
+	const present = new Set(files);
+	const missingFiles = [];
+	for (const attempt of Array.from(attempts).sort((left, right) => left - right)) {
+		for (const stream of ["stdout", "stderr"]) {
+			const file = `${roundDir}/validation-attempt-${attempt}-${stream}.txt`;
+			if (!present.has(file)) missingFiles.push(file);
+		}
+	}
+	return missingFiles;
 }
 
 function roundEvidenceDir(file) {
