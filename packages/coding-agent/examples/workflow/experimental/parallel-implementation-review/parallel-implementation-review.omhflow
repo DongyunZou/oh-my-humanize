@@ -22,6 +22,8 @@ changePolicy:
 resources:
   - path: scripts/precheck-task-contract.js
     kind: script
+  - path: scripts/materialize-plan-handoff.js
+    kind: script
   - path: scripts/run-declared-validation.js
     kind: script
   - path: scripts/lane-hard-stop-guard.js
@@ -78,6 +80,16 @@ sequence:
               state: /taskContract
       writes:
         - /plan
+  - node:
+      id: materializePlanHandoff
+      type: script
+      script:
+        language: js
+        file: scripts/materialize-plan-handoff.js
+      reads:
+        - /plan
+      writes:
+        - /planHandoff
   - parallel:
       - node:
           id: implementCore
@@ -86,14 +98,14 @@ sequence:
           model:
             role: builder
           reads:
-            - /plan
+            - /planHandoff
             - /taskContract
           prompt:
             template:
               file: prompts/implement-core.md
               bindings:
-                plan:
-                  state: /plan
+                planHandoff:
+                  state: /planHandoff
                 taskContract:
                   state: /taskContract
       - node:
@@ -103,14 +115,14 @@ sequence:
           model:
             role: builder
           reads:
-            - /plan
+            - /planHandoff
             - /taskContract
           prompt:
             template:
               file: prompts/implement-tests.md
               bindings:
-                plan:
-                  state: /plan
+                planHandoff:
+                  state: /planHandoff
                 taskContract:
                   state: /taskContract
       - node:
@@ -120,14 +132,14 @@ sequence:
           model:
             role: builder
           reads:
-            - /plan
+            - /planHandoff
             - /taskContract
           prompt:
             template:
               file: prompts/implement-docs.md
               bindings:
-                plan:
-                  state: /plan
+                planHandoff:
+                  state: /planHandoff
                 taskContract:
                   state: /taskContract
     join:
@@ -145,7 +157,7 @@ sequence:
       model:
         role: reviewer
       reads:
-        - /plan
+        - /planHandoff
         - /taskContract
         - /summary
         - /laneHardStopGuard
@@ -153,8 +165,8 @@ sequence:
         template:
           file: prompts/integration-review.md
           bindings:
-            plan:
-              state: /plan
+            planHandoff:
+              state: /planHandoff
             taskContract:
               state: /taskContract
             coreSummary:
@@ -179,7 +191,7 @@ sequence:
         language: js
         file: scripts/materialize-integration-review.js
       reads:
-        - /plan
+        - /planHandoff
         - /taskContract
         - /summary
         - /laneHardStopGuard
@@ -219,7 +231,7 @@ sequence:
       model:
         role: reviewer
       reads:
-        - /plan
+        - /planHandoff
         - /taskContract
         - /summary
         - /evidenceContract
@@ -227,8 +239,8 @@ sequence:
         template:
           file: prompts/strong-review.md
           bindings:
-            plan:
-              state: /plan
+            planHandoff:
+              state: /planHandoff
             taskContract:
               state: /taskContract
             coreSummary:

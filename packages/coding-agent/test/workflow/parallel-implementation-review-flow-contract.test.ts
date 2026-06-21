@@ -301,6 +301,79 @@ describe("parallel-implementation-review flow contract", () => {
 		expect(prompt).not.toContain("Before yielding, write `workflow-output/integration-review-<tuple-id>.json`");
 	});
 
+	it("materializes a bounded plan handoff before fan-out prompts consume scope output", async () => {
+		const cwd = await createTempDir();
+		await writeTupleFiles(cwd, "P06-T06-test");
+		const largePlan = {
+			status: "scope_plan",
+			surface_matrix: Array.from({ length: 120 }, (_, index) => ({
+				area: `area-${index}`,
+				file: `pkg/area-${index}/implementation.go`,
+				test: `pkg/area-${index}/implementation_test.go`,
+				contract: `Repository-wide contract ${index} `.repeat(40),
+			})),
+			known_conflicts_and_locks: Array.from(
+				{ length: 40 },
+				(_, index) => `lock-${index}: ${"validation ownership ".repeat(20)}`,
+			),
+			unresolved_risks: Array.from({ length: 40 }, (_, index) => `risk-${index}: ${"large repo ".repeat(30)}`),
+		};
+
+		const result = await runScript(cwd, "materialize-plan-handoff.js", {
+			state: { plan: largePlan },
+		});
+		const handoff = result.statePatch?.find(patch => patch.path === "/planHandoff")?.value;
+
+		expect(typeof handoff).toBe("string");
+		expect(new TextEncoder().encode(handoff as string).byteLength).toBeLessThanOrEqual(12 * 1024);
+		expect(handoff as string).toContain("workflow-output/scope-plan-raw-P06-T06-test.json");
+		expect(handoff as string).toContain("__omitted_items");
+		expect(result.artifacts).toEqual([
+			"workflow-output/scope-plan-raw-P06-T06-test.json",
+			"workflow-output/scope-plan-handoff-P06-T06-test.json",
+		]);
+		expect(await fileExists(path.join(cwd, "workflow-output", "scope-plan-raw-P06-T06-test.json"))).toBe(true);
+		expect(await fileExists(path.join(cwd, "workflow-output", "scope-plan-handoff-P06-T06-test.json"))).toBe(true);
+	});
+
+	it("routes fan-out and review prompts through compact plan handoff text", async () => {
+		const workflow = await Bun.file(
+			path.join(
+				import.meta.dir,
+				"../../examples/workflow/experimental/parallel-implementation-review/parallel-implementation-review.omhflow",
+			),
+		).text();
+		const prompts = await Promise.all(
+			[
+				"implement-core.md",
+				"implement-tests.md",
+				"implement-docs.md",
+				"integration-review.md",
+				"strong-review.md",
+			].map(async file =>
+				Bun.file(
+					path.join(
+						import.meta.dir,
+						"../../examples/workflow/experimental/parallel-implementation-review/parallel-implementation-review/prompts",
+						file,
+					),
+				).text(),
+			),
+		);
+
+		expect(workflow).toContain("id: materializePlanHandoff");
+		expect(workflow).toContain("- /planHandoff");
+		expect(workflow).toContain("planHandoff:\n                  state: /planHandoff");
+		expect(workflow).toContain("planHandoff:\n              state: /planHandoff");
+		expect(workflow).not.toContain("{{jsonStringify plan}}");
+		for (const prompt of prompts) {
+			expect(prompt).toContain("{{planHandoff}}");
+			expect(prompt).not.toContain("{{jsonStringify plan}}");
+		}
+		expect(prompts[0]).toContain("Do not edit validation or run-control scripts");
+		expect(prompts[2]).toContain("Do not edit validation or run-control scripts");
+	});
+
 	it("requires rollback evidence to cover every changed project file after parallel lanes join", async () => {
 		const cwd = await createTempDir();
 		await initGitRepo(cwd);

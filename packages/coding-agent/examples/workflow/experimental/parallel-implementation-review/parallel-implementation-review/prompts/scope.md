@@ -7,7 +7,11 @@ has already been recorded by the precheck node:
 
 Inspect only enough project structure to split the work safely.
 
-Create a concise plan that can be consumed by three parallel agents:
+Create a concise plan that can be consumed by three parallel agents. Keep the
+returned plan compact; the next workflow node will materialize a bounded
+handoff and a raw plan artifact. If a broad project scan produces many surfaces,
+summarize the pattern and include only the highest-signal examples instead of
+returning a full repository inventory.
 
 - core behavior or configuration change;
 - tests or executable validation;

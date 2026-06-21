@@ -13,6 +13,9 @@
 
 ### Fixed
 
+- Fixed the experimental parallel implementation workflow so broad scope plans
+  are materialized into bounded handoff artifacts before fan-out prompts consume
+  them, avoiding prompt-size failures on large repositories.
 - Fixed workflow-owned exact model bindings so nested `task` and eval `agent()` spawns inherit the workflow node model boundary instead of falling back to agent/default roles such as `pi/smol`.
 - Fixed workflow frozen resource staging so controller scripts are materialized outside a task-local workspace `TMPDIR`, preventing agent nodes from discovering and running controller-owned scripts as project artifacts.
 - Fixed workflow stop/checkpoint handling so a node runtime that ignores an abort signal cannot keep `/workflow stop` waiting forever after the stop deadline.

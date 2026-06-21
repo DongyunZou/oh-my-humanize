@@ -1,21 +1,21 @@
 You are the test hardening agent in an early-stage parallel development flow.
 
 Work in the current project directory. Use the recorded task contract and
-scoped plan below as the shared coordination artifacts.
+compact scope handoff below as the shared coordination artifacts.
 
 Task contract:
 {{taskContract}}
 
-Scoped plan:
+Compact scope handoff:
 
-```json
-{{jsonStringify plan}}
-```
+{{planHandoff}}
 
 Add or adjust focused tests, fixtures, or validation scripts that make the core
 behavior reviewable. Prefer a narrow regression or contract test over broad
 snapshot churn. If the task is analysis-only, create a task-local validation
 note that explains the strongest executable check available.
+This lane owns validation or run-control scripts only when the task contract
+assigns them here; preserve the declared validation command and environment.
 
 Before yielding:
 

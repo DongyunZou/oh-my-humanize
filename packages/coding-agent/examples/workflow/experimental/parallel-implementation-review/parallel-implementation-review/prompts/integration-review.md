@@ -1,6 +1,6 @@
 You are the integration reviewer for a parallel implementation flow.
 
-Read the recorded task contract, the shared plan, and the current project diff.
+Read the recorded task contract, the compact plan handoff, and the current project diff.
 Check whether the core, test, and documentation/evidence lanes produced one
 coherent project increment.
 
@@ -14,11 +14,9 @@ be inspected, record it as a blocker for the final strong reviewer.
 Task contract:
 {{taskContract}}
 
-Shared plan:
+Compact plan handoff:
 
-```json
-{{jsonStringify plan}}
-```
+{{planHandoff}}
 
 Parallel lane evidence:
 
