@@ -412,6 +412,43 @@ describe("agent-build-review-loop flow contract", () => {
 		expect(result.data.reason).toContain("terminal validation blocker");
 	});
 
+	it("does not route negated terminal blocker wording to reject", async () => {
+		const cwd = await createTempDir();
+		await fs.mkdir(path.join(cwd, "workflow-output", "round-1"), { recursive: true });
+		await Bun.write(
+			path.join(cwd, "task.md"),
+			[
+				"Produce at least twelve meaningful build/review cycles.",
+				"Validation Command:",
+				"./workflow-output/run-validation.sh",
+			].join("\n"),
+		);
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			"ROUND 1: fixed import.meta.glob restored query extension placement before URL hashes; validation=./workflow-output/run-validation.sh; result=pass\n",
+		);
+		await Bun.write(
+			path.join(cwd, "workflow-output", "round-1", "validation-summary.txt"),
+			["attempts=1", "exit_code=0", "result=pass"].join("\n"),
+		);
+
+		const result = await runReviewRouteClassifier(cwd, {
+			verdict: "continue",
+			summary:
+				"Continue: progress.md currently has 1 line beginning ROUND, while task.md requires at least 12 meaningful build/review cycles before archive. The declared validation command's latest recorded run passed, and no terminal external validation blocker is present, but the minimum round count and broad canary coverage are not yet satisfied.",
+		});
+
+		expect(result.data).toMatchObject({
+			decision: "continue",
+			reviewVerdict: "continue",
+			requiredRoundCount: 12,
+			setupBlockerEvidenceFiles: [],
+			externalValidationBlockerEvidenceFiles: [],
+			terminalBlockerEvidenceFiles: [],
+		});
+		expect(result.data.reason).toContain("review requested another build round");
+	});
+
 	it("routes repeated clean-copy missing dependency blockers to reject", async () => {
 		const cwd = await createTempDir();
 		for (const round of [1, 2]) {

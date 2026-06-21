@@ -273,11 +273,23 @@ async function latestRoundEvidenceFiles(fileName) {
 }
 
 function isReviewerDeclaredTerminalValidationBlocker(text) {
+	if (negatesTerminalValidationBlocker(text)) return false;
 	return (
 		/\bterminal\b.{0,120}\b(?:external|out[- ]of[- ]scope|unrelated|environment(?:al)?)\b.{0,120}\b(?:validation\s+)?blocker\b/ius.test(
 			text,
 		) ||
 		/\b(?:external|out[- ]of[- ]scope|unrelated|environment(?:al)?)\b.{0,120}\bterminal\b.{0,120}\b(?:validation\s+)?blocker\b/ius.test(
+			text,
+		)
+	);
+}
+
+function negatesTerminalValidationBlocker(text) {
+	return (
+		/\b(?:no|not|without)\b.{0,80}\bterminal\b.{0,120}\b(?:external|out[- ]of[- ]scope|unrelated|environment(?:al)?)\b.{0,120}\b(?:validation\s+)?blocker\b/ius.test(
+			text,
+		) ||
+		/\bterminal\b.{0,120}\b(?:external|out[- ]of[- ]scope|unrelated|environment(?:al)?)\b.{0,120}\b(?:validation\s+)?blocker\b.{0,80}\b(?:is|are)?\s*(?:not|absent|missing|not present|no longer present)\b/ius.test(
 			text,
 		)
 	);
