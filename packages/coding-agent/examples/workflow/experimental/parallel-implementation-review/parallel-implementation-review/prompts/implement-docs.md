@@ -20,6 +20,15 @@ Do not edit validation or run-control scripts; record operator evidence and
 risks, but leave runnable verification artifacts to the test lane or workflow
 program nodes.
 
+Evidence quality rule: mechanical inventories from parsed file names, test
+names, benchmark names, fuzz names, or wrapper package expansion are index-only.
+They may be listed as navigation aids, but they do not prove semantic
+investigation and must not be used to claim that a task's documentation,
+surface-count, or investigation requirement is satisfied. Claim semantic
+evidence only for directly inspected behavior, with exact files plus what you
+learned beyond the identifier names. If all you have is an index, record an
+unresolved integration risk instead of claiming completion.
+
 Before yielding:
 
 - record the documentation or evidence artifacts changed;

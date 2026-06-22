@@ -18,6 +18,15 @@ Do not edit validation or run-control scripts; those are owned by the test lane
 or later workflow program nodes. If one is wrong, record the risk in your lane
 artifact instead of patching it.
 
+Evidence quality rule: mechanical inventories from parsed file names, test
+names, benchmark names, fuzz names, or wrapper package expansion are index-only.
+They may help you choose where to inspect, but they do not prove semantic
+investigation and must not be used to claim that a task's surface-count or
+investigation requirement is satisfied. Claim semantic evidence only for
+directly inspected behavior, with exact files plus what you learned beyond the
+identifier names. If all you have is an index, record an unresolved integration
+risk instead of claiming completion.
+
 Before yielding:
 
 - record changed files and the rationale for each change;

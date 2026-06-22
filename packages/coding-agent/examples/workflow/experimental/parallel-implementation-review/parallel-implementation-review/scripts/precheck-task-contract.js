@@ -48,6 +48,11 @@ function workflowFinalizationRule() {
 		"- Any task requirement for a final archive, final review, final status, promotion decision, or tuple state is satisfied only by the workflow finalizer node after evidenceContractGuard and strongReview.",
 		"- Lane, integration-review, and reviewer agents must not write workflow-output artifacts whose basename starts with `final-`, starts with `final_`, contains `-final-`, starts with `strong-review`, starts with `promotion-decision`, or is `tuple-state.json`.",
 		"- Archive evidence package means lane-owned evidence, not final archive. Agents must use lane/reviewer names such as `workflow-output/docs-evidence-<tuple-id>.md`, `workflow-output/lane-archive-<lane>-<tuple-id>.md`, `workflow-output/integration-review-<tuple-id>.json`, or `workflow-output/reviewer-notes-<tuple-id>.md`; the finalizer node will later produce the final archive and final review artifacts.",
+		"",
+		"Workflow evidence quality rule:",
+		"- Mechanical inventories from parsed file names, test names, benchmarks, fuzz names, or wrapper package expansion are index-only. They may guide review, but they do not satisfy semantic investigation, implementation, documentation, or promotion evidence.",
+		"- A lane may claim semantic investigation only for directly inspected behavior. Evidence must name exact files and observed contracts, and explain what was learned beyond the identifier names.",
+		"- If a lane only has mechanical inventory evidence, it must record an unresolved integration risk instead of claiming completion.",
 	].join("\n");
 }
 

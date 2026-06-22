@@ -29,6 +29,11 @@ inventory, or when the only way the run made it visible was an index-only
 visibility mutation such as `git add -N`. Also reject when the evidence
 contract guard verdict is `REPAIR`; the guard's reasons must be treated as
 blocking pre-promotion evidence, not as optional reviewer advice.
+Also reject when a lane uses mechanical inventories from parsed file names,
+test names, benchmark names, fuzz names, or wrapper package expansion to claim
+semantic investigation, surface-count satisfaction, or production readiness.
+Those inventories are index-only unless backed by directly inspected behavior
+and exact learned contracts.
 
 If the bounded handoff is insufficient for a promotion decision, inspect the
 durable artifact paths named in the handoff and then either reject with the

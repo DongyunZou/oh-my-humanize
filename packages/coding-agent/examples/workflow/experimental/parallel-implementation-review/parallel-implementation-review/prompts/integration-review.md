@@ -29,6 +29,13 @@ Tests / validation lane:
 Docs / operator evidence lane:
 {{docsSummary}}
 
+Evidence quality rule: mechanical inventories from parsed file names, test
+names, benchmark names, fuzz names, or wrapper package expansion are index-only.
+They are not semantic investigation evidence. Treat a lane conflict or blocker
+as unresolved when a lane uses bulk parsed inventory to claim completion,
+surface-count satisfaction, or production readiness without directly inspected
+behavior and exact learned contracts.
+
 Summarize changed files, verification evidence, unresolved risks, lane/workspace
 conflicts, and the highest-priority follow-up for the final strong reviewer.
 This node records integration evidence in its review output; it does not decide

@@ -7,6 +7,7 @@ const changedFiles = await changedProjectFiles();
 const evidenceFiles = await workflowEvidenceFiles();
 const validationMatch = await validationEvidenceMatches(evidenceFiles, validationCommand, validationEnvironment);
 const staleValidationHashArtifacts = await staleValidationHashArtifactsFromEvidence(evidenceFiles);
+const mechanicalSurfaceInventoryArtifacts = await mechanicalSurfaceInventoryArtifactsFromEvidence(evidenceFiles);
 const validationArtifacts = validationMatch.passedFiles;
 const finalValidationArtifacts = validationArtifacts.filter(file => isFinalDeclaredValidationArtifact(file, tupleId));
 const trustedFinalValidationArtifacts = validationMatch.trustedFinalFiles.filter(file =>
@@ -94,6 +95,12 @@ if (!manualEvidenceAllowed && staleValidationHashArtifacts.length > 0) {
 	);
 }
 
+if (mechanicalSurfaceInventoryArtifacts.length > 0) {
+	reasons.push(
+		`mechanical surface inventory used as semantic evidence: ${mechanicalSurfaceInventoryArtifacts.join(", ")}; parsed file/test/function inventories are index-only and cannot satisfy investigation or promotion evidence`,
+	);
+}
+
 if (prematureDecisionArtifacts.length > 0) {
 	reasons.push(
 		`premature final decision artifacts found before strong review: ${prematureDecisionArtifacts.join(", ")}; only the strongReview node may write promotion artifacts`,
@@ -142,6 +149,7 @@ const diagnostic = {
 		failed_validation_artifacts: failedValidationArtifacts.slice(0, 80),
 		superseded_failed_validation_artifacts: supersededFailedValidationArtifacts.slice(0, 80),
 		stale_validation_hash_artifacts: staleValidationHashArtifacts.slice(0, 80),
+		mechanical_surface_inventory_artifacts: mechanicalSurfaceInventoryArtifacts.slice(0, 80),
 		premature_decision_artifacts: prematureDecisionArtifacts.slice(0, 80),
 		reserved_final_artifacts: reservedFinalArtifacts.slice(0, 80),
 		quarantined_reserved_final_artifacts: quarantinedReservedFinalArtifacts.slice(0, 80),
@@ -197,6 +205,11 @@ await Bun.write(
 		"Stale validation hash artifacts:",
 		...(staleValidationHashArtifacts.length > 0
 			? staleValidationHashArtifacts.map(file => `- ${file}`)
+			: ["- (none)"]),
+		"",
+		"Mechanical surface inventory artifacts:",
+		...(mechanicalSurfaceInventoryArtifacts.length > 0
+			? mechanicalSurfaceInventoryArtifacts.map(file => `- ${file}`)
 			: ["- (none)"]),
 		"",
 		"Premature final decision artifacts:",
@@ -525,6 +538,15 @@ async function staleValidationHashArtifactsFromEvidence(files) {
 	return stale.sort((left, right) => left.localeCompare(right, "en"));
 }
 
+async function mechanicalSurfaceInventoryArtifactsFromEvidence(files) {
+	const artifacts = [];
+	for (const file of files.filter(isReviewableLaneEvidenceFile)) {
+		const text = await readText(file);
+		if (mechanicalSurfaceInventoryClaim(text)) artifacts.push(file);
+	}
+	return artifacts.sort((left, right) => left.localeCompare(right, "en"));
+}
+
 async function readJson(file) {
 	try {
 		return JSON.parse(await Bun.file(file).text());
@@ -592,6 +614,34 @@ async function sha256File(file) {
 
 function isSafeWorkflowOutputPath(file) {
 	return typeof file === "string" && file.startsWith("workflow-output/") && !file.includes("..");
+}
+
+function isReviewableLaneEvidenceFile(file) {
+	return (
+		isCoreLaneEvidenceFile(file) ||
+		isDocsLaneEvidenceFile(file) ||
+		isIntegrationReviewEvidenceFile(file) ||
+		/(^|\/)(core-evidence|lane-archive-core|lane-archive-docs|reviewer-notes)[^/]*\.(?:json|md|txt)$/iu.test(file)
+	);
+}
+
+function mechanicalSurfaceInventoryClaim(text) {
+	if (!text) return false;
+	const hasMechanicalSignal =
+		/\bparsed\s+(?:go\s+)?(?:test|benchmark|fuzz|entry point|wrapper|file)/iu.test(text) ||
+		/\bcandidate test functions discovered\b/iu.test(text) ||
+		/\bwrapper package (?:argument|expansion)/iu.test(text) ||
+		/\bgate role:\s*stable_matrix_candidate\b/iu.test(text) ||
+		/"(?:candidate_test_count|selected_concrete_surface_count|archived_concrete_entry_points)"\s*:/iu.test(text);
+	if (!hasMechanicalSignal) return false;
+	const claimsSemanticCompletion =
+		/\bconcrete surfaces selected\b/iu.test(text) ||
+		/\barchived concrete\b/iu.test(text) ||
+		/\bmeets[_ -]?\d*[_ -]?surface[_ -]?requirement\b/iu.test(text) ||
+		/"meets_[^"]*_requirement"\s*:\s*true/iu.test(text) ||
+		/\bverifies (?:unit )?behavior for\b/iu.test(text);
+	const explicitlyIndexOnly = /\bindex[-_ ]only\b/iu.test(text) || /\bnavigation aids?\b/iu.test(text);
+	return claimsSemanticCompletion || !explicitlyIndexOnly;
 }
 
 async function fileValidationStatus(file, command, environment) {

@@ -51,6 +51,7 @@ interface ScriptResult {
 			failed_validation_artifacts?: string[];
 			lane_hard_stop_artifacts?: string[];
 			ignored_nonterminal_lane_hard_stop_artifacts?: string[];
+			mechanical_surface_inventory_artifacts?: string[];
 			rollback_artifacts?: string[];
 			missing_rollback_files?: string[];
 			stale_validation_hash_artifacts?: string[];
@@ -101,8 +102,11 @@ describe("parallel-implementation-review flow contract", () => {
 
 		expect(typeof taskContract).toBe("string");
 		expect(taskContract).toContain("Workflow-owned finalization rule");
+		expect(taskContract).toContain("Workflow evidence quality rule");
 		expect(taskContract).toContain("final archive");
 		expect(taskContract).toContain("finalizer node");
+		expect(taskContract).toContain("Mechanical inventories from parsed file names");
+		expect(taskContract).toContain("index-only");
 		expect(taskContract).toContain("must not write workflow-output artifacts whose basename starts with `final-`");
 		expect(taskContract).toContain("Archive evidence package means lane-owned evidence, not final archive");
 		expect(taskContract).toContain("workflow-output/lane-archive-<lane>-<tuple-id>.md");
@@ -396,6 +400,56 @@ describe("parallel-implementation-review flow contract", () => {
 				generic_validation_aliases: ["workflow-output/validation.txt"],
 			},
 		});
+	});
+
+	it("rejects mechanical surface inventories as semantic lane evidence", async () => {
+		const cwd = await createTempDir();
+		await writeReadyEvidence(cwd, "P06-T06-test");
+		await Bun.write(
+			path.join(cwd, "workflow-output", "core-lane-P06-T06-test.json"),
+			`${JSON.stringify(
+				{
+					tuple_id: "P06-T06-test",
+					producer_node: "implementCore",
+					status: "complete",
+					surface_audit: {
+						candidate_test_count: 3567,
+						selected_concrete_surface_count: 430,
+						meets_340_surface_requirement: true,
+						surface_inventory_path: "workflow-output/core-evidence-P06-T06-test.md",
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		await Bun.write(
+			path.join(cwd, "workflow-output", "core-evidence-P06-T06-test.md"),
+			[
+				"# Core lane evidence",
+				"Candidate test functions discovered in declared matrix packages: 3567",
+				"Concrete surfaces selected and named below: 430",
+				"1. `pkg/example/example_test.go` `TestExample`: Verifies unit behavior for Example within the declared stable matrix. Gate role: stable_matrix_candidate.",
+			].join("\n"),
+		);
+		await Bun.write(
+			path.join(cwd, "workflow-output", "docs-evidence-P06-T06-test.md"),
+			[
+				"# Docs evidence",
+				"Concrete scoped surface inventory: 3720 parsed Go test/benchmark/fuzz entry points across wrapper package arguments.",
+				"Archived concrete entry points are listed as production evidence.",
+			].join("\n"),
+		);
+
+		const result = await runScript(cwd, "evidence-contract-guard.js", {});
+
+		expect(result.verdict).toBe("REPAIR");
+		expect(result.summary).toContain("mechanical surface inventory used as semantic evidence");
+		expect(result.data?.checked_inputs?.mechanical_surface_inventory_artifacts).toEqual([
+			"workflow-output/core-evidence-P06-T06-test.md",
+			"workflow-output/core-lane-P06-T06-test.json",
+			"workflow-output/docs-evidence-P06-T06-test.md",
+		]);
 	});
 
 	it("reports any premature final namespace artifact as repair evidence before strong review", async () => {
@@ -726,7 +780,15 @@ describe("parallel-implementation-review flow contract", () => {
 			expect(prompt).toContain("{{planHandoff}}");
 			expect(prompt).not.toContain("{{jsonStringify plan}}");
 		}
+		expect(prompts[0]).toContain("mechanical inventories");
+		expect(prompts[0]).toContain("index-only");
+		expect(prompts[2]).toContain("mechanical inventories");
+		expect(prompts[2]).toContain("index-only");
+		expect(prompts[3]).toContain("mechanical inventories");
+		expect(prompts[3]).toContain("index-only");
 		expect(prompts[4]).toContain("{{strongReviewPacket}}");
+		expect(prompts[4]).toContain("mechanical inventories");
+		expect(prompts[4]).toContain("index-only");
 		expect(prompts[4]).not.toContain("{{taskContract}}");
 		expect(prompts[4]).not.toContain("{{planHandoff}}");
 		expect(prompts[4]).not.toContain("{{reviewHandoff}}");
