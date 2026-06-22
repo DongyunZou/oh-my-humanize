@@ -88,6 +88,8 @@ describe("parallel-implementation-review flow contract", () => {
 		expect(taskContract).toContain("final archive");
 		expect(taskContract).toContain("finalizer node");
 		expect(taskContract).toContain("must not write workflow-output artifacts whose basename starts with `final-`");
+		expect(taskContract).toContain("Archive evidence package means lane-owned evidence, not final archive");
+		expect(taskContract).toContain("workflow-output/lane-archive-<lane>-<tuple-id>.md");
 	});
 
 	it("writes tuple-scoped validation stdout and stderr artifacts without generic txt aliases", async () => {
@@ -211,6 +213,19 @@ describe("parallel-implementation-review flow contract", () => {
 				premature_decision_artifacts: ["workflow-output/P06-T06-test-final-validation.json"],
 			},
 		});
+	});
+
+	it("reports premature final archive artifacts as repair evidence before strong review", async () => {
+		const cwd = await createTempDir();
+		await writeReadyEvidence(cwd, "P06-T06-test");
+		await Bun.write(path.join(cwd, "workflow-output", "final-archive-P06-T06-test.md"), "# premature archive\n");
+
+		const result = await runScript(cwd, "evidence-contract-guard.js", {});
+
+		expect(result.verdict).toBe("REPAIR");
+		expect(result.data?.checked_inputs?.premature_decision_artifacts).toEqual([
+			"workflow-output/final-archive-P06-T06-test.md",
+		]);
 	});
 
 	it("materializes tuple-scoped integration review evidence from the completed review activation", async () => {

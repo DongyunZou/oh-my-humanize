@@ -43,6 +43,12 @@ Before yielding:
   `workflow-output/tuple-state.json`, or any workflow-output artifact whose
   filename starts with `evidence-contract-guard`, `final-`, `final_`, or
   `strong-review`. Those filenames are owned only by later workflow nodes;
+- if the task asks you to archive an evidence package, use lane-owned evidence
+  only. Safe names include `workflow-output/core-lane-<tuple-id>.json`,
+  `workflow-output/core-evidence-<tuple-id>.md`, or
+  `workflow-output/lane-archive-core-<tuple-id>.md`. Never use `final`,
+  `promotion`, `strong-review`, `tuple-state`, or `evidence-contract-guard` in a
+  lane-authored filename;
 - if you run validation, record the exact task `Validation Command` string in a
   JSON field named `command`, the exact task `Validation Environment` key/value
   pairs in `environment`, and the pass/fail value in `result`; do not write a

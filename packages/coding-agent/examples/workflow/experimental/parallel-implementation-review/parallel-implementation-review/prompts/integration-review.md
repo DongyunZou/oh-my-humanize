@@ -34,6 +34,12 @@ conflicts, and the highest-priority follow-up for the final strong reviewer.
 This node records integration evidence in its review output; it does not decide
 promotion and must not create final promotion artifacts such as
 `workflow-output/final-review.*` or `workflow-output/final-archive.*`.
+If you need to refer to an archive or evidence package, describe it in your
+review text or use only reviewer-scoped names such as
+`workflow-output/reviewer-notes-<tuple-id>.md`; never create a file whose basename
+starts with `final-`, starts with `final_`, contains `-final-`, starts with
+`strong-review`, starts with `promotion-decision`, or equals
+`tuple-state.json`.
 It must also not write `workflow-output/validation-<tuple-id>.json` or
 `workflow-output/evidence-contract-guard-<tuple-id>.json`; the following
 workflow program nodes own those artifacts.

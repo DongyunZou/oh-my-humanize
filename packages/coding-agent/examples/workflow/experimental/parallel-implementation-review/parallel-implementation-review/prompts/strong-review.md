@@ -55,6 +55,10 @@ Do not write `workflow-output/final-review-<tuple-id>.json`,
 `workflow-output/strong-review-<tuple-id>.json`, or final archive files. This
 node owns the verdict text; the following finalizer node owns durable final
 review artifacts.
+If you mention an archive or evidence package, keep it in the verdict text only;
+do not create files whose basename starts with `final-`, starts with `final_`,
+contains `-final-`, starts with `strong-review`, starts with
+`promotion-decision`, or equals `tuple-state.json`.
 
 Write a concise review first, then put exactly one token on the final non-empty
 line: `reject` or `promote`.
