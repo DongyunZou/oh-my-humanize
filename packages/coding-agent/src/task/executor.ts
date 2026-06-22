@@ -8,7 +8,7 @@ import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentTelemetryConfig, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model, Usage } from "@oh-my-pi/pi-ai";
-import { logger, popLoopPhase, prompt, pushLoopPhase, untilAborted } from "@oh-my-pi/pi-utils";
+import { logger, popLoopPhase, prompt, pushLoopPhase } from "@oh-my-pi/pi-utils";
 import type { Rule } from "../capability/rule";
 import { ModelRegistry } from "../config/model-registry";
 import {
@@ -2301,9 +2301,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					// Hard abort (caller signal / wall-clock / budget): terminal teardown.
 					registry.setStatus(id, "aborted");
 					try {
-						await untilAborted(AbortSignal.timeout(5000), () => session.dispose());
-					} catch {
-						// Ignore cleanup errors
+						await session.dispose();
+					} catch (error) {
+						logger.warn("runSubprocess: aborted subagent session dispose failed", { id, error: String(error) });
 					}
 				} else if (worktree !== undefined || completionLifecycle === "park") {
 					// Isolated and workflow-owned runs are not live follow-up agents.
@@ -2313,9 +2313,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					// wrapper skips unregister.
 					registry.setStatus(id, "parked");
 					try {
-						await untilAborted(AbortSignal.timeout(5000), () => session.dispose());
-					} catch {
-						// Ignore cleanup errors
+						await session.dispose();
+					} catch (error) {
+						logger.warn("runSubprocess: parked subagent session dispose failed", { id, error: String(error) });
 					}
 					registry.detachSession(id);
 				} else {

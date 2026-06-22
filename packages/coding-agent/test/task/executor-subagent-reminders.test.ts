@@ -115,6 +115,7 @@ function mockCreateAgentSession(session: AgentSession) {
 
 describe("runSubprocess yield reminders", () => {
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.restoreAllMocks();
 	});
 
@@ -137,6 +138,50 @@ describe("runSubprocess yield reminders", () => {
 		} as unknown as ModelRegistry,
 		enableLsp: false,
 	};
+
+	it("does not finish a parked workflow subagent before its session resources are disposed", async () => {
+		vi.useFakeTimers();
+		const disposeStarted = Promise.withResolvers<void>();
+		const disposeReleased = Promise.withResolvers<void>();
+		let runSettled = false;
+		const session = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-yield",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { ok: true } },
+				},
+				isError: false,
+			});
+		});
+		session.dispose = async () => {
+			disposeStarted.resolve();
+			await disposeReleased.promise;
+		};
+		mockCreateAgentSession(session);
+
+		const run = runSubprocess({
+			...baseOptions,
+			id: "subagent-parked-workflow-cleanup",
+			completionLifecycle: "park",
+		});
+		void run.then(() => {
+			runSettled = true;
+		});
+
+		await disposeStarted.promise;
+		vi.advanceTimersByTime(10_000);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(runSettled).toBe(false);
+		disposeReleased.resolve();
+		const result = await run;
+		expect(result.exitCode).toBe(0);
+		expect(runSettled).toBe(true);
+	});
 
 	it("waits for session_start extension user messages before prompting the subagent", async () => {
 		let extensionSendUserMessage: ExtensionActions["sendUserMessage"] | undefined;

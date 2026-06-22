@@ -6,6 +6,7 @@ const manualEvidenceAllowed = hasHeadingOrField(taskText, "manual evidence allow
 const changedFiles = await changedProjectFiles();
 const evidenceFiles = await workflowEvidenceFiles();
 const validationMatch = await validationEvidenceMatches(evidenceFiles, validationCommand, validationEnvironment);
+const staleValidationHashArtifacts = await staleValidationHashArtifactsFromEvidence(evidenceFiles);
 const validationArtifacts = validationMatch.passedFiles;
 const finalValidationArtifacts = validationArtifacts.filter(file => isFinalDeclaredValidationArtifact(file, tupleId));
 const trustedFinalValidationArtifacts = validationMatch.trustedFinalFiles.filter(file =>
@@ -87,6 +88,12 @@ if (!manualEvidenceAllowed && failedValidationArtifacts.length > 0) {
 	);
 }
 
+if (!manualEvidenceAllowed && staleValidationHashArtifacts.length > 0) {
+	reasons.push(
+		`stale validation evidence hashes found: ${staleValidationHashArtifacts.join(", ")}; validation artifacts must still match the hashes recorded by their producer`,
+	);
+}
+
 if (prematureDecisionArtifacts.length > 0) {
 	reasons.push(
 		`premature final decision artifacts found before strong review: ${prematureDecisionArtifacts.join(", ")}; only the strongReview node may write promotion artifacts`,
@@ -134,6 +141,7 @@ const diagnostic = {
 		ignored_nonterminal_lane_hard_stop_artifacts: laneHardStopResult.nonterminal.slice(0, 80),
 		failed_validation_artifacts: failedValidationArtifacts.slice(0, 80),
 		superseded_failed_validation_artifacts: supersededFailedValidationArtifacts.slice(0, 80),
+		stale_validation_hash_artifacts: staleValidationHashArtifacts.slice(0, 80),
 		premature_decision_artifacts: prematureDecisionArtifacts.slice(0, 80),
 		reserved_final_artifacts: reservedFinalArtifacts.slice(0, 80),
 		quarantined_reserved_final_artifacts: quarantinedReservedFinalArtifacts.slice(0, 80),
@@ -184,6 +192,11 @@ await Bun.write(
 		"Superseded failed validation artifacts:",
 		...(supersededFailedValidationArtifacts.length > 0
 			? supersededFailedValidationArtifacts.map(file => `- ${file}`)
+			: ["- (none)"]),
+		"",
+		"Stale validation hash artifacts:",
+		...(staleValidationHashArtifacts.length > 0
+			? staleValidationHashArtifacts.map(file => `- ${file}`)
 			: ["- (none)"]),
 		"",
 		"Premature final decision artifacts:",
@@ -497,6 +510,67 @@ async function validationEvidenceMatches(files, command, environment) {
 		}
 	}
 	return { passedFiles, failedFiles, trustedFinalFiles, reasons };
+}
+
+async function staleValidationHashArtifactsFromEvidence(files) {
+	const stale = [];
+	for (const file of files.filter(filePath => filePath.endsWith(".json"))) {
+		const data = await readJson(file);
+		if (!data) continue;
+		for (const entry of recordedValidationHashes(data)) {
+			const actual = await sha256File(entry.path);
+			if (!actual || actual !== entry.sha256) stale.push(`${file} -> ${entry.path}`);
+		}
+	}
+	return stale.sort((left, right) => left.localeCompare(right, "en"));
+}
+
+async function readJson(file) {
+	try {
+		return JSON.parse(await Bun.file(file).text());
+	} catch {
+		return null;
+	}
+}
+
+function recordedValidationHashes(data) {
+	const hashes = new Map();
+	addHashMap(hashes, data?.artifact_hashes);
+	addHashMap(hashes, data?.validation?.evidence_hashes);
+	addHashMap(hashes, data?.validation?.reusedArtifactHashes);
+	addCoverageProfileHashes(hashes, data?.coverage_profiles);
+	addCoverageProfileHashes(hashes, data?.validation?.coverage_profiles);
+	addCoverageProfileHashes(hashes, data?.validation?.reusedCoverageProfiles);
+	return Array.from(hashes.entries()).map(([artifactPath, sha256]) => ({ path: artifactPath, sha256 }));
+}
+
+function addHashMap(hashes, value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return;
+	for (const [artifactPath, hash] of Object.entries(value)) {
+		if (typeof hash === "string" && isSafeWorkflowOutputPath(artifactPath)) hashes.set(artifactPath, hash);
+	}
+}
+
+function addCoverageProfileHashes(hashes, value) {
+	if (!Array.isArray(value)) return;
+	for (const profile of value) {
+		const artifactPath = typeof profile?.path === "string" ? profile.path : "";
+		const hash = typeof profile?.sha256 === "string" ? profile.sha256 : "";
+		if (hash && isSafeWorkflowOutputPath(artifactPath)) hashes.set(artifactPath, hash);
+	}
+}
+
+async function sha256File(file) {
+	try {
+		const bytes = new Uint8Array(await Bun.file(file).arrayBuffer());
+		return new Bun.SHA256().update(bytes).digest("hex");
+	} catch {
+		return "";
+	}
+}
+
+function isSafeWorkflowOutputPath(file) {
+	return typeof file === "string" && file.startsWith("workflow-output/") && !file.includes("..");
 }
 
 async function fileValidationStatus(file, command, environment) {

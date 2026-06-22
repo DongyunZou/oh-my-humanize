@@ -35,6 +35,9 @@ interface ScriptResult {
 			exitCode?: number;
 			stdoutArtifact?: string;
 			stderrArtifact?: string;
+			reusedFromTestLane?: string;
+			reusedArtifactHashes?: Record<string, string>;
+			reusedCoverageProfiles?: Array<{ path: string; sha256: string }>;
 		};
 		checked_inputs?: {
 			generic_validation_aliases?: string[];
@@ -50,6 +53,7 @@ interface ScriptResult {
 			ignored_nonterminal_lane_hard_stop_artifacts?: string[];
 			rollback_artifacts?: string[];
 			missing_rollback_files?: string[];
+			stale_validation_hash_artifacts?: string[];
 		};
 	};
 }
@@ -309,6 +313,68 @@ describe("parallel-implementation-review flow contract", () => {
 			stdoutArtifact: "workflow-output/test-validation-P06-T06-test.stdout",
 			stderrArtifact: "workflow-output/test-validation-P06-T06-test.stderr",
 			reusedFromTestLane: "workflow-output/tests-lane-P06-T06-test.json",
+		});
+		expect(await fileExists(path.join(cwd, "workflow-output", "should-not-rerun"))).toBe(false);
+		expect(await fileExists(path.join(cwd, "workflow-output", "validation-P06-T06-test.stdout"))).toBe(false);
+	});
+
+	it("reuses nested test-lane validation hashes without rerunning the same command", async () => {
+		const cwd = await createTempDir();
+		await initGitRepo(cwd);
+		await writeTupleFiles(cwd, "P06-T06-test");
+		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
+		const command = "bash -lc 'printf rerun > workflow-output/should-not-rerun; exit 42'";
+		await Bun.write(path.join(cwd, "task.md"), `Validation Command:\n${command}\n`);
+		await Bun.write(path.join(cwd, "workflow-output", "nested-validation-P06-T06-test.stdout"), "passed once\n");
+		await Bun.write(path.join(cwd, "workflow-output", "nested-validation-P06-T06-test.stderr"), "");
+		await Bun.write(path.join(cwd, "workflow-output", "nested-validation-P06-T06-test.exitcode"), "0\n");
+		await Bun.write(path.join(cwd, "workflow-output", "nested-cover-P06-T06-test.out"), "mode: atomic\n");
+		const stdoutPath = "workflow-output/nested-validation-P06-T06-test.stdout";
+		const stderrPath = "workflow-output/nested-validation-P06-T06-test.stderr";
+		const exitCodePath = "workflow-output/nested-validation-P06-T06-test.exitcode";
+		const coveragePath = "workflow-output/nested-cover-P06-T06-test.out";
+		const coverageHash = await sha256File(path.join(cwd, coveragePath));
+		const laneArtifact = {
+			tuple_id: "P06-T06-test",
+			producer_node: "implementTests",
+			status: "completed",
+			validation: {
+				command,
+				environment: {},
+				result: "pass",
+				exit_code: 0,
+				stdout_path: stdoutPath,
+				stderr_path: stderrPath,
+				exit_code_path: exitCodePath,
+				evidence_hashes: {
+					[stdoutPath]: await sha256File(path.join(cwd, stdoutPath)),
+					[stderrPath]: await sha256File(path.join(cwd, stderrPath)),
+					[exitCodePath]: await sha256File(path.join(cwd, exitCodePath)),
+				},
+				coverage_profiles: [{ path: coveragePath, sha256: coverageHash }],
+			},
+		};
+		await Bun.write(
+			path.join(cwd, "workflow-output", "tests-lane-P06-T06-test.json"),
+			`${JSON.stringify(laneArtifact, null, 2)}\n`,
+		);
+
+		const result = await runScript(cwd, "run-declared-validation.js", {});
+
+		expect(result.verdict).toBe("PASS");
+		expect(result.data?.validation).toMatchObject({
+			result: "passed",
+			exitCode: 0,
+			stdoutArtifact: stdoutPath,
+			stderrArtifact: stderrPath,
+			reusedFromTestLane: "workflow-output/tests-lane-P06-T06-test.json",
+			reusedArtifactHashes: {
+				[stdoutPath]: laneArtifact.validation.evidence_hashes[stdoutPath],
+				[stderrPath]: laneArtifact.validation.evidence_hashes[stderrPath],
+				[exitCodePath]: laneArtifact.validation.evidence_hashes[exitCodePath],
+				[coveragePath]: coverageHash,
+			},
+			reusedCoverageProfiles: [{ path: coveragePath, sha256: coverageHash }],
 		});
 		expect(await fileExists(path.join(cwd, "workflow-output", "should-not-rerun"))).toBe(false);
 		expect(await fileExists(path.join(cwd, "workflow-output", "validation-P06-T06-test.stdout"))).toBe(false);
@@ -755,6 +821,62 @@ describe("parallel-implementation-review flow contract", () => {
 		expect(guardResult.verdict).toBe("REPAIR");
 		expect(guardResult.data?.checked_inputs?.failed_validation_artifacts).toEqual([
 			"workflow-output/validation-P06-T06-test.json",
+		]);
+		expect(finalResult.verdict).toBe("reject");
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			status: "rejected",
+			terminal: true,
+			verdict: "reject",
+			evidence_contract_verdict: "REPAIR",
+		});
+	});
+
+	it("rejects promotion when recorded validation evidence hashes are stale", async () => {
+		const cwd = await createTempDir();
+		await writeReadyEvidence(cwd, "P06-T06-test");
+		const coveragePath = "workflow-output/unit-cover-P06-T06-test.out";
+		const stdoutPath = "workflow-output/test-validation-P06-T06-test.stdout";
+		await Bun.write(path.join(cwd, stdoutPath), "original stdout\n");
+		await Bun.write(path.join(cwd, coveragePath), "mode: atomic\noriginal\n");
+		const stdoutHash = await sha256File(path.join(cwd, stdoutPath));
+		const coverageHash = await sha256File(path.join(cwd, coveragePath));
+		await Bun.write(
+			path.join(cwd, "workflow-output", "tests-lane-P06-T06-test.json"),
+			`${JSON.stringify(
+				{
+					tuple_id: "P06-T06-test",
+					producer_node: "implementTests",
+					status: "completed",
+					validation: {
+						command: "true",
+						environment: {},
+						result: "pass",
+						exit_code: 0,
+						stdout_path: stdoutPath,
+						evidence_hashes: {
+							[stdoutPath]: stdoutHash,
+						},
+						coverage_profiles: [{ path: coveragePath, sha256: coverageHash }],
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		await Bun.write(path.join(cwd, coveragePath), "mode: atomic\noverwritten by duplicate validation\n");
+
+		const guardResult = await runScript(cwd, "evidence-contract-guard.js", {});
+		const finalResult = await runScript(cwd, "finalize-strong-review.js", {
+			state: {
+				verdict: { verdict: "promote" },
+				evidenceContract: guardResult.data,
+			},
+		});
+
+		expect(guardResult.verdict).toBe("REPAIR");
+		expect(guardResult.summary).toContain("stale validation evidence hashes");
+		expect(guardResult.data?.checked_inputs?.stale_validation_hash_artifacts).toEqual([
+			"workflow-output/tests-lane-P06-T06-test.json -> workflow-output/unit-cover-P06-T06-test.out",
 		]);
 		expect(finalResult.verdict).toBe("reject");
 		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({

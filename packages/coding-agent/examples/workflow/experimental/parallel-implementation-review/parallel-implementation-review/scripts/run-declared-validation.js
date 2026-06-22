@@ -176,7 +176,7 @@ async function reusableExactTestLaneValidation({ tupleId, validationCommand, val
 			exitCodeArtifact: stringField(validation, "exit_code_path") || stringField(validation, "exitCodeArtifact"),
 			runtimeEnvironment: objectField(validation, "runtime_environment"),
 			recordedHashes,
-			coverageProfiles: Array.isArray(data.coverage_profiles) ? data.coverage_profiles : [],
+			coverageProfiles: recordedCoverageProfiles(data),
 		};
 	}
 	return null;
@@ -226,19 +226,47 @@ function environmentMatches(actual, expected) {
 
 function recordedValidationHashes(data) {
 	const hashes = {};
-	if (data?.artifact_hashes && typeof data.artifact_hashes === "object" && !Array.isArray(data.artifact_hashes)) {
-		for (const [filePath, hash] of Object.entries(data.artifact_hashes)) {
-			if (typeof hash === "string" && isSafeWorkflowOutputPath(filePath)) hashes[filePath] = hash;
-		}
-	}
-	if (Array.isArray(data?.coverage_profiles)) {
-		for (const profile of data.coverage_profiles) {
+	addHashMap(hashes, data?.artifact_hashes);
+	addHashMap(hashes, data?.validation?.evidence_hashes);
+	addHashMap(hashes, data?.validation?.reusedArtifactHashes);
+	addCoverageProfileHashes(hashes, data?.coverage_profiles);
+	addCoverageProfileHashes(hashes, data?.validation?.coverage_profiles);
+	addCoverageProfileHashes(hashes, data?.validation?.reusedCoverageProfiles);
+	return hashes;
+}
+
+function recordedCoverageProfiles(data) {
+	const profiles = [];
+	const seen = new Set();
+	for (const source of [data?.coverage_profiles, data?.validation?.coverage_profiles, data?.validation?.reusedCoverageProfiles]) {
+		if (!Array.isArray(source)) continue;
+		for (const profile of source) {
 			const filePath = typeof profile?.path === "string" ? profile.path : "";
 			const hash = typeof profile?.sha256 === "string" ? profile.sha256 : "";
-			if (hash && isSafeWorkflowOutputPath(filePath)) hashes[filePath] = hash;
+			if (!hash || !isSafeWorkflowOutputPath(filePath)) continue;
+			const key = `${filePath}\0${hash}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			profiles.push({ path: filePath, sha256: hash });
 		}
 	}
-	return hashes;
+	return profiles;
+}
+
+function addHashMap(hashes, value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return;
+	for (const [filePath, hash] of Object.entries(value)) {
+		if (typeof hash === "string" && isSafeWorkflowOutputPath(filePath)) hashes[filePath] = hash;
+	}
+}
+
+function addCoverageProfileHashes(hashes, value) {
+	if (!Array.isArray(value)) return;
+	for (const profile of value) {
+		const filePath = typeof profile?.path === "string" ? profile.path : "";
+		const hash = typeof profile?.sha256 === "string" ? profile.sha256 : "";
+		if (hash && isSafeWorkflowOutputPath(filePath)) hashes[filePath] = hash;
+	}
 }
 
 async function recordedHashesStillMatch(hashes) {
