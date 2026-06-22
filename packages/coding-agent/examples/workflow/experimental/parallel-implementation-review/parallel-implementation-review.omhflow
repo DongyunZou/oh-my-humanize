@@ -34,6 +34,8 @@ resources:
     kind: script
   - path: scripts/evidence-contract-guard.js
     kind: script
+  - path: scripts/materialize-strong-review-packet.js
+    kind: script
   - path: scripts/finalize-strong-review.js
     kind: script
   - path: prompts/scope.md
@@ -226,28 +228,32 @@ sequence:
       writes:
         - /evidenceContract
   - node:
+      id: materializeStrongReviewPacket
+      type: script
+      script:
+        language: js
+        file: scripts/materialize-strong-review-packet.js
+      reads:
+        - /planHandoff
+        - /taskContract
+        - /reviewHandoff
+        - /evidenceContract
+      writes:
+        - /strongReviewPacket
+  - node:
       id: strongReview
       type: review
       agent: reviewer
       model:
         role: reviewer
       reads:
-        - /planHandoff
-        - /taskContract
-        - /reviewHandoff
-        - /evidenceContract
+        - /strongReviewPacket
       prompt:
         template:
           file: prompts/strong-review.md
           bindings:
-            planHandoff:
-              state: /planHandoff
-            taskContract:
-              state: /taskContract
-            reviewHandoff:
-              state: /reviewHandoff
-            evidenceContract:
-              state: /evidenceContract
+            strongReviewPacket:
+              state: /strongReviewPacket
       gates:
         - reject
         - promote

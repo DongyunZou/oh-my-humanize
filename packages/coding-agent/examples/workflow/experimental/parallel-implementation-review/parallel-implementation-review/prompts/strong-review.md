@@ -1,25 +1,11 @@
 You are the final strong reviewer for a parallel implementation flow.
 
-Read the recorded task contract, the compact plan handoff, the current project
-diff, and the bounded review handoff left by the parallel agents and integration
-reviewer.
+Read the bounded strong-review packet below. It summarizes the task contract,
+compact plan handoff, current project diff, lane handoff, validation evidence,
+rollback coverage, and evidence contract guard. Raw evidence is intentionally
+not inlined; durable artifact paths are listed in the packet for inspection.
 
-Task contract:
-{{taskContract}}
-
-Compact plan handoff:
-
-{{planHandoff}}
-
-Bounded review handoff:
-
-{{reviewHandoff}}
-
-Evidence contract guard:
-
-```json
-{{jsonStringify evidenceContract}}
-```
+{{strongReviewPacket}}
 
 Return `promote` only when:
 

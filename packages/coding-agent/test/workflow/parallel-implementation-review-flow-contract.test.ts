@@ -432,6 +432,62 @@ describe("parallel-implementation-review flow contract", () => {
 		expect(() => validateWorkflowActivationOutput(result)).not.toThrow();
 	});
 
+	it("materializes a single bounded strong-review packet from large final evidence", async () => {
+		const cwd = await createTempDir();
+		await writeTupleFiles(cwd, "P06-T06-test");
+		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
+		const largePlanHandoff = [
+			"workflow-output/scope-plan-handoff-P06-T06-test.json",
+			"surface contract ".repeat(1200),
+		].join("\n");
+		const largeReviewHandoff = [
+			"workflow-output/review-handoff-P06-T06-test.json",
+			"lane summary ".repeat(2200),
+		].join("\n");
+		const largeTaskContract = [
+			"Objective:",
+			"Improve a real project behavior.",
+			"Acceptance Criteria:",
+			"- Keep evidence complete.",
+			"Detailed scope:",
+			"task details ".repeat(1600),
+		].join("\n");
+		const evidenceContract = {
+			verdict: "READY",
+			reasons: [],
+			changed_files: Array.from({ length: 160 }, (_, index) => `src/changed-${index}.ts`),
+			evidence_files: Array.from({ length: 260 }, (_, index) => `workflow-output/evidence-${index}.json`),
+			checked_inputs: {
+				lane_artifacts: Array.from({ length: 120 }, (_, index) => `workflow-output/lane-${index}.json`),
+				validation_artifacts: Array.from({ length: 120 }, (_, index) => `workflow-output/validation-${index}.json`),
+			},
+		};
+
+		const result = await runScript(cwd, "materialize-strong-review-packet.js", {
+			state: {
+				planHandoff: largePlanHandoff,
+				taskContract: largeTaskContract,
+				reviewHandoff: largeReviewHandoff,
+				evidenceContract,
+			},
+		});
+		const packet = result.statePatch?.find(patch => patch.path === "/strongReviewPacket")?.value;
+
+		expect(typeof packet).toBe("string");
+		expect(new TextEncoder().encode(packet as string).byteLength).toBeLessThanOrEqual(18 * 1024);
+		expect(packet as string).toContain("workflow-output/strong-review-packet-P06-T06-test.md");
+		expect(packet as string).toContain("workflow-output/review-handoff-P06-T06-test.json");
+		expect(packet as string).toContain("Evidence contract verdict: READY");
+		expect(packet as string).toContain("changed files omitted");
+		expect(packet as string).not.toContain("lane summary ".repeat(500));
+		expect(result.data).toMatchObject({
+			artifact: "workflow-output/strong-review-packet-P06-T06-test.md",
+			producer_node: "materializeStrongReviewPacket",
+			packet_bytes: expect.any(Number),
+		});
+		expect(() => validateWorkflowActivationOutput(result)).not.toThrow();
+	});
+
 	it("accepts materialized integration review evidence for the evidence contract", async () => {
 		const cwd = await createTempDir();
 		await writeReadyEvidence(cwd, "P06-T06-test", { integrationReviewArtifact: false });
@@ -534,17 +590,25 @@ describe("parallel-implementation-review flow contract", () => {
 		);
 
 		expect(workflow).toContain("id: materializePlanHandoff");
-		expect(workflow).toContain("reviewHandoff:\n              state: /reviewHandoff");
+		expect(workflow).toContain("id: materializeStrongReviewPacket");
+		expect(workflow).toContain("- /reviewHandoff");
+		expect(workflow).toContain("strongReviewPacket:\n              state: /strongReviewPacket");
 		expect(workflow).toContain("- /planHandoff");
 		expect(workflow).toContain("planHandoff:\n                  state: /planHandoff");
 		expect(workflow).toContain("planHandoff:\n              state: /planHandoff");
+		expect(workflow).not.toContain("taskContract:\n              state: /taskContract\n            reviewHandoff:");
+		expect(workflow).not.toContain("evidenceContract:\n              state: /evidenceContract\n      gates:");
 		expect(workflow).not.toContain("integrationSummary:\n              output:");
 		expect(workflow).not.toContain("{{jsonStringify plan}}");
-		for (const prompt of prompts) {
+		for (const prompt of prompts.slice(0, 4)) {
 			expect(prompt).toContain("{{planHandoff}}");
 			expect(prompt).not.toContain("{{jsonStringify plan}}");
 		}
-		expect(prompts[4]).toContain("{{reviewHandoff}}");
+		expect(prompts[4]).toContain("{{strongReviewPacket}}");
+		expect(prompts[4]).not.toContain("{{taskContract}}");
+		expect(prompts[4]).not.toContain("{{planHandoff}}");
+		expect(prompts[4]).not.toContain("{{reviewHandoff}}");
+		expect(prompts[4]).not.toContain("{{jsonStringify evidenceContract}}");
 		expect(prompts[4]).not.toContain("{{integrationSummary}}");
 		expect(prompts[4]).not.toContain("{{coreSummary}}");
 		expect(prompts[4]).not.toContain("{{testsSummary}}");
