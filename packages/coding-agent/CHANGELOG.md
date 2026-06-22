@@ -13,6 +13,11 @@
 
 ### Fixed
 
+- Fixed workflow graph views so terminal attempts cannot render stale persisted
+  running activations as live work or stale elapsed-time monitors.
+- Fixed the experimental agent build/review loop workflow so terminal
+  `tuple-state.json` files expose normalized `verdict` and
+  `evidence_contract_verdict` fields for fanout audit tooling.
 - Fixed workflow JavaScript script nodes so workflow stop and node abort signals
   propagate into the eval runtime instead of leaving validation subprocesses
   running after an aborted attempt.

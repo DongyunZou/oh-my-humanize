@@ -1910,6 +1910,55 @@ describe("workflow graph view rendering", () => {
 		expect(text).not.toContain("↵ steer");
 	});
 
+	it("renders terminal attempts without stale live elapsed time from persisted activations", async () => {
+		const theme = await getThemeByName("dark");
+		if (!theme) throw new Error("dark theme fixture is required");
+		setThemeInstance(theme);
+		const definition: WorkflowDefinition = {
+			name: "closed-live-stale",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [{ id: "build", type: "agent", agent: "task" }],
+			edges: [],
+		};
+		const family = createFamily(definition);
+		const attempt = family.attempts[0]!;
+		attempt.id = "attempt-closed";
+		attempt.status = "completed";
+		attempt.activations = [
+			{
+				id: "activation-stale",
+				nodeId: "build",
+				parentActivationIds: [],
+				status: "running",
+			},
+		];
+		const view = buildWorkflowGraphView(family, {
+			liveAttemptIds: new Set(),
+			activeAgentProgressById: new Map([
+				[
+					"build",
+					{
+						durationMs: 40 * 60 * 60 * 1000,
+						lastIntent: "still working on a stale activation",
+						toolCount: 12,
+					},
+				],
+			]),
+		});
+
+		const text = stripAnsi(new WorkflowGraphComponent(view, { refreshMs: 0 }).render(132).join("\n"));
+
+		expect(text).toContain("Run: attempt-closed completed");
+		expect(text).not.toContain("40h");
+		expect(text).not.toContain("still working on a stale activation");
+		expect(text).not.toContain("12 tools");
+		expect(text).not.toContain("Build live");
+		expect(text).not.toContain("Build running");
+		expect(text).not.toContain("Agent Hub");
+		expect(text).not.toContain("/workflow interrupt");
+	});
+
 	it("labels running non-agent work without implying an Agent Hub target", async () => {
 		const theme = await getThemeByName("dark");
 		if (!theme) throw new Error("dark theme fixture is required");

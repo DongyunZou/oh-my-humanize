@@ -1284,6 +1284,35 @@ describe("agent-build-review-loop flow contract", () => {
 		).rejects.toThrow("review route still requests build or repair work");
 	});
 
+	it("writes normalized terminal tuple-state fields for completed archives", async () => {
+		const cwd = await createTempDir();
+		await fs.mkdir(path.join(cwd, "workflow-output", "round-1"), { recursive: true });
+		await Bun.write(path.join(cwd, "task.md"), "Validation Command:\ntrue\n\nNo-Code Allowed: yes\n");
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			"ROUND 1: changed allowed behavior; validation=true; result=pass\n",
+		);
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stdout.txt"), "ok\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stderr.txt"), "\n");
+
+		await runArchiveLoop(cwd, {
+			decision: "complete",
+			reason: "review accepted the completed project work",
+			reviewVerdict: "complete",
+		});
+
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			flow: "agent-build-review-loop",
+			status: "completed",
+			terminal: true,
+			verdict: "complete",
+			evidence_contract_verdict: "READY",
+			final_artifact: "workflow-output/final-agent-loop-archive.md",
+			review_decision: "complete",
+			review_verdict: "complete",
+		});
+	});
+
 	it("writes a rejected archive and fails the attempt for setup-blocker routes", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
@@ -1301,6 +1330,8 @@ describe("agent-build-review-loop flow contract", () => {
 			flow: "agent-build-review-loop",
 			status: "rejected",
 			terminal: true,
+			verdict: "reject",
+			evidence_contract_verdict: "REPAIR",
 			final_artifact: "workflow-output/final-agent-loop-reject.md",
 		});
 	});
@@ -1325,6 +1356,8 @@ describe("agent-build-review-loop flow contract", () => {
 			flow: "agent-build-review-loop",
 			status: "rejected",
 			terminal: true,
+			verdict: "reject",
+			evidence_contract_verdict: "REPAIR",
 			final_artifact: "workflow-output/final-agent-loop-reject.md",
 		});
 	});

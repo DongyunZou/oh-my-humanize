@@ -16,6 +16,18 @@ describe("buildWorkflowGraphView", () => {
 			"Interrupt Program · Long running hold: /workflow interrupt attempt-1 longRunningHold --deadline-ms 30000",
 		);
 	});
+
+	it("does not render stale running activations as live work after an attempt is terminal", () => {
+		const family = workflowFamilyWithRunningProgram();
+		family.attempts[0]!.status = "completed";
+		const view = buildWorkflowGraphView(family, { liveAttemptIds: new Set() });
+
+		expect(view.currentAttempt?.status).toBe("completed");
+		expect(view.focus).toBeUndefined();
+		expect(view.activeAgents ?? []).toEqual([]);
+		expect(view.nodes.find(node => node.id === "longRunningHold")?.status).toBe("completed");
+		expect(view.actions.join("\n")).not.toContain("/workflow interrupt");
+	});
 });
 
 describe("renderWorkflowGraphDiagram", () => {

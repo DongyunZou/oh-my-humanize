@@ -1593,10 +1593,11 @@ function buildWorkflowGraphNodeStatuses(
 		const currentAttemptOwnsCheckpoint = currentAttempt.id === currentCheckpoint?.attemptId;
 		for (const activation of currentAttempt.activations) {
 			statuses.set(activation.nodeId, {
-				status:
-					currentAttemptOwnsCheckpoint && checkpointedActivationIds.has(activation.id)
-						? "checkpointed"
-						: activation.status,
+				status: workflowGraphNodeStatusForActivation(
+					currentAttempt,
+					activation,
+					currentAttemptOwnsCheckpoint && checkpointedActivationIds.has(activation.id),
+				),
 				verdict: workflowActivationOutputVerdict(activation.output),
 				summary: activation.output?.summary,
 				error: activation.error,
@@ -1605,6 +1606,19 @@ function buildWorkflowGraphNodeStatuses(
 		}
 	}
 	return statuses;
+}
+
+function workflowGraphNodeStatusForActivation(
+	attempt: WorkflowRunAttemptSnapshot,
+	activation: WorkflowAttemptActivationRecord,
+	checkpointed: boolean,
+): WorkflowGraphNodeStatus {
+	if (checkpointed) return "checkpointed";
+	if (activation.status !== "running") return activation.status;
+	if (attempt.status === "running" || attempt.status === "stop_requested") return "running";
+	if (attempt.status === "completed") return "completed";
+	if (attempt.status === "failed") return "failed";
+	return "aborted";
 }
 
 interface WorkflowGraphNodeStatusRecord {

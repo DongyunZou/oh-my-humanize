@@ -140,10 +140,13 @@ return {
 };
 
 async function writeTupleState({ status, finalArtifact, reviewRoute, roundCount, changedFiles, evidenceFiles }) {
+	const verdict = status === "rejected" ? "reject" : (reviewRoute.decision ?? "complete");
 	const state = {
 		flow: "agent-build-review-loop",
 		status,
 		terminal: true,
+		verdict,
+		evidence_contract_verdict: status === "rejected" ? "REPAIR" : "READY",
 		final_artifact: finalArtifact,
 		reason: reviewRoute.reason ?? "",
 		review_decision: reviewRoute.decision ?? "",
