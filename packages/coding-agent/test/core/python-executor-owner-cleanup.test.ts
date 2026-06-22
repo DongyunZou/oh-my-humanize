@@ -317,12 +317,16 @@ describe("python executor owner cleanup", () => {
 		expect(unownedRetainedKernel.shutdown).toHaveBeenCalledTimes(1);
 	});
 
-	it("retains sessions whose kernel shutdown is not confirmed so a later dispose retries", async () => {
+	it("drops sessions whose kernel shutdown is not confirmed instead of reusing a possibly leaked process", async () => {
 		const kernel = new FakeKernel();
+		const replacementKernel = new FakeKernel();
 		const unconfirmedShutdown = vi.fn(async (): Promise<KernelShutdownResult> => ({ confirmed: false }));
 		kernel.shutdown = unconfirmedShutdown;
 		vi.spyOn(pythonKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });
-		const startSpy = vi.spyOn(PythonKernel, "start").mockResolvedValue(kernel as unknown as PythonKernelInstance);
+		const startSpy = vi
+			.spyOn(PythonKernel, "start")
+			.mockResolvedValueOnce(kernel as unknown as PythonKernelInstance)
+			.mockResolvedValueOnce(replacementKernel as unknown as PythonKernelInstance);
 
 		await executePython("1", {
 			cwd: "/tmp/unconfirmed-shutdown",
@@ -335,28 +339,26 @@ describe("python executor owner cleanup", () => {
 		await disposeAllKernelSessions();
 		expect(unconfirmedShutdown).toHaveBeenCalledTimes(1);
 
-		// Re-executing the same session must reuse the retained kernel (no new start).
 		await executePython("2", {
 			cwd: "/tmp/unconfirmed-shutdown",
 			sessionId: "unconfirmed-shutdown-session",
 			kernelMode: "session",
 		});
-		expect(startSpy).toHaveBeenCalledTimes(1);
-		expect(kernel.execute).toHaveBeenCalledTimes(2);
-
-		// Swap to a confirmed shutdown so afterEach can drain the retained session.
-		const confirmedShutdown = vi.fn(async (): Promise<KernelShutdownResult> => ({ confirmed: true }));
-		kernel.shutdown = confirmedShutdown;
-		await disposeAllKernelSessions();
-		expect(confirmedShutdown).toHaveBeenCalledTimes(1);
+		expect(startSpy).toHaveBeenCalledTimes(2);
+		expect(kernel.execute).toHaveBeenCalledTimes(1);
+		expect(replacementKernel.execute).toHaveBeenCalledTimes(1);
 	});
 
-	it("retains owner mapping when owner-scoped shutdown is not confirmed", async () => {
+	it("drops owner mapping when owner-scoped shutdown is not confirmed", async () => {
 		const kernel = new FakeKernel();
+		const replacementKernel = new FakeKernel();
 		const unconfirmedShutdown = vi.fn(async (): Promise<KernelShutdownResult> => ({ confirmed: false }));
 		kernel.shutdown = unconfirmedShutdown;
 		vi.spyOn(pythonKernel, "checkPythonKernelAvailability").mockResolvedValue({ ok: true });
-		vi.spyOn(PythonKernel, "start").mockResolvedValue(kernel as unknown as PythonKernelInstance);
+		const startSpy = vi
+			.spyOn(PythonKernel, "start")
+			.mockResolvedValueOnce(kernel as unknown as PythonKernelInstance)
+			.mockResolvedValueOnce(replacementKernel as unknown as PythonKernelInstance);
 
 		await executePython("1", {
 			cwd: "/tmp/unconfirmed-owner-shutdown",
@@ -368,9 +370,14 @@ describe("python executor owner cleanup", () => {
 		await disposeKernelSessionsByOwner("owner-a");
 		expect(unconfirmedShutdown).toHaveBeenCalledTimes(1);
 
-		const confirmedShutdown = vi.fn(async (): Promise<KernelShutdownResult> => ({ confirmed: true }));
-		kernel.shutdown = confirmedShutdown;
-		await disposeKernelSessionsByOwner("owner-a");
-		expect(confirmedShutdown).toHaveBeenCalledTimes(1);
+		await executePython("2", {
+			cwd: "/tmp/unconfirmed-owner-shutdown",
+			sessionId: "unconfirmed-owner-shutdown-session",
+			kernelMode: "session",
+			kernelOwnerId: "owner-a",
+		});
+		expect(startSpy).toHaveBeenCalledTimes(2);
+		expect(kernel.execute).toHaveBeenCalledTimes(1);
+		expect(replacementKernel.execute).toHaveBeenCalledTimes(1);
 	});
 });

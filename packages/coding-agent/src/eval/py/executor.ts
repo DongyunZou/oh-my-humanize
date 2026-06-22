@@ -462,7 +462,6 @@ export async function disposeAllKernelSessions(): Promise<void> {
 			cwd: session.cwd,
 			reason,
 		});
-		if (!sessions.has(id)) sessions.set(id, session);
 	}
 }
 
@@ -494,7 +493,6 @@ export async function disposeKernelSessionsByOwner(ownerId: string): Promise<voi
 			cwd: session.cwd,
 			reason,
 		});
-		if (!sessions.has(session.sessionKey)) sessions.set(session.sessionKey, session);
 	}
 }
 

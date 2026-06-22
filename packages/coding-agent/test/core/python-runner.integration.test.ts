@@ -96,6 +96,25 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 		}
 	});
 
+	it("confirms clean shutdown and releases the runner process", async () => {
+		using tempDir = TempDir.createSync("@python-runner-clean-shutdown-");
+		const kernel = await PythonKernel.start({ cwd: tempDir.path() });
+		const pidPath = path.join(tempDir.path(), "runner.pid");
+		const result = await executePythonWithKernel(
+			kernel,
+			["import os, pathlib", `pathlib.Path(${JSON.stringify(pidPath)}).write_text(str(os.getpid()))`].join("\n"),
+		);
+		expect(result.exitCode).toBe(0);
+		const runnerPid = Number(await waitForFile(pidPath));
+		expect(isProcessAlive(runnerPid)).toBe(true);
+
+		const shutdown = await kernel.shutdown();
+
+		expect(shutdown.confirmed).toBe(true);
+		await waitForProcessExit(runnerPid);
+		expect(isProcessAlive(runnerPid)).toBe(false);
+	});
+
 	it("cancels a long sleep via SIGINT within 500ms", async () => {
 		using tempDir = TempDir.createSync("@python-runner-cancel-");
 		const kernel = await PythonKernel.start({ cwd: tempDir.path() });

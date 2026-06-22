@@ -486,7 +486,7 @@ export class PythonKernel {
 
 		const exited = this.#waitForExitWithTimeout(timeoutMs);
 		let result = await exited;
-		if (!result) {
+		if (result === null) {
 			try {
 				signalPythonKernelProcessTree(proc, "SIGTERM");
 			} catch {
@@ -494,7 +494,7 @@ export class PythonKernel {
 			}
 			result = await this.#waitForExitWithTimeout(timeoutMs);
 		}
-		if (!result) {
+		if (result === null) {
 			try {
 				signalPythonKernelProcessTree(proc, "SIGKILL");
 			} catch {
@@ -503,7 +503,7 @@ export class PythonKernel {
 			result = await this.#waitForExitWithTimeout(timeoutMs);
 		}
 
-		const confirmed = !!result;
+		const confirmed = result !== null || !isProcessAlive(proc.pid);
 		this.#shutdownConfirmed = confirmed;
 		this.#disposed = true;
 		return { confirmed };
@@ -740,13 +740,34 @@ function signalPythonKernelProcessTree(proc: Subprocess, signal: NodeJS.Signals)
 			return;
 		} catch (err) {
 			logger.warn("Failed to signal python runner process group; falling back to runner process", {
-				pid: proc.pid,
+				runnerPid: proc.pid,
+				signal,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+		try {
+			process.kill(proc.pid, signal);
+			return;
+		} catch (err) {
+			logger.warn("Failed to signal python runner pid; falling back to Bun subprocess kill", {
+				runnerPid: proc.pid,
 				signal,
 				error: err instanceof Error ? err.message : String(err),
 			});
 		}
 	}
 	proc.kill(signal);
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+	if (!Number.isInteger(pid) || pid === undefined || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		if (err && typeof err === "object" && "code" in err && err.code === "ESRCH") return false;
+		return true;
+	}
 }
 
 function isTimeoutReason(reason: unknown): boolean {
