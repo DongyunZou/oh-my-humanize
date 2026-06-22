@@ -17,6 +17,7 @@ interface ScriptResult {
 	data?: {
 		artifact?: string;
 		producer_node?: string;
+		reasons?: string[];
 		review_handoff_artifact?: string;
 		review_handoff_bytes?: number;
 		preexisting_final_artifacts?: Array<{
@@ -41,6 +42,7 @@ interface ScriptResult {
 			reusedCoverageProfiles?: Array<{ path: string; sha256: string }>;
 		};
 		checked_inputs?: {
+			final_validation_artifacts?: string[];
 			generic_validation_aliases?: string[];
 			integration_artifacts?: string[];
 			premature_decision_artifacts?: string[];
@@ -50,6 +52,9 @@ interface ScriptResult {
 				quarantine: string;
 			}>;
 			failed_validation_artifacts?: string[];
+			superseded_failed_validation_artifacts?: string[];
+			trusted_failed_final_validation_artifacts?: string[];
+			trusted_final_validation_artifacts?: string[];
 			validation_attempt_log_findings?: Array<{
 				file: string;
 				reason: string;
@@ -1233,10 +1238,25 @@ describe("parallel-implementation-review flow contract", () => {
 		});
 
 		expect(guardResult.verdict).toBe("REPAIR");
-		expect(guardResult.data?.checked_inputs?.failed_validation_artifacts).toEqual([
-			"workflow-output/tests-lane-P06-T06-test.json",
+		expect(guardResult.data?.checked_inputs?.final_validation_artifacts).toEqual([
 			"workflow-output/validation-P06-T06-test.json",
 		]);
+		expect(guardResult.data?.checked_inputs?.trusted_failed_final_validation_artifacts).toEqual([
+			"workflow-output/validation-P06-T06-test.json",
+		]);
+		expect(guardResult.data?.checked_inputs?.failed_validation_artifacts).toEqual([
+			"workflow-output/validation-P06-T06-test.json",
+		]);
+		expect(guardResult.data?.checked_inputs?.superseded_failed_validation_artifacts).toEqual([
+			"workflow-output/tests-lane-P06-T06-test.json",
+		]);
+		expect(guardResult.data?.reasons).toContain(
+			"trusted runDeclaredValidation artifact reported failed validation: workflow-output/validation-P06-T06-test.json",
+		);
+		expect(guardResult.data?.reasons?.some(reason => reason.includes("no trusted runDeclaredValidation"))).toBe(
+			false,
+		);
+		expect(guardResult.data?.reasons?.some(reason => reason.includes("conflicting failed validation"))).toBe(false);
 		expect(finalResult.verdict).toBe("reject");
 		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
 			status: "rejected",

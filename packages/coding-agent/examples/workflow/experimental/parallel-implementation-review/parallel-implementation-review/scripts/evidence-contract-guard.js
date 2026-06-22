@@ -9,21 +9,35 @@ const validationMatch = await validationEvidenceMatches(evidenceFiles, validatio
 const staleValidationHashArtifacts = await staleValidationHashArtifactsFromEvidence(evidenceFiles);
 const mechanicalSurfaceInventoryArtifacts = await mechanicalSurfaceInventoryArtifactsFromEvidence(evidenceFiles);
 const validationArtifacts = validationMatch.passedFiles;
-const finalValidationArtifacts = validationArtifacts.filter(file => isFinalDeclaredValidationArtifact(file, tupleId));
+const finalValidationArtifacts = [...validationMatch.passedFiles, ...validationMatch.failedFiles]
+	.filter(file => isFinalDeclaredValidationArtifact(file, tupleId))
+	.sort((left, right) => left.localeCompare(right, "en"));
 const trustedFinalValidationArtifacts = validationMatch.trustedFinalFiles.filter(file =>
 	isFinalDeclaredValidationArtifact(file, tupleId),
 );
-const untrustedFinalValidationArtifacts = finalValidationArtifacts.filter(file => !trustedFinalValidationArtifacts.includes(file));
+const trustedFailedFinalValidationArtifacts = validationMatch.trustedFailedFinalFiles.filter(file =>
+	isFinalDeclaredValidationArtifact(file, tupleId),
+);
+const trustedDeclaredValidationArtifacts = [
+	...trustedFinalValidationArtifacts,
+	...trustedFailedFinalValidationArtifacts,
+].sort((left, right) => left.localeCompare(right, "en"));
+const untrustedFinalValidationArtifacts = finalValidationArtifacts.filter(
+	file => !trustedDeclaredValidationArtifacts.includes(file),
+);
 const genericValidationAliases = genericValidationAliasArtifacts(evidenceFiles);
 const laneHardStopResult = laneHardStopResultFromState(workflowContext.state);
 const activeLaneHardStopArtifacts = laneHardStopResult.active;
 const reservedFinalArtifacts = laneHardStopResult.reservedFinalArtifacts;
 const quarantinedReservedFinalArtifacts = laneHardStopResult.quarantinedReservedFinalArtifacts;
 const supersededFailedValidationArtifacts =
-	trustedFinalValidationArtifacts.length > 0
+	trustedDeclaredValidationArtifacts.length > 0
 		? validationMatch.failedFiles.filter(file => !isFinalDeclaredValidationArtifact(file, tupleId))
 		: [];
 const failedValidationArtifacts = validationMatch.failedFiles.filter(file => !supersededFailedValidationArtifacts.includes(file));
+const conflictingFailedValidationArtifacts = failedValidationArtifacts.filter(
+	file => !trustedFailedFinalValidationArtifacts.includes(file),
+);
 const prematureDecisionArtifacts = await prematureDecisionArtifactFiles();
 const coreArtifacts = evidenceFiles.filter(isCoreLaneEvidenceFile);
 const testArtifacts = evidenceFiles.filter(isTestLaneEvidenceFile);
@@ -68,8 +82,14 @@ if (!manualEvidenceAllowed && validationArtifacts.length === 0) {
 	if (validationMatch.reasons.length > 0) reasons.push(...validationMatch.reasons);
 }
 
-if (!manualEvidenceAllowed && trustedFinalValidationArtifacts.length === 0) {
+if (!manualEvidenceAllowed && trustedDeclaredValidationArtifacts.length === 0) {
 	reasons.push("no trusted runDeclaredValidation artifact was found under workflow-output/");
+}
+
+if (!manualEvidenceAllowed && trustedFailedFinalValidationArtifacts.length > 0) {
+	reasons.push(
+		`trusted runDeclaredValidation artifact reported failed validation: ${trustedFailedFinalValidationArtifacts.join(", ")}`,
+	);
 }
 
 if (!manualEvidenceAllowed && untrustedFinalValidationArtifacts.length > 0) {
@@ -84,9 +104,9 @@ if (genericValidationAliases.length > 0) {
 	);
 }
 
-if (!manualEvidenceAllowed && failedValidationArtifacts.length > 0) {
+if (!manualEvidenceAllowed && conflictingFailedValidationArtifacts.length > 0) {
 	reasons.push(
-		`conflicting failed validation evidence found under workflow-output/: ${failedValidationArtifacts.join(", ")}; rerun the declared validation after all lane work and leave one unambiguous final validation record`,
+		`conflicting failed validation evidence found under workflow-output/: ${conflictingFailedValidationArtifacts.join(", ")}; rerun the declared validation after all lane work and leave one unambiguous final validation record`,
 	);
 }
 
@@ -150,6 +170,7 @@ const diagnostic = {
 		validation_artifacts: validationArtifacts.slice(0, 80),
 		final_validation_artifacts: finalValidationArtifacts.slice(0, 80),
 		trusted_final_validation_artifacts: trustedFinalValidationArtifacts.slice(0, 80),
+		trusted_failed_final_validation_artifacts: trustedFailedFinalValidationArtifacts.slice(0, 80),
 		untrusted_final_validation_artifacts: untrustedFinalValidationArtifacts.slice(0, 80),
 		generic_validation_aliases: genericValidationAliases.slice(0, 80),
 		lane_hard_stop_artifacts: activeLaneHardStopArtifacts.slice(0, 80),
@@ -186,6 +207,11 @@ await Bun.write(
 		"Trusted final validation artifacts:",
 		...(trustedFinalValidationArtifacts.length > 0
 			? trustedFinalValidationArtifacts.map(file => `- ${file}`)
+			: ["- (none)"]),
+		"",
+		"Trusted failed final validation artifacts:",
+		...(trustedFailedFinalValidationArtifacts.length > 0
+			? trustedFailedFinalValidationArtifacts.map(file => `- ${file}`)
 			: ["- (none)"]),
 		"",
 		"Untrusted final validation artifacts:",
@@ -528,6 +554,7 @@ async function validationEvidenceMatches(files, command, environment) {
 	const passedFiles = [];
 	const failedFiles = [];
 	const trustedFinalFiles = [];
+	const trustedFailedFinalFiles = [];
 	const reasons = [];
 	for (const file of files.filter(isValidationEvidenceFile)) {
 		const match = await fileValidationStatus(file, command, environment);
@@ -536,11 +563,12 @@ async function validationEvidenceMatches(files, command, environment) {
 			if (match.trustedFinal) trustedFinalFiles.push(file);
 		} else if (match.status === "failed") {
 			failedFiles.push(file);
+			if (match.trustedFinal) trustedFailedFinalFiles.push(file);
 		} else if (match.reason) {
 			reasons.push(`${file}: ${match.reason}`);
 		}
 	}
-	return { passedFiles, failedFiles, trustedFinalFiles, reasons };
+	return { passedFiles, failedFiles, trustedFinalFiles, trustedFailedFinalFiles, reasons };
 }
 
 async function staleValidationHashArtifactsFromEvidence(files) {
@@ -793,7 +821,7 @@ function jsonValidationStatus(value, command, environment) {
 		return { status: "unmatched", reason: "undeclared validation environment or missing declared environment" };
 	}
 	const failed = environmentCandidates.some(candidate => valueContainsFailedValidation(candidate));
-	if (failed) return { status: "failed" };
+	if (failed) return { status: "failed", trustedFinal: isTrustedRunDeclaredValidationArtifact(value) };
 	const passed = environmentCandidates.some(candidate => valueContainsPassedValidation(candidate));
 	if (passed) return { status: "passed", trustedFinal: isTrustedRunDeclaredValidationArtifact(value) };
 	return { status: "unmatched", reason: "declared validation object did not pass" };
