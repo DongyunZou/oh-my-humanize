@@ -13,6 +13,9 @@
 
 ### Fixed
 
+- Fixed retained Python eval-kernel disposal so workflow-owned Python work that
+  ignores abort is force-shutdown instead of writing artifacts after a workflow
+  attempt reaches a terminal state.
 - Fixed the experimental parallel implementation/review workflow so tuple-scoped
   canary IDs such as `C93-K8S-PAR-...` are recognized from task contracts by
   every workflow finalization script instead of leaving unscoped artifacts and

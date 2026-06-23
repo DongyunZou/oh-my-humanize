@@ -4323,9 +4323,12 @@ export class AgentSession {
 		}
 		const evalExecutionsSettled = await this.#prepareEvalExecutionsForDispose();
 		if (!evalExecutionsSettled) {
-			logger.warn("Detaching retained eval-kernel ownership during dispose while eval execution is still active");
+			logger.warn("Forcing retained eval-kernel shutdown during dispose while eval execution is still active");
 		}
-		await disposeKernelSessionsByOwner(this.#evalKernelOwnerId);
+		await disposeKernelSessionsByOwner(this.#evalKernelOwnerId, { force: !evalExecutionsSettled });
+		if (!evalExecutionsSettled && !(await this.#waitForEvalExecutionsToSettle(1_000))) {
+			logger.warn("Python execution remained active after forced retained-kernel shutdown during dispose");
+		}
 		await disposeRubyKernelSessionsByOwner(this.#evalKernelOwnerId);
 		await disposeJuliaKernelSessionsByOwner(this.#evalKernelOwnerId);
 		await shutdownTinyTitleClient();
@@ -11416,7 +11419,7 @@ export class AgentSession {
 			this.abortEval();
 			if (!(await this.#waitForEvalExecutionsToSettle(1_000))) {
 				logger.warn(
-					"Python execution is still active after dispose aborted all active runs; retained kernel ownership will still be detached",
+					"Python execution is still active after dispose aborted all active runs; retained kernel will be force-shutdown",
 				);
 				return false;
 			}

@@ -332,11 +332,11 @@ export async function disposeAllKernelSessions(): Promise<void> {
 	}
 }
 
-export async function disposeKernelSessionsByOwner(ownerId: string): Promise<void> {
+export async function disposeKernelSessionsByOwner(ownerId: string, options: { force?: boolean } = {}): Promise<void> {
 	const toShutdown: PythonSession[] = [];
 	for (const session of [...sessions.values()]) {
 		if (!session.ownerIds.has(ownerId)) continue;
-		if (session.ownerIds.size === 1) {
+		if (options.force || session.ownerIds.size === 1) {
 			toShutdown.push(session);
 			continue;
 		}
