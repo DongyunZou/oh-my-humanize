@@ -3,6 +3,7 @@ import { $ } from "bun";
 import { getEditorTheme, initTheme } from "../theme/theme";
 import {
 	CustomEditor,
+	extractBracketedImagePastePaths,
 	SPACE_HOLD_MECHANICAL_RUN,
 	SPACE_HOLD_RELEASE_MS,
 	SPACE_REPEAT_MAX_GAP_MS,
@@ -21,6 +22,12 @@ function makeEditor() {
 const REPEAT_GAP_MS = 30;
 /** A gap above the threshold — looks like a deliberate keypress. */
 const TAP_GAP_MS = SPACE_REPEAT_MAX_GAP_MS + 80;
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
+
+function bracketedPaste(text: string): string {
+	return `${BRACKETED_PASTE_START}${text}${BRACKETED_PASTE_END}`;
+}
 
 /** Feed `count` spaces `gapMs` apart on the fake clock. The first space of a run has no prior
  *  space, so its gap is effectively infinite and it always reads as a deliberate tap. */
@@ -39,11 +46,12 @@ function feedGaps(editor: CustomEditor, gaps: number[]): void {
 	}
 }
 
-async function decorateInFreshProcess(text: string): Promise<string> {
+async function decorateInFreshProcess(text: string, imageLinks?: readonly string[]): Promise<string> {
 	const customEditorUrl = new URL("./custom-editor.ts", import.meta.url).href;
 	const script = `
 import { CustomEditor } from ${JSON.stringify(customEditorUrl)};
 const editor = new CustomEditor({});
+editor.imageLinks = ${JSON.stringify(imageLinks)};
 process.stdout.write(editor.decorateText(${JSON.stringify(text)}));
 `;
 	const child = await $`bun -e ${script}`.quiet().nothrow();
@@ -59,9 +67,24 @@ describe("CustomEditor placeholder decoration", () => {
 		expect(output).toBe("[Paste #1, +30 lines]");
 	});
 
-	it("renders image placeholders before theme initialization", async () => {
-		const output = await decorateInFreshProcess("[Image #1]");
+	it("renders linked image placeholders before theme and settings initialization", async () => {
+		const output = await decorateInFreshProcess("[Image #1]", ["/tmp/example.png"]);
 		expect(output).toBe("[Image #1]");
+	});
+});
+
+describe("CustomEditor bracketed image-path paste", () => {
+	it("leaves a pasted bare .png filename on the normal text path", () => {
+		expect(extractBracketedImagePastePaths(bracketedPaste("icon-photo-default.png"))).toBeUndefined();
+	});
+
+	it("extracts explicit local image paths for attachment", () => {
+		expect(extractBracketedImagePastePaths(bracketedPaste("/tmp/icon-photo-default.png"))).toEqual([
+			"/tmp/icon-photo-default.png",
+		]);
+		expect(extractBracketedImagePastePaths(bracketedPaste("C:\\Users\\me\\icon-photo-default.png"))).toEqual([
+			"C:\\Users\\me\\icon-photo-default.png",
+		]);
 	});
 });
 

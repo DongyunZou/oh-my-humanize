@@ -5,6 +5,11 @@
 ### Changed
 
 - Changed the public application name constant from `omp` to `omh` while preserving the existing `.omp` compatibility config root.
+## [16.1.8] - 2026-06-20
+
+### Added
+
+- Exported `removeSyncWithRetries()` as a standalone function so tests that manage their own temp dirs can use the same retry-on-EBUSY cleanup logic as `TempDir.removeSync()`.
 
 ## [16.1.3] - 2026-06-19
 

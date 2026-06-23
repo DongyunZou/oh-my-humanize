@@ -5,6 +5,11 @@
 ### Changed
 
 - Changed package metadata links from the old Oh My Pi site/repository to the OMH site/repository.
+## [16.1.15] - 2026-06-22
+
+### Added
+
+- Added token usage breakdown by agent type (Main, Subagents, Advisor) to the overview dashboard
 
 ## [16.0.10] - 2026-06-18
 

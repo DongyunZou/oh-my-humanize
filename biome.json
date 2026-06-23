@@ -62,6 +62,7 @@
 			"!temp/**/*",
 			"!**/test-sessions.ts",
 			"!**/agent_pb.ts",
+			"!**/devin-gen/**/*",
 			"!.worktrees/**/*",
 			"!.wt/**/*"
 		]
