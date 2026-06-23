@@ -636,6 +636,7 @@ function taskResultArtifactReferences(result: WorkflowAgentTaskResult): string[]
 	const artifacts: string[] = [];
 	if (result.agentId !== undefined) artifacts.push(`agent-output://${result.agentId}`);
 	if (result.outputPath !== undefined) artifacts.push(`local://${result.outputPath}`);
+	if (result.sessionFile !== undefined) artifacts.push(`local://${result.sessionFile}`);
 	return artifacts;
 }
 

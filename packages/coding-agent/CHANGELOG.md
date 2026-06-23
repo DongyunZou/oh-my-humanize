@@ -16,6 +16,9 @@
 - Fixed workflow agent and review node transient provider retries so 429/5xx
   failures honor retry-after hints and apply bounded jitter instead of retrying
   many concurrent workflow nodes in lockstep.
+- Fixed workflow agent and review node activation artifacts so persisted
+  subagent session transcripts are linked as local artifacts for later
+  inspection.
 - Fixed retained Python eval-kernel disposal so workflow-owned Python work that
   ignores abort is force-shutdown instead of writing artifacts after a workflow
   attempt reaches a terminal state.

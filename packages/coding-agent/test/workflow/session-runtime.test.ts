@@ -353,7 +353,7 @@ edges: []
 		});
 	});
 
-	it("records workflow agent outputs as focusable agent artifacts without persisting session paths", async () => {
+	it("records workflow agent outputs and transcript sessions as focusable artifacts", async () => {
 		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
 		const node = definition.nodes.find(candidate => candidate.id === "build");
 		if (!node) throw new Error("expected build node");
@@ -374,13 +374,14 @@ edges: []
 			prompt: node.prompt,
 			model: node.model,
 		});
+		if (output === undefined) throw new Error("expected agent output");
 
 		expect(output).toEqual({
 			summary: "agent completed",
 			data: { exitCode: 0 },
-			artifacts: ["agent-output://build"],
+			artifacts: ["agent-output://build", "local:///tmp/omp-workflow-agent.jsonl"],
 		});
-		expect(JSON.stringify(output)).not.toContain("omp-workflow-agent.jsonl");
+		expect(validateWorkflowActivationOutput(output)).toEqual(output);
 	});
 
 	it("bounds unstructured agent output summaries and keeps full output references", async () => {
@@ -644,6 +645,7 @@ edges: []
 				output: longReview,
 				agentId: "review-long",
 				outputPath: "/tmp/workflow-review-output.md",
+				sessionFile: "/tmp/workflow-review-session.jsonl",
 			}),
 		});
 
@@ -654,7 +656,11 @@ edges: []
 			DEFAULT_WORKFLOW_MAX_SUMMARY_BYTES,
 		);
 		expect(output.summary).toContain("[workflow summary truncated");
-		expect(output.artifacts).toEqual(["agent-output://review-long", "local:///tmp/workflow-review-output.md"]);
+		expect(output.artifacts).toEqual([
+			"agent-output://review-long",
+			"local:///tmp/workflow-review-output.md",
+			"local:///tmp/workflow-review-session.jsonl",
+		]);
 		expect(validateWorkflowActivationOutput(output)).toEqual(output);
 	});
 
