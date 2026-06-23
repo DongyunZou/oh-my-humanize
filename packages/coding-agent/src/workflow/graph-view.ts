@@ -114,6 +114,7 @@ export interface WorkflowGraphFocusView {
 	reason?: string;
 	recentOutput?: string[];
 	controls?: string[];
+	artifacts?: string[];
 }
 
 export interface WorkflowGraphNodeActivationView {
@@ -131,6 +132,7 @@ export interface WorkflowGraphNodeActivationView {
 	stats?: string;
 	activity?: string;
 	recentOutput?: string[];
+	artifacts?: string[];
 }
 
 export interface WorkflowGraphNodeView {
@@ -1849,6 +1851,7 @@ function buildWorkflowGraphNodeActivations(
 			status: activation.status,
 		};
 		if (activation.output?.summary !== undefined) view.summary = activation.output.summary;
+		if (activation.output?.artifacts !== undefined) view.artifacts = [...activation.output.artifacts];
 		const verdict = workflowActivationOutputVerdict(activation.output);
 		if (verdict !== undefined) view.verdict = verdict;
 		if (activation.error !== undefined) view.error = activation.error;
@@ -2051,6 +2054,7 @@ function applyWorkflowGraphActivationFocus(
 	if (activation.error !== undefined) focus.error = activation.error;
 	if (activation.reason !== undefined) focus.reason = activation.reason;
 	if (activation.recentOutput !== undefined) focus.recentOutput = activation.recentOutput;
+	if (activation.artifacts !== undefined) focus.artifacts = [...activation.artifacts];
 }
 
 function selectWorkflowFocusNode(nodes: readonly WorkflowGraphNodeView[]): WorkflowGraphNodeView | undefined {

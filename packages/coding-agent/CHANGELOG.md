@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Fixed workflow graph and focus views so completed workflow agent activations
+  expose linked transcript artifacts for node-level inspection.
 - Fixed workflow agent and review node transient provider retries so 429/5xx
   failures honor retry-after hints and apply bounded jitter instead of retrying
   many concurrent workflow nodes in lockstep.

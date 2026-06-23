@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import type { WorkflowDefinition } from "./definition";
 import type { FlowFreeze } from "./freeze";
-import { buildWorkflowGraphView, renderWorkflowGraphDiagram, type WorkflowGraphView } from "./graph-view";
+import {
+	buildWorkflowGraphView,
+	renderWorkflowGraphDiagram,
+	selectWorkflowGraphViewNode,
+	type WorkflowGraphView,
+} from "./graph-view";
 import type { RuntimeBindingSnapshot, WorkflowRunFamilySnapshot } from "./lifecycle";
 
 describe("buildWorkflowGraphView", () => {
@@ -27,6 +32,23 @@ describe("buildWorkflowGraphView", () => {
 		expect(view.activeAgents ?? []).toEqual([]);
 		expect(view.nodes.find(node => node.id === "longRunningHold")?.status).toBe("completed");
 		expect(view.actions.join("\n")).not.toContain("/workflow interrupt");
+	});
+
+	it("projects completed activation artifacts into node and focus views", () => {
+		const view = buildWorkflowGraphView(workflowFamilyWithAgentArtifacts());
+		const build = view.nodes.find(node => node.id === "build");
+		const focused = selectWorkflowGraphViewNode(view, "build", 0);
+
+		expect(build?.activations?.[0]?.artifacts).toEqual([
+			"agent-output://build",
+			"local:///tmp/workflow/build.md",
+			"local:///tmp/workflow/build.jsonl",
+		]);
+		expect(focused.focus?.artifacts).toEqual([
+			"agent-output://build",
+			"local:///tmp/workflow/build.md",
+			"local:///tmp/workflow/build.jsonl",
+		]);
 	});
 });
 
@@ -167,6 +189,48 @@ function workflowFamilyWithRunningProgram(): WorkflowRunFamilySnapshot {
 						nodeId: "longRunningHold",
 						parentActivationIds: ["activation-1"],
 						status: "running",
+					},
+				],
+			},
+		],
+		checkpoints: [],
+		changeRequests: [],
+	};
+}
+
+function workflowFamilyWithAgentArtifacts(): WorkflowRunFamilySnapshot {
+	const definition: WorkflowDefinition = {
+		name: "artifact-projection-smoke",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [{ id: "build", type: "agent" }],
+		edges: [],
+	};
+	return {
+		id: "family-artifacts",
+		freezes: [flowFreeze(definition)],
+		attempts: [
+			{
+				id: "attempt-artifacts",
+				familyId: "family-artifacts",
+				freezeId: "freeze-1",
+				startNodeId: "build",
+				status: "completed",
+				runtimeBindingSnapshot: runtimeBinding(),
+				activations: [
+					{
+						id: "activation-build",
+						nodeId: "build",
+						parentActivationIds: [],
+						status: "completed",
+						output: {
+							summary: "built",
+							artifacts: [
+								"agent-output://build",
+								"local:///tmp/workflow/build.md",
+								"local:///tmp/workflow/build.jsonl",
+							],
+						},
 					},
 				],
 			},
