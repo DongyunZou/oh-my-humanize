@@ -5,6 +5,7 @@ import { disposeAllVmContexts } from "../../src/eval/js/context-manager";
 import * as pythonExecutor from "../../src/eval/py/executor";
 import * as pythonKernel from "../../src/eval/py/kernel";
 import type { ToolSession } from "../../src/tools";
+import { EvalTool } from "../../src/tools/eval";
 import { createEvalToolScriptRunner } from "../../src/workflow/eval-tool-runtime";
 
 function createToolSession(
@@ -42,6 +43,55 @@ afterAll(async () => {
 });
 
 describe("workflow eval tool runtime adapter", () => {
+	it("dispatches workflow script requests as a single eval call", async () => {
+		using tempDir = TempDir.createSync("@omp-workflow-eval-");
+		const executeSpy = vi.spyOn(EvalTool.prototype, "execute").mockResolvedValue({
+			content: [{ type: "text", text: "workflow-ok" }],
+			details: {
+				isError: false,
+				cells: [
+					{
+						index: 0,
+						title: "script",
+						code: 'return "workflow-ok";',
+						language: "js",
+						output: "workflow-ok",
+						status: "complete",
+						exitCode: 0,
+						statusEvents: [],
+					},
+				],
+				languages: ["js"],
+			},
+		});
+		const runner = createEvalToolScriptRunner(createToolSession(tempDir.path()));
+
+		const result = await runner({
+			activationId: "activation-script",
+			nodeId: "script",
+			code: 'return "workflow-ok";',
+			language: "js",
+			title: "script",
+			timeoutMs: 1_500,
+		});
+
+		expect(result).toEqual({
+			exitCode: 0,
+			output: "workflow-ok",
+			language: "js",
+		});
+		expect(executeSpy).toHaveBeenCalledWith(
+			"workflow-activation-script",
+			{
+				language: "js",
+				code: 'return "workflow-ok";',
+				title: "script",
+				timeout: 2,
+			},
+			undefined,
+		);
+	});
+
 	it("runs workflow script requests through the existing eval tool", async () => {
 		using tempDir = TempDir.createSync("@omp-workflow-eval-");
 		const runner = createEvalToolScriptRunner(createToolSession(tempDir.path()));

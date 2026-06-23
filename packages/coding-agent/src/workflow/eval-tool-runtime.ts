@@ -7,18 +7,15 @@ import type { WorkflowScriptEvalResult, WorkflowScriptEvalRunner } from "./sessi
 export function createEvalToolScriptRunner(toolSession: ToolSession): WorkflowScriptEvalRunner {
 	return async request => {
 		const evalTool = new EvalTool(await workflowScriptToolSession(toolSession));
-		const cell: EvalToolParams["cells"][number] = {
+		const params: EvalToolParams = {
 			language: request.language,
 			code: request.code,
 			title: request.title,
 		};
 		const timeout = workflowScriptEvalTimeoutSeconds(request.timeoutMs);
 		if (timeout !== undefined) {
-			cell.timeout = timeout;
+			params.timeout = timeout;
 		}
-		const params: EvalToolParams = {
-			cells: [cell],
-		};
 		const result = await evalTool.execute(`workflow-${request.activationId}`, params, request.signal);
 		return workflowScriptResultFromEvalTool(request.language, result);
 	};
