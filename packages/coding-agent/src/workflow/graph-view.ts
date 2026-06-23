@@ -100,6 +100,9 @@ export interface WorkflowGraphFocusView {
 	label: string;
 	role: string;
 	status: WorkflowGraphNodeStatus;
+	activationId?: string;
+	activationOrdinal?: number;
+	activationCount?: number;
 	focusAgentId?: string;
 	generation?: number;
 	model?: string;
@@ -113,11 +116,29 @@ export interface WorkflowGraphFocusView {
 	controls?: string[];
 }
 
+export interface WorkflowGraphNodeActivationView {
+	id: string;
+	ordinal: number;
+	status: WorkflowAttemptActivationRecord["status"];
+	verdict?: string;
+	summary?: string;
+	error?: string;
+	reason?: string;
+	focusAgentId?: string;
+	generation?: number;
+	model?: string;
+	tool?: string;
+	stats?: string;
+	activity?: string;
+	recentOutput?: string[];
+}
+
 export interface WorkflowGraphNodeView {
 	id: string;
 	kind: string;
 	status: WorkflowGraphNodeStatus;
 	activationCount?: number;
+	activations?: WorkflowGraphNodeActivationView[];
 	verdict?: string;
 	summary?: string;
 	error?: string;
@@ -217,9 +238,14 @@ export function buildWorkflowGraphView(
 	const nodeStatuses = buildWorkflowGraphNodeStatuses(family, currentAttempt, currentCheckpoint);
 	const nodeActivationCounts =
 		currentAttempt === undefined ? undefined : buildWorkflowGraphNodeActivationCounts(currentAttempt);
+	const nodeActivations =
+		currentAttempt === undefined
+			? undefined
+			: buildWorkflowGraphNodeActivations(currentAttempt, currentFreeze?.definition.nodes ?? [], options);
 	const nodes =
 		currentFreeze?.definition.nodes.map(node => {
 			const status = nodeStatuses.get(node.id) ?? { status: "pending" as const };
+			const activations = nodeActivations?.get(node.id) ?? [];
 			const view: WorkflowGraphNodeView = {
 				id: node.id,
 				kind: formatWorkflowNodeKind(node),
@@ -227,6 +253,7 @@ export function buildWorkflowGraphView(
 				focused: isFocusedWorkflowGraphNode(status.status),
 			};
 			if (nodeActivationCounts !== undefined) view.activationCount = nodeActivationCounts.get(node.id) ?? 0;
+			if (activations.length > 0) view.activations = activations;
 			if (status.verdict !== undefined) view.verdict = status.verdict;
 			if (status.summary !== undefined) view.summary = status.summary;
 			if (status.error !== undefined) view.error = status.error;
@@ -1787,6 +1814,59 @@ function formatWorkflowNodeKind(node: WorkflowNode): string {
 	return formatWorkflowNodeRole(node);
 }
 
+function buildWorkflowGraphNodeActivations(
+	currentAttempt: WorkflowRunAttemptSnapshot,
+	nodes: WorkflowNode[],
+	options: WorkflowGraphViewOptions,
+): Map<string, WorkflowGraphNodeActivationView[]> {
+	const nodesById = new Map(nodes.map(node => [node.id, node]));
+	const generationByNodeId = new Map<string, number>();
+	const activationsByNodeId = new Map<string, WorkflowGraphNodeActivationView[]>();
+	const hasLiveAttempt =
+		(currentAttempt.status === "running" || currentAttempt.status === "stop_requested") &&
+		(options.liveAttemptIds === undefined || options.liveAttemptIds.has(currentAttempt.id));
+	for (const activation of currentAttempt.activations) {
+		const generation = (generationByNodeId.get(activation.nodeId) ?? 0) + 1;
+		generationByNodeId.set(activation.nodeId, generation);
+		const node = nodesById.get(activation.nodeId);
+		const focusAgentId =
+			node !== undefined && workflowNodeIsAgentLike(node)
+				? formatWorkflowAgentFocusTarget(node.id, generation)
+				: undefined;
+		const progress =
+			hasLiveAttempt && focusAgentId !== undefined ? options.activeAgentProgressById?.get(focusAgentId) : undefined;
+		const model =
+			node === undefined
+				? undefined
+				: (progress?.model ?? currentAttempt.runtimeBindingSnapshot.modelBindings?.[node.id]?.resolvedModel);
+		const tool = formatWorkflowActiveAgentTool(progress);
+		const activity = formatWorkflowActiveAgentActivity(progress);
+		const stats = formatWorkflowActiveAgentStats(progress);
+		const recentOutput = formatWorkflowActiveAgentRecentOutput(progress);
+		const view: WorkflowGraphNodeActivationView = {
+			id: activation.id,
+			ordinal: generation,
+			status: activation.status,
+		};
+		if (activation.output?.summary !== undefined) view.summary = activation.output.summary;
+		const verdict = workflowActivationOutputVerdict(activation.output);
+		if (verdict !== undefined) view.verdict = verdict;
+		if (activation.error !== undefined) view.error = activation.error;
+		if (activation.reason !== undefined) view.reason = activation.reason;
+		if (focusAgentId !== undefined) view.focusAgentId = focusAgentId;
+		if (generation > 1) view.generation = generation;
+		if (model !== undefined) view.model = model;
+		if (tool !== undefined) view.tool = tool;
+		if (stats !== undefined) view.stats = stats;
+		if (activity !== undefined) view.activity = activity;
+		if (recentOutput.length > 0) view.recentOutput = recentOutput;
+		const activations = activationsByNodeId.get(activation.nodeId) ?? [];
+		activations.push(view);
+		activationsByNodeId.set(activation.nodeId, activations);
+	}
+	return activationsByNodeId;
+}
+
 function formatActiveWorkflowAgents(
 	currentAttempt: WorkflowRunAttemptSnapshot | undefined,
 	nodes: WorkflowNode[],
@@ -1840,54 +1920,142 @@ function buildWorkflowGraphFocus(
 ): WorkflowGraphFocusView | undefined {
 	const activeAgent = activeAgents[0];
 	if (activeAgent !== undefined) {
-		const focus: WorkflowGraphFocusView = {
-			nodeId: activeAgent.nodeId,
-			label: activeAgent.label,
-			role: activeAgent.role,
-			status: "running",
-			focusAgentId: activeAgent.focusAgentId,
-		};
-		if (activeAgent.generation !== undefined) focus.generation = activeAgent.generation;
-		if (activeAgent.model !== undefined) focus.model = activeAgent.model;
-		if (activeAgent.tool !== undefined) focus.tool = activeAgent.tool;
-		if (activeAgent.stats !== undefined) focus.stats = activeAgent.stats;
-		if (activeAgent.activity !== undefined) focus.activity = activeAgent.activity;
-		if (activeAgent.summary !== undefined) focus.summary = activeAgent.summary;
-		if (activeAgent.recentOutput !== undefined) focus.recentOutput = activeAgent.recentOutput;
-		if (currentAttempt !== undefined) {
-			focus.controls = [
-				`Watch: Agent Hub ${activeAgent.focusAgentId}`,
-				`Interrupt: /workflow interrupt ${currentAttempt.id} ${activeAgent.focusAgentId} --deadline-ms 30000`,
-				"Steer: Agent Hub Enter attaches; Esc returns",
-			];
-		}
-		return focus;
+		return workflowGraphFocusFromActiveAgent(activeAgent, currentAttempt?.id);
 	}
 	const node = selectWorkflowFocusNode(nodes);
 	if (node === undefined) return undefined;
+	return workflowGraphFocusFromNode(node, currentAttempt?.id);
+}
+
+export function selectWorkflowGraphViewNode(
+	view: WorkflowGraphView,
+	nodeId: string,
+	activationIndex: number | undefined,
+): WorkflowGraphView {
+	const node = view.nodes.find(candidate => candidate.id === nodeId);
+	if (node === undefined) return view;
+	const nodes = view.nodes.map(candidate => ({ ...candidate, focused: candidate.id === node.id }));
+	const selectedNode = nodes.find(candidate => candidate.id === node.id) ?? node;
+	const activation = selectedWorkflowGraphNodeActivation(selectedNode, activationIndex);
+	const focusAgent =
+		activation?.focusAgentId === undefined
+			? undefined
+			: (view.activeAgents ?? []).find(agent => agent.focusAgentId === activation.focusAgentId);
+	const fallbackAgent =
+		focusAgent ??
+		(view.activeAgents ?? []).find(agent => agent.activationId === activation?.id) ??
+		(view.activeAgents ?? []).find(agent => agent.nodeId === selectedNode.id);
+	const focus =
+		fallbackAgent === undefined
+			? workflowGraphFocusFromNode(selectedNode, view.currentAttempt?.id, activation)
+			: workflowGraphFocusFromActiveAgent(fallbackAgent, view.currentAttempt?.id, activation, selectedNode);
+	return { ...view, nodes, focus };
+}
+
+function workflowGraphFocusFromActiveAgent(
+	activeAgent: WorkflowGraphActiveAgentView,
+	attemptId: string | undefined,
+	activation?: WorkflowGraphNodeActivationView,
+	node?: WorkflowGraphNodeView,
+): WorkflowGraphFocusView {
+	const focus: WorkflowGraphFocusView = {
+		nodeId: activeAgent.nodeId,
+		label: activeAgent.label,
+		role: activeAgent.role,
+		status: "running",
+		focusAgentId: activeAgent.focusAgentId,
+	};
+	const activationCount = node?.activationCount ?? node?.activations?.length;
+	if (activation !== undefined) applyWorkflowGraphActivationFocus(focus, activation, activationCount);
+	else if (activationCount !== undefined && activationCount > 0) focus.activationCount = activationCount;
+	if (activeAgent.generation !== undefined) focus.generation = activeAgent.generation;
+	if (activeAgent.model !== undefined) focus.model = activeAgent.model;
+	if (activeAgent.tool !== undefined) focus.tool = activeAgent.tool;
+	if (activeAgent.stats !== undefined) focus.stats = activeAgent.stats;
+	if (activeAgent.activity !== undefined) focus.activity = activeAgent.activity;
+	if (activeAgent.summary !== undefined) focus.summary = activeAgent.summary;
+	if (activeAgent.recentOutput !== undefined) focus.recentOutput = activeAgent.recentOutput;
+	if (attemptId !== undefined) {
+		focus.controls = [
+			`Watch: Agent Hub ${activeAgent.focusAgentId}`,
+			`Interrupt: /workflow interrupt ${attemptId} ${activeAgent.focusAgentId} --deadline-ms 30000`,
+			"Steer: Agent Hub Enter attaches; Esc returns",
+		];
+	}
+	return focus;
+}
+
+function workflowGraphFocusFromNode(
+	node: WorkflowGraphNodeView,
+	attemptId: string | undefined,
+	activation?: WorkflowGraphNodeActivationView,
+): WorkflowGraphFocusView {
 	const focus: WorkflowGraphFocusView = {
 		nodeId: node.id,
 		label: formatWorkflowNodeDisplayName(node.id),
 		role: node.kind,
 		status: node.status,
 	};
-	if (node.verdict !== undefined) focus.summary = `verdict ${node.verdict}`;
-	if (node.summary !== undefined) focus.summary = node.summary;
-	if (node.error !== undefined) focus.error = node.error;
-	if (node.reason !== undefined) focus.reason = node.reason;
+	const selectedActivation = activation ?? selectedWorkflowGraphNodeActivation(node, undefined);
+	if (selectedActivation !== undefined) {
+		applyWorkflowGraphActivationFocus(focus, selectedActivation, node.activationCount ?? node.activations?.length);
+	}
+	if (node.verdict !== undefined && focus.summary === undefined) focus.summary = `verdict ${node.verdict}`;
+	if (node.summary !== undefined && focus.summary === undefined) focus.summary = node.summary;
+	if (node.error !== undefined && focus.error === undefined) focus.error = node.error;
+	if (node.reason !== undefined && focus.reason === undefined) focus.reason = node.reason;
 	if (
 		node.status === "running" &&
-		currentAttempt !== undefined &&
-		currentAttempt.status === "running" &&
-		currentAttempt.activations.some(activation => activation.status === "running" && activation.nodeId === node.id)
+		attemptId !== undefined &&
+		selectedActivation?.focusAgentId !== undefined &&
+		selectedActivation.status === "running"
 	) {
-		focus.controls = [`Interrupt: /workflow interrupt ${currentAttempt.id} ${node.id} --deadline-ms 30000`];
+		focus.controls = [
+			`Watch: Agent Hub ${selectedActivation.focusAgentId}`,
+			`Interrupt: /workflow interrupt ${attemptId} ${selectedActivation.focusAgentId} --deadline-ms 30000`,
+			"Steer: Agent Hub Enter attaches; Esc returns",
+		];
+	} else if (node.status === "running" && attemptId !== undefined) {
+		focus.controls = [`Interrupt: /workflow interrupt ${attemptId} ${node.id} --deadline-ms 30000`];
 	}
 	return focus;
 }
 
+function selectedWorkflowGraphNodeActivation(
+	node: WorkflowGraphNodeView,
+	activationIndex: number | undefined,
+): WorkflowGraphNodeActivationView | undefined {
+	const activations = node.activations ?? [];
+	if (activations.length === 0) return undefined;
+	if (activationIndex === undefined || !Number.isFinite(activationIndex)) return activations[0];
+	const boundedIndex = Math.max(0, Math.min(activations.length - 1, Math.floor(activationIndex)));
+	return activations[boundedIndex];
+}
+
+function applyWorkflowGraphActivationFocus(
+	focus: WorkflowGraphFocusView,
+	activation: WorkflowGraphNodeActivationView,
+	activationCount: number | undefined,
+): void {
+	focus.activationId = activation.id;
+	focus.activationOrdinal = activation.ordinal;
+	if (activationCount !== undefined) focus.activationCount = activationCount;
+	if (activation.focusAgentId !== undefined) focus.focusAgentId = activation.focusAgentId;
+	if (activation.generation !== undefined) focus.generation = activation.generation;
+	if (activation.model !== undefined) focus.model = activation.model;
+	if (activation.tool !== undefined) focus.tool = activation.tool;
+	if (activation.stats !== undefined) focus.stats = activation.stats;
+	if (activation.activity !== undefined) focus.activity = activation.activity;
+	if (activation.verdict !== undefined) focus.summary = `verdict ${activation.verdict}`;
+	if (activation.summary !== undefined) focus.summary = activation.summary;
+	if (activation.error !== undefined) focus.error = activation.error;
+	if (activation.reason !== undefined) focus.reason = activation.reason;
+	if (activation.recentOutput !== undefined) focus.recentOutput = activation.recentOutput;
+}
+
 function selectWorkflowFocusNode(nodes: readonly WorkflowGraphNodeView[]): WorkflowGraphNodeView | undefined {
 	return (
+		nodes.find(node => node.focused) ??
 		nodes.find(node => node.status === "failed") ??
 		nodes.find(node => node.status === "running") ??
 		nodes.find(node => node.status === "frontier") ??
@@ -2092,6 +2260,8 @@ export function formatWorkflowFocusLines(view: WorkflowGraphView): string[] {
 	const tool = focus.tool === undefined ? "" : ` · tool ${formatSingleLineWorkflowDetail(focus.tool)}`;
 	const stats = focus.stats === undefined ? "" : ` · ${focus.stats}`;
 	lines.push(`${focus.role} · ${focus.label} ${formatWorkflowFocusStatus(focus)}${generation}${model}${tool}${stats}`);
+	const activationLine = formatWorkflowFocusActivationLine(focus);
+	if (activationLine !== undefined) lines.push(activationLine);
 	if (focus.activity !== undefined) {
 		lines.push(`activity: ${formatSingleLineWorkflowDetail(focus.activity)}`);
 	}
@@ -2113,6 +2283,13 @@ export function formatWorkflowFocusLines(view: WorkflowGraphView): string[] {
 	return lines;
 }
 
+function formatWorkflowFocusActivationLine(focus: WorkflowGraphFocusView): string | undefined {
+	if (focus.activationCount === undefined || focus.activationCount <= 0) return undefined;
+	const ordinal = focus.activationOrdinal ?? focus.activationCount;
+	const id = focus.activationId === undefined ? "" : ` · ${focus.activationId}`;
+	return `activation: ${ordinal}/${focus.activationCount}${id}`;
+}
+
 function formatWorkflowFocusStatus(focus: WorkflowGraphFocusView): string {
 	if (focus.status === "running" && focus.focusAgentId !== undefined) return "live";
 	return focus.status;
@@ -2127,7 +2304,18 @@ export function formatWorkflowChangeReviewLines(view: WorkflowGraphView): string
 }
 
 export function formatWorkflowControlLines(view: WorkflowGraphView): string[] {
-	return view.actions.map(formatWorkflowControlAction);
+	return [...view.actions.map(formatWorkflowControlAction), ...formatWorkflowNavigationControlLines(view)];
+}
+
+function formatWorkflowNavigationControlLines(view: WorkflowGraphView): string[] {
+	if (view.nodes.length === 0) return [];
+	const hasRepeatedNode = view.nodes.some(node => (node.activationCount ?? node.activations?.length ?? 0) > 1);
+	const lines = ["Navigate nodes: Tab/Shift-Tab nodes; h help; /workflow help for full command guide"];
+	if (hasRepeatedNode) lines.push("Switch activation: [/] activations for the selected node");
+	if ((view.activeAgents ?? []).length > 0) {
+		lines.push("Agent Hub transcript: Enter/observe opens the selected live agent transcript; Esc returns");
+	}
+	return lines;
 }
 
 function formatWorkflowControlAction(action: string): string {

@@ -1,5 +1,6 @@
 import {
 	type Component,
+	matchesKey,
 	type NativeScrollbackLiveRegion,
 	replaceTabs,
 	truncateToWidth,
@@ -16,6 +17,7 @@ import {
 	formatWorkflowSelectedRoute,
 	formatWorkflowSubflow,
 	renderWorkflowGraphDiagram,
+	selectWorkflowGraphViewNode,
 	type WorkflowGraphActiveAgentView,
 	type WorkflowGraphNodeStatus,
 	type WorkflowGraphView,
@@ -40,6 +42,10 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 	#heightProvider?: () => number | undefined;
 	#lastObservedViewSignature?: string;
 	#onViewChange?: (view: WorkflowGraphView) => void;
+	#requestRender?: (component: Component) => void;
+	#selectedActivationIndexByNodeId = new Map<string, number>();
+	#selectedNodeId?: string;
+	#showKeyboardHelp = false;
 	#view: WorkflowGraphView;
 	#viewProvider?: () => WorkflowGraphView | undefined;
 	#refreshTimer?: NodeJS.Timeout;
@@ -48,6 +54,7 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 		this.#view = view;
 		this.#viewProvider = options.viewProvider;
 		this.#onViewChange = options.onViewChange;
+		this.#requestRender = options.requestRender;
 		this.#heightProvider = options.heightProvider;
 		this.#displayMode = options.displayMode ?? "full";
 		this.#displayModeProvider = options.displayModeProvider;
@@ -94,8 +101,34 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 		return 0;
 	}
 
+	handleInput(data: string): void {
+		const view = this.#currentView();
+		if (view.nodes.length === 0) return;
+		if (matchesKey(data, "tab") || matchesKey(data, "right")) {
+			this.#moveSelectedNode(view, 1);
+			return;
+		}
+		if (matchesKey(data, "shift+tab") || data === "\x1b[Z" || matchesKey(data, "left")) {
+			this.#moveSelectedNode(view, -1);
+			return;
+		}
+		if (data === "]" || data === "}") {
+			this.#moveSelectedActivation(view, 1);
+			return;
+		}
+		if (data === "[" || data === "{") {
+			this.#moveSelectedActivation(view, -1);
+			return;
+		}
+		if (data.toLowerCase() === "h" || data === "?") {
+			this.#showKeyboardHelp = !this.#showKeyboardHelp;
+			this.#selectionChanged();
+		}
+	}
+
 	#currentView(): WorkflowGraphView {
-		return this.#viewProvider?.() ?? this.#view;
+		const view = this.#viewProvider?.() ?? this.#view;
+		return this.#selectedView(view);
 	}
 
 	#observeView(view: WorkflowGraphView): void {
@@ -105,6 +138,65 @@ export class WorkflowGraphComponent implements Component, NativeScrollbackLiveRe
 		this.#lastObservedViewSignature = signature;
 		this.#onViewChange(view);
 	}
+
+	#selectedView(view: WorkflowGraphView): WorkflowGraphView {
+		const nodeId = this.#selectedWorkflowNodeId(view);
+		if (nodeId === undefined) return this.#viewWithKeyboardHelp(view);
+		const activationIndex = this.#selectedActivationIndexByNodeId.get(nodeId);
+		return this.#viewWithKeyboardHelp(selectWorkflowGraphViewNode(view, nodeId, activationIndex));
+	}
+
+	#selectedWorkflowNodeId(view: WorkflowGraphView): string | undefined {
+		if (this.#selectedNodeId !== undefined && view.nodes.some(node => node.id === this.#selectedNodeId)) {
+			return this.#selectedNodeId;
+		}
+		return view.focus?.nodeId ?? view.nodes.find(node => node.focused)?.id ?? view.nodes[0]?.id;
+	}
+
+	#moveSelectedNode(view: WorkflowGraphView, delta: number): void {
+		const selectedNodeId = this.#selectedWorkflowNodeId(view);
+		if (selectedNodeId === undefined) return;
+		const selectedIndex = view.nodes.findIndex(node => node.id === selectedNodeId);
+		if (selectedIndex === -1) return;
+		const nextIndex = wrapWorkflowGraphIndex(selectedIndex + delta, view.nodes.length);
+		this.#selectedNodeId = view.nodes[nextIndex]?.id;
+		this.#selectionChanged();
+	}
+
+	#moveSelectedActivation(view: WorkflowGraphView, delta: number): void {
+		const selectedNodeId = this.#selectedWorkflowNodeId(view);
+		if (selectedNodeId === undefined) return;
+		const node = view.nodes.find(candidate => candidate.id === selectedNodeId);
+		const activationCount = node?.activations?.length ?? node?.activationCount ?? 0;
+		if (activationCount <= 1) return;
+		const currentIndex = this.#selectedActivationIndexByNodeId.get(selectedNodeId) ?? 0;
+		this.#selectedActivationIndexByNodeId.set(
+			selectedNodeId,
+			wrapWorkflowGraphIndex(currentIndex + delta, activationCount),
+		);
+		this.#selectionChanged();
+	}
+
+	#viewWithKeyboardHelp(view: WorkflowGraphView): WorkflowGraphView {
+		if (!this.#showKeyboardHelp) return view;
+		return {
+			...view,
+			actions: [
+				"Keyboard help: Tab/Shift-Tab moves node focus; [/] switches activation; Enter/observe opens Agent Hub transcript; /workflow dashboard collapse frees prompt space",
+				...view.actions,
+			],
+		};
+	}
+
+	#selectionChanged(): void {
+		this.invalidate();
+		this.#requestRender?.(this);
+	}
+}
+
+function wrapWorkflowGraphIndex(index: number, length: number): number {
+	if (length <= 0) return 0;
+	return ((index % length) + length) % length;
 }
 
 type WorkflowGraphDensity = "full" | "compact";
@@ -508,6 +600,14 @@ function workflowGraphLiveWorkbenchLines(
 	if (railLines.length > 0) {
 		lines.push(...workflowGraphWorkbenchGroup("Operator rail", railLines, width, density === "full" ? 2 : 1));
 	}
+	lines.push(
+		...workflowGraphWorkbenchGroup(
+			"Guide: keyboard",
+			workflowGraphInteractionGuideLines(view, width, density),
+			width,
+			density === "full" ? 2 : 1,
+		),
+	);
 	if (maxFocus > 0) lines.push(...workflowGraphWorkbenchGroup("Focus: selected node", focusLines, width, maxFocus));
 	if (maxTabs > 0) {
 		const tabLines = workflowGraphAgentTabLines(view, width);
@@ -585,9 +685,26 @@ function workflowGraphOperatorRailPrimaryToken(subject: string, hasLiveAgentTarg
 	return hasLiveAgentTarget ? `◉ monitor ${compactSubject}` : `◎ focus ${compactSubject}`;
 }
 
+function workflowGraphInteractionGuideLines(
+	view: WorkflowGraphView,
+	width: number,
+	density: WorkflowGraphDensity,
+): string[] {
+	const activationHint = view.nodes.some(node => (node.activationCount ?? node.activations?.length ?? 0) > 1)
+		? "  [/] activations"
+		: "";
+	const transcriptHint = (view.activeAgents ?? []).length > 0 ? "Agent Hub transcript" : "/workflow help agents";
+	const lines =
+		density === "full"
+			? [`Tab/Shift-Tab nodes${activationHint}`, `h help  ${transcriptHint}`]
+			: [`Tab/Shift-Tab nodes${activationHint}  h help`];
+	return lines.map(line => truncateToWidth(line, Math.max(20, width)));
+}
+
 function workflowGraphSelectedAgentTarget(view: WorkflowGraphView): string | undefined {
 	const agents = view.activeAgents ?? [];
 	const focusAgentId = view.focus?.focusAgentId;
+	if (view.focus !== undefined && focusAgentId === undefined) return undefined;
 	return agents.find(agent => agent.focusAgentId === focusAgentId)?.focusAgentId ?? agents[0]?.focusAgentId;
 }
 

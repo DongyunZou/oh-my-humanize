@@ -75,6 +75,43 @@ describe("WorkflowGraphComponent display modes", () => {
 		expect(compact).toContain("/workflow interrupt");
 	});
 
+	it("makes workflow node and transcript navigation discoverable", () => {
+		const text = new WorkflowGraphComponent(workflowGraphNavigationViewFixture(), {
+			displayModeProvider: () => "full",
+		})
+			.render(140)
+			.map(stripAnsi)
+			.join("\n");
+
+		expect(text).toContain("Tab/Shift-Tab nodes");
+		expect(text).toContain("[/] activations");
+		expect(text).toContain("h help");
+		expect(text).toContain("Agent Hub transcript");
+		expect(text).toContain("Focus: selected node");
+	});
+
+	it("switches selected workflow nodes and activation summaries from keyboard input", () => {
+		const component = new WorkflowGraphComponent(workflowGraphNavigationViewFixture(), {
+			displayModeProvider: () => "full",
+		});
+
+		expect(stripAnsi(component.render(220).join("\n"))).toContain("Planner: Plan completed");
+
+		component.handleInput?.("\t");
+		const buildText = stripAnsi(component.render(220).join("\n"));
+		expect(buildText).toContain("Builder: Build round completed");
+		expect(buildText).toContain("activation: 1/3");
+		expect(buildText).toContain("summary: initial implementation compiled");
+
+		component.handleInput?.("]");
+		const secondActivationText = stripAnsi(component.render(220).join("\n"));
+		expect(secondActivationText).toContain("activation: 2/3");
+		expect(secondActivationText).toContain("summary: fixed reviewer blocking feedback");
+
+		component.handleInput?.("\x1b[Z");
+		expect(stripAnsi(component.render(220).join("\n"))).toContain("Planner: Plan completed");
+	});
+
 	it("colors arrows and occluded graph segments with distinct terminal styles", () => {
 		const text = new WorkflowGraphComponent(workflowGraphOcclusionViewFixture(), {
 			displayModeProvider: () => "full",
@@ -224,6 +261,117 @@ function workflowGraphOcclusionViewFixture(): WorkflowGraphView {
 			"Refresh",
 			"Interrupt Builder · Left branch: /workflow interrupt attempt-1 left --deadline-ms 30000",
 			"Stop attempt · /workflow stop attempt-1 --deadline-ms 30000",
+		],
+	};
+}
+
+function workflowGraphNavigationViewFixture(): WorkflowGraphView {
+	return {
+		familyId: "keyboard-navigation-check",
+		latestFreezeId: "flowfreeze:navigation",
+		currentAttempt: {
+			id: "attempt-1",
+			status: "running",
+			runtimeBindingId: "binding-1",
+		},
+		changes: { approved: 0, proposed: 0, rejected: 0 },
+		topology: {
+			parallelFanOuts: 0,
+			branchPoints: 1,
+			joins: 0,
+			loops: 1,
+			subflows: 0,
+		},
+		focus: {
+			nodeId: "plan",
+			label: "Plan",
+			role: "Planner",
+			status: "completed",
+			summary: "plan completed",
+		},
+		nodes: [
+			{
+				id: "plan",
+				kind: "Planner",
+				status: "completed",
+				activationCount: 1,
+				focused: true,
+				activations: [
+					{
+						id: "activation-plan-1",
+						ordinal: 1,
+						status: "completed",
+						summary: "plan completed",
+					},
+				],
+			},
+			{
+				id: "buildRound",
+				kind: "Builder",
+				status: "completed",
+				activationCount: 3,
+				focused: false,
+				activations: [
+					{
+						id: "activation-build-1",
+						ordinal: 1,
+						status: "completed",
+						summary: "initial implementation compiled",
+					},
+					{
+						id: "activation-build-2",
+						ordinal: 2,
+						status: "completed",
+						summary: "fixed reviewer blocking feedback",
+					},
+					{
+						id: "activation-build-3",
+						ordinal: 3,
+						status: "completed",
+						summary: "final validation passed",
+					},
+				],
+			},
+			{
+				id: "reviewRound",
+				kind: "Reviewer",
+				status: "running",
+				activationCount: 1,
+				focused: false,
+				activations: [
+					{
+						id: "activation-review-1",
+						ordinal: 1,
+						status: "running",
+						focusAgentId: "reviewRound",
+						activity: "checking the final diff",
+					},
+				],
+			},
+		],
+		edges: [
+			{ from: "plan", to: "buildRound" },
+			{ from: "buildRound", to: "reviewRound" },
+			{ from: "reviewRound", to: "buildRound", condition: "issues" },
+		],
+		activeAgents: [
+			{
+				activationId: "activation-review-1",
+				focusAgentId: "reviewRound",
+				nodeId: "reviewRound",
+				label: "Review round",
+				role: "Reviewer",
+				status: "running",
+				activity: "checking the final diff",
+			},
+		],
+		lineage: [],
+		actions: [
+			"Refresh: /workflow graph --family-id keyboard-navigation-check",
+			"Interrupt Reviewer · Review round: /workflow interrupt attempt-1 reviewRound --deadline-ms 30000",
+			"Stop attempt: /workflow stop attempt-1 --deadline-ms 30000",
+			"Open Agent Hub: double-left or observe key; watch/intervene reviewRound",
+			"Focused prompt: Agent Hub Enter attaches to the selected agent; Esc returns to workflow control",
 		],
 	};
 }
