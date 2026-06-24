@@ -368,6 +368,62 @@ describe("parallel-implementation-review flow contract", () => {
 		expect(await fileExists(path.join(cwd, "workflow-output", "rerun-marker"))).toBe(false);
 	});
 
+	it("reuses declared validation emitted as a validations array entry", async () => {
+		const cwd = await createTempDir();
+		await writeTupleFiles(cwd, "P03-T10-test");
+		await fs.mkdir(path.join(cwd, "workflow-output"), { recursive: true });
+		const command = ".venv/bin/python -m pytest tests/client/test_async_client.py";
+		await Bun.write(path.join(cwd, "task.md"), `Validation Command:\n${command}\n`);
+		await Bun.write(path.join(cwd, "workflow-output", "validation-attempt-1-stdout-P03-T10-test.txt"), "54 passed\n");
+		await Bun.write(path.join(cwd, "workflow-output", "validation-attempt-1-stderr-P03-T10-test.txt"), "");
+		await Bun.write(path.join(cwd, "workflow-output", "validation-attempt-1-exitcode-P03-T10-test.txt"), "0\n");
+		await Bun.write(
+			path.join(cwd, "workflow-output", "tests-lane-P03-T10-test.json"),
+			`${JSON.stringify(
+				{
+					tuple_id: "P03-T10-test",
+					producer_node: "implementTests",
+					status: "complete",
+					validations: [
+						{
+							kind: "focused",
+							command: `${command}::test_manual_stream_closes_on_iterator_base_exception`,
+							environment: {},
+							result: "pass",
+							exit_code: 0,
+						},
+						{
+							kind: "declared",
+							command,
+							environment: {},
+							result: "pass",
+							exit_code: 0,
+							stdout: "workflow-output/validation-attempt-1-stdout-P03-T10-test.txt",
+							stderr: "workflow-output/validation-attempt-1-stderr-P03-T10-test.txt",
+							exitcode: "workflow-output/validation-attempt-1-exitcode-P03-T10-test.txt",
+						},
+					],
+				},
+				null,
+				2,
+			)}\n`,
+		);
+
+		const result = await runScript(cwd, "run-declared-validation.js", {});
+
+		expect(result.verdict).toBe("PASS");
+		expect(result.data?.validation).toMatchObject({
+			command,
+			result: "passed",
+			exitCode: 0,
+			stdoutArtifact: "workflow-output/validation-attempt-1-stdout-P03-T10-test.txt",
+			stderrArtifact: "workflow-output/validation-attempt-1-stderr-P03-T10-test.txt",
+			exitCodeArtifact: "workflow-output/validation-attempt-1-exitcode-P03-T10-test.txt",
+			reusedFromTestLane: "workflow-output/tests-lane-P03-T10-test.json",
+		});
+		expect(await fileExists(path.join(cwd, "workflow-output", "rerun-marker"))).toBe(false);
+	});
+
 	it("reuses validation evidence with test-lane file hash and exit-code file aliases", async () => {
 		const cwd = await createTempDir();
 		await writeTupleFiles(cwd, "P06-T06-test");

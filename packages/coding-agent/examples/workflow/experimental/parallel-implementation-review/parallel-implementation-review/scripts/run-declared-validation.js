@@ -236,7 +236,23 @@ async function reusableTupleScopedValidationFiles({
 
 function declaredValidationObject(data) {
 	const validation = optionalObjectField(data, "validation");
-	return optionalObjectField(data, "declared_validation") ?? optionalObjectField(validation, "declared") ?? validation ?? {};
+	return (
+		optionalObjectField(data, "declared_validation") ??
+		optionalObjectField(validation, "declared") ??
+		declaredValidationArrayEntry(data) ??
+		validation ??
+		{}
+	);
+}
+
+function declaredValidationArrayEntry(data) {
+	return arrayField(data, "validations").find(entry => isDeclaredValidationEntry(entry)) ?? null;
+}
+
+function isDeclaredValidationEntry(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const label = String(value.kind ?? value.type ?? value.name ?? value.id ?? "").toLowerCase();
+	return label === "declared" || label === "declared_validation" || label === "declared-validation";
 }
 
 function validationArtifactPaths(data, validation, tupleId) {
