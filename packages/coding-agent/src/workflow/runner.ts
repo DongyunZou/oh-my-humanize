@@ -422,7 +422,7 @@ async function executeAndPersistActivation(
 			appendLifecycleActivationStarted(options, activation, node);
 		}
 		const message = error instanceof Error ? error.message : String(error);
-		const abortReason = workflowNodeAbortReason(context.nodeAbortSignal ?? context.signal);
+		const abortReason = workflowNodeAbortReason(workflowNodeCompletionSignal(context));
 		if (abortReason !== undefined) {
 			appendWorkflowActivationAborted(options.host, run.id, {
 				activationId: activation.id,
@@ -445,10 +445,27 @@ function workflowNodeRuntimeSignal(context: WorkflowSchedulerExecutionContext): 
 }
 
 function workflowNodeCompletionSignal(context: WorkflowSchedulerExecutionContext): AbortSignal | undefined {
-	if (context.nodeAbortSignal === undefined || context.signal === undefined) {
-		return workflowNodeRuntimeSignal(context);
-	}
-	return combineAbortSignals(context.nodeAbortSignal, context.signal);
+	if (context.nodeAbortSignal === undefined) return context.signal;
+	if (context.signal === undefined) return context.nodeAbortSignal;
+	return combineNodeCompletionAbortSignals(context.nodeAbortSignal, context.signal);
+}
+
+function combineNodeCompletionAbortSignals(nodeSignal: AbortSignal, schedulerSignal: AbortSignal): AbortSignal {
+	const controller = new AbortController();
+	const abortFromNode = (): void => {
+		if (!controller.signal.aborted) controller.abort(nodeSignal.reason);
+	};
+	const abortFromScheduler = (): void => {
+		const reason = workflowNodeAbortReason(schedulerSignal);
+		if (isWorkflowFailFastAbortReason(reason) && !controller.signal.aborted) {
+			controller.abort(reason);
+		}
+	};
+	if (nodeSignal.aborted) abortFromNode();
+	if (schedulerSignal.aborted) abortFromScheduler();
+	nodeSignal.addEventListener("abort", abortFromNode, { once: true });
+	schedulerSignal.addEventListener("abort", abortFromScheduler, { once: true });
+	return controller.signal;
 }
 
 function awaitWorkflowNodeExecution<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
