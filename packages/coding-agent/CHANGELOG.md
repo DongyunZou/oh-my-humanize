@@ -23,6 +23,9 @@
   environment directories such as `.venv/` and `node_modules/` do not pollute
   integration handoffs, rollback coverage, or evidence-contract changed-file
   checks.
+- Fixed the experimental parallel implementation/review workflow so final
+  validation can reuse test-lane declared validation evidence emitted under
+  nested `validation.declared` records.
 - Fixed workflow parallel fail-fast handling so a failed activation aborts
   running sibling activations, stops downstream scheduling, and waits for
   aborted sibling runtimes to settle before the attempt reaches a terminal

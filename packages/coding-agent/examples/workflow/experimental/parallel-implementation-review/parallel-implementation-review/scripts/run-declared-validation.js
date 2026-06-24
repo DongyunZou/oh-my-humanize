@@ -235,7 +235,8 @@ async function reusableTupleScopedValidationFiles({
 }
 
 function declaredValidationObject(data) {
-	return optionalObjectField(data, "declared_validation") ?? optionalObjectField(data, "validation") ?? {};
+	const validation = optionalObjectField(data, "validation");
+	return optionalObjectField(data, "declared_validation") ?? optionalObjectField(validation, "declared") ?? validation ?? {};
 }
 
 function validationArtifactPaths(data, validation, tupleId) {
@@ -320,6 +321,7 @@ function latestValidationAttempt(data, validation) {
 
 async function recordedValidationHashes(data) {
 	const hashes = {};
+	const declaredValidation = declaredValidationObject(data);
 	addHashMap(hashes, data?.artifact_hashes);
 	addHashMap(hashes, data?.artifact_hashes_sha256);
 	addHashMap(hashes, data?.file_hashes);
@@ -327,24 +329,31 @@ async function recordedValidationHashes(data) {
 	addHashMap(hashes, data?.checksums);
 	addHashMap(hashes, data?.validation?.evidence_hashes);
 	addHashMap(hashes, data?.declared_validation?.evidence_hashes);
+	addHashMap(hashes, declaredValidation?.evidence_hashes);
 	addHashMap(hashes, data?.validation?.reusedArtifactHashes);
 	addHashMap(hashes, data?.declared_validation?.reusedArtifactHashes);
+	addHashMap(hashes, declaredValidation?.reusedArtifactHashes);
 	await addCoverageProfileHashes(hashes, data?.coverage_profiles);
 	await addCoverageProfileHashes(hashes, data?.validation?.coverage_profiles);
 	await addCoverageProfileHashes(hashes, data?.declared_validation?.coverage_profiles);
+	await addCoverageProfileHashes(hashes, declaredValidation?.coverage_profiles);
 	await addCoverageProfileHashes(hashes, data?.validation?.reusedCoverageProfiles);
 	await addCoverageProfileHashes(hashes, data?.declared_validation?.reusedCoverageProfiles);
+	await addCoverageProfileHashes(hashes, declaredValidation?.reusedCoverageProfiles);
 	return hashes;
 }
 
 async function recordedCoverageProfiles(data) {
 	const profiles = [];
 	const seen = new Set();
+	const declaredValidation = declaredValidationObject(data);
 	await collectCoverageProfiles(profiles, seen, data?.coverage_profiles);
 	await collectCoverageProfiles(profiles, seen, data?.validation?.coverage_profiles);
 	await collectCoverageProfiles(profiles, seen, data?.declared_validation?.coverage_profiles);
+	await collectCoverageProfiles(profiles, seen, declaredValidation?.coverage_profiles);
 	await collectCoverageProfiles(profiles, seen, data?.validation?.reusedCoverageProfiles);
 	await collectCoverageProfiles(profiles, seen, data?.declared_validation?.reusedCoverageProfiles);
+	await collectCoverageProfiles(profiles, seen, declaredValidation?.reusedCoverageProfiles);
 	return profiles;
 }
 
