@@ -75,6 +75,8 @@ export async function runWorkflowScheduler(
 	const completedById = seedCompletedById(externalCompletedActivations);
 	const outputsByNode = seedOutputsByNode(externalCompletedActivations);
 	const queuedJoinKeys = new Set<string>();
+	const failureController = new AbortController();
+	const schedulerSignal = combineSchedulerAbortSignals(options.signal, failureController.signal);
 	let nextActivationId = nextActivationOrdinal(externalCompletedActivations);
 	const createNextActivation = (nodeId: string, parentActivationIds: string[]): WorkflowActivation => ({
 		id: `activation-${nextActivationId++}`,
@@ -105,7 +107,7 @@ export async function runWorkflowScheduler(
 			}
 			const activation = queue.shift();
 			if (!activation) break;
-			if (workflowAbortReason(options.signal)) {
+			if (workflowAbortReason(schedulerSignal)) {
 				stoppedFrontierNodeIds = uniqueNodeIds([activation, ...queue]);
 				stopScheduling = true;
 				break;
@@ -127,12 +129,11 @@ export async function runWorkflowScheduler(
 			}
 			activation.status = "running";
 			activations.push(activation);
-			const nodeAbortSignal = options.nodeAbortSignalForActivation?.(activation) ?? options.nodeAbortSignal;
 			const context: WorkflowSchedulerExecutionContext = {
 				state,
 				completedActivations: completedActivationSnapshot(),
-				signal: options.signal,
-				nodeAbortSignal,
+				signal: schedulerSignal,
+				nodeAbortSignal: options.nodeAbortSignalForActivation?.(activation) ?? options.nodeAbortSignal,
 			};
 			running.set(activation.id, {
 				activation,
@@ -156,10 +157,19 @@ export async function runWorkflowScheduler(
 		if (result.error !== undefined) {
 			result.activation.status = "failed";
 			result.activation.error = result.error;
-			if (!stopScheduling) startReadyActivations();
+			stopScheduling = true;
+			if (!failureController.signal.aborted) {
+				failureController.abort(`workflow activation ${result.activation.nodeId} failed: ${result.error}`);
+			}
 			continue;
 		}
 		const output = result.output;
+		const failureAbortReason = workflowAbortReason(failureController.signal);
+		if (failureAbortReason !== undefined) {
+			result.activation.status = "aborted";
+			result.activation.reason = failureAbortReason;
+			continue;
+		}
 		if (output === undefined) {
 			result.activation.status = "failed";
 			result.activation.error = `workflow activation ${result.activation.id} produced no output`;
@@ -183,7 +193,7 @@ export async function runWorkflowScheduler(
 		completed.push(result.activation);
 		completedByNode.set(result.activation.nodeId, completed);
 		completedById.set(result.activation.id, result.activation);
-		if (workflowAbortReason(options.signal)) {
+		if (workflowAbortReason(schedulerSignal)) {
 			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
 			for (const nodeId of eligibleFrontierNodeIds(
 				definition,
@@ -217,6 +227,19 @@ export async function runWorkflowScheduler(
 	}
 
 	return { activations, limitReached, frontierNodeIds: stoppedFrontierNodeIds ?? uniqueNodeIds(queue), state };
+}
+
+function combineSchedulerAbortSignals(first: AbortSignal | undefined, second: AbortSignal): AbortSignal {
+	if (first === undefined) return second;
+	const controller = new AbortController();
+	const abortFrom = (signal: AbortSignal): void => {
+		if (!controller.signal.aborted) controller.abort(signal.reason);
+	};
+	if (first.aborted) abortFrom(first);
+	if (second.aborted) abortFrom(second);
+	first.addEventListener("abort", () => abortFrom(first), { once: true });
+	second.addEventListener("abort", () => abortFrom(second), { once: true });
+	return controller.signal;
 }
 
 async function executeSchedulerActivation(

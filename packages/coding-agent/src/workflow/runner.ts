@@ -376,19 +376,24 @@ async function executeAndPersistActivation(
 		if (modelAudit?.error && nodeRequiresModel(node)) {
 			throw new WorkflowRunnerError(modelAudit.error);
 		}
-		const executionSignal = context.nodeAbortSignal ?? context.signal;
+		const runtimeSignal = workflowNodeRuntimeSignal(context);
+		const completionSignal = workflowNodeCompletionSignal(context);
 		const rawOutput = await awaitWorkflowNodeExecution(
 			executeWorkflowNode(nodeForExecution, activation, options.runtimeHost, {
 				modelOverride: modelOverrideFromAudit(modelAudit),
-				signal: executionSignal,
+				signal: runtimeSignal,
 				context: {
 					state: context.state,
 					completedActivations: context.completedActivations,
 				},
 				resourceDir,
 			}),
-			executionSignal,
+			completionSignal,
 		);
+		const postExecutionAbortReason = workflowNodeAbortReason(completionSignal);
+		if (isWorkflowFailFastAbortReason(postExecutionAbortReason)) {
+			throw new WorkflowRunnerError(postExecutionAbortReason);
+		}
 		const output = validateWorkflowActivationOutput(materializeSingleWriteData(node, rawOutput), {
 			allowedWritePaths: node.writes,
 			stateSchema: options.definition.stateSchema,
@@ -435,6 +440,17 @@ async function executeAndPersistActivation(
 	}
 }
 
+function workflowNodeRuntimeSignal(context: WorkflowSchedulerExecutionContext): AbortSignal | undefined {
+	return context.nodeAbortSignal ?? context.signal;
+}
+
+function workflowNodeCompletionSignal(context: WorkflowSchedulerExecutionContext): AbortSignal | undefined {
+	if (context.nodeAbortSignal === undefined || context.signal === undefined) {
+		return workflowNodeRuntimeSignal(context);
+	}
+	return combineAbortSignals(context.nodeAbortSignal, context.signal);
+}
+
 function awaitWorkflowNodeExecution<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
 	if (signal === undefined) return operation;
 	const { promise, resolve, reject } = Promise.withResolvers<T>();
@@ -450,20 +466,42 @@ function awaitWorkflowNodeExecution<T>(operation: Promise<T>, signal: AbortSigna
 		signal.removeEventListener("abort", onAbort);
 		fn();
 	};
+	const rejectWithAbortReason = (): void => {
+		const reason = workflowNodeAbortReason(signal) ?? "workflow activation aborted";
+		settle(() => reject(new WorkflowRunnerError(reason)));
+	};
 	const onAbort = (): void => {
+		if (shouldWaitForWorkflowNodeAfterAbort(signal)) return;
 		if (abortTimer !== undefined) return;
-		abortTimer = setTimeout(() => {
-			const reason = workflowNodeAbortReason(signal) ?? "workflow activation aborted";
-			settle(() => reject(new Error(reason)));
-		}, 0);
+		abortTimer = setTimeout(rejectWithAbortReason, 0);
 	};
 	signal.addEventListener("abort", onAbort, { once: true });
 	operation.then(
-		output => settle(() => resolve(output)),
-		error => settle(() => reject(error)),
+		output => {
+			if (isWorkflowFailFastAbortReason(workflowNodeAbortReason(signal))) {
+				rejectWithAbortReason();
+				return;
+			}
+			settle(() => resolve(output));
+		},
+		error => {
+			if (isWorkflowFailFastAbortReason(workflowNodeAbortReason(signal))) {
+				rejectWithAbortReason();
+				return;
+			}
+			settle(() => reject(error));
+		},
 	);
 	if (signal.aborted) onAbort();
 	return promise;
+}
+
+function shouldWaitForWorkflowNodeAfterAbort(signal: AbortSignal): boolean {
+	return isWorkflowFailFastAbortReason(workflowNodeAbortReason(signal));
+}
+
+function isWorkflowFailFastAbortReason(reason: string | undefined): reason is string {
+	return reason?.startsWith("workflow activation ") === true && reason.includes(" failed:");
 }
 
 function materializeSingleWriteData(node: WorkflowNode, output: WorkflowActivationOutput): WorkflowActivationOutput {

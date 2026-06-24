@@ -502,6 +502,83 @@ edges:
 		expect(result.frontierNodeIds).toEqual(["afterLeft", "afterRight"]);
 	});
 
+	it("aborts running siblings and does not start downstream nodes after a parallel activation fails", async () => {
+		const definition = parseWorkflowDefinition(
+			`
+name: parallel-fail-fast-demo
+version: 1
+nodes:
+  start:
+    type: script
+  left:
+    type: script
+  right:
+    type: script
+  afterLeft:
+    type: script
+  afterRight:
+    type: script
+edges:
+  - from: start
+    to: left
+  - from: start
+    to: right
+  - from: left
+    to: afterLeft
+  - from: right
+    to: afterRight
+`,
+			{ sourcePath: "workflow.yml" },
+		);
+		const leftStarted = Promise.withResolvers<void>();
+		const leftObservedAbort = Promise.withResolvers<void>();
+		const rightStarted = Promise.withResolvers<void>();
+		const executed: string[] = [];
+
+		const result = await runWorkflowScheduler(definition, {
+			startNodeId: "start",
+			executeNode: async (activation, _node, context) => {
+				executed.push(activation.nodeId);
+				if (activation.nodeId === "left") {
+					leftStarted.resolve();
+					const signal = context.signal;
+					if (signal === undefined) {
+						throw new Error("left activation missing scheduler signal");
+					}
+					const abortWait = Promise.withResolvers<void>();
+					const onAbort = () => {
+						leftObservedAbort.resolve();
+						abortWait.resolve();
+					};
+					if (signal.aborted) {
+						onAbort();
+					} else {
+						signal.addEventListener("abort", onAbort, { once: true });
+					}
+					await abortWait.promise;
+					return { summary: "left drained after sibling failure" };
+				}
+				if (activation.nodeId === "right") {
+					rightStarted.resolve();
+					await leftStarted.promise;
+					throw new Error("right exploded");
+				}
+				return { summary: `ran ${activation.nodeId}` };
+			},
+		});
+
+		await rightStarted.promise;
+		await leftObservedAbort.promise;
+
+		expect(executed).toEqual(["start", "left", "right"]);
+		expect(result.activations.map(activation => [activation.nodeId, activation.status, activation.error])).toEqual([
+			["start", "completed", undefined],
+			["left", "aborted", undefined],
+			["right", "failed", "right exploded"],
+		]);
+		expect(result.frontierNodeIds).toEqual([]);
+	});
+
 	it("returns frontier without starting downstream activations when cancellation follows completion", async () => {
 		const definition = parseWorkflowDefinition(linearWorkflow, { sourcePath: "workflow.yml" });
 		const controller = new AbortController();

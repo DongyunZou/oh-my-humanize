@@ -13,6 +13,10 @@
 
 ### Fixed
 
+- Fixed workflow parallel fail-fast handling so a failed activation aborts
+  running sibling activations, stops downstream scheduling, and waits for
+  aborted sibling runtimes to settle before the attempt reaches a terminal
+  state.
 - Fixed workflow and non-interactive command environments so Python validation
   does not import packages from stale user-site editable installs left by other
   workflow workspaces.

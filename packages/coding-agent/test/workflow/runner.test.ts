@@ -624,6 +624,118 @@ edges:
 		]);
 	});
 
+	it("waits for fail-fast aborted sibling runtimes before failing a lifecycle attempt", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(
+			`
+name: parallel-fail-fast-runner-demo
+version: 1
+nodes:
+  start:
+    type: script
+  left:
+    type: script
+    writes:
+      - /left
+  right:
+    type: script
+  afterLeft:
+    type: script
+  afterRight:
+    type: script
+edges:
+  - from: start
+    to: left
+  - from: start
+    to: right
+  - from: left
+    to: afterLeft
+  - from: right
+    to: afterRight
+`,
+			{ sourcePath: "workflow.yml" },
+		);
+		const leftStarted = Promise.withResolvers<void>();
+		let leftSettled = false;
+		const calls: string[] = [];
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runScriptNode: async input => {
+				calls.push(input.node.id);
+				if (input.node.id === "left") {
+					leftStarted.resolve();
+					const signal = input.signal;
+					if (signal === undefined) {
+						throw new Error("left activation missing abort signal");
+					}
+					const abortWait = Promise.withResolvers<void>();
+					const onAbort = () => abortWait.resolve();
+					if (signal.aborted) {
+						onAbort();
+					} else {
+						signal.addEventListener("abort", onAbort, { once: true });
+					}
+					await abortWait.promise;
+					await Bun.sleep(25);
+					leftSettled = true;
+					return {
+						summary: "left drained after sibling failure",
+						statePatch: [{ op: "set", path: "/left", value: "discarded" }],
+					};
+				}
+				if (input.node.id === "right") {
+					await leftStarted.promise;
+					throw new Error("right exploded");
+				}
+				return { summary: `ran ${input.node.id}` };
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-parallel-fail-fast",
+			startNodeId: "start",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-parallel-fail-fast",
+				attemptId: "attempt-parallel-fail-fast-1",
+				freeze: createFreeze("flowfreeze:parallel-fail-fast", definition),
+				runtimeBindingSnapshot: binding("binding-parallel-fail-fast"),
+			},
+		});
+
+		expect(leftSettled).toBe(true);
+		expect(calls).toEqual(["start", "left", "right"]);
+		expect(
+			result.scheduler.activations.map(activation => [activation.nodeId, activation.status, activation.error]),
+		).toEqual([
+			["start", "completed", undefined],
+			["left", "aborted", undefined],
+			["right", "failed", "right exploded"],
+		]);
+		expect(reconstructWorkflowRuns(host.getBranch())[0]?.state).toEqual({});
+		const families = reconstructWorkflowFamilies(host.getBranch());
+		expect(families[0]?.attempts.map(attempt => [attempt.id, attempt.status, attempt.error])).toEqual([
+			["attempt-parallel-fail-fast-1", "failed", "right exploded"],
+		]);
+		expect(families[0]?.attempts[0]?.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["start", "completed"],
+			["left", "aborted"],
+			["right", "failed"],
+		]);
+		expect(families[0]?.checkpoints).toMatchObject([
+			{
+				id: "attempt-parallel-fail-fast-1:checkpoint-1",
+				attemptId: "attempt-parallel-fail-fast-1",
+				completedActivationIds: ["activation-1"],
+				abortedActivationIds: ["activation-2"],
+				frontierNodeIds: ["right"],
+				state: {},
+				sourceMapping: { right: "right" },
+			},
+		]);
+	});
+
 	it("checkpoints lifecycle attempts when max runtime elapses", async () => {
 		const host = createHost();
 		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });
