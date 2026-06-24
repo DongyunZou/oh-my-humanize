@@ -16,6 +16,9 @@
 - Fixed workflow stop checkpointing so graceful `/workflow stop` waits for the
   node abort deadline before checkpointing a still-running activation while
   preserving immediate fail-fast cancellation for sibling activation failures.
+- Fixed the experimental agent build/review loop workflow so dependency
+  environment directories such as `.venv/` and `node_modules/` do not pollute
+  semantic changed-file evidence or final archives.
 - Fixed workflow parallel fail-fast handling so a failed activation aborts
   running sibling activations, stops downstream scheduling, and waits for
   aborted sibling runtimes to settle before the attempt reaches a terminal

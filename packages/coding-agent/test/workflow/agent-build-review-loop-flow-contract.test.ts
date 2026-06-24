@@ -1264,6 +1264,27 @@ describe("agent-build-review-loop flow contract", () => {
 		});
 	});
 
+	it("ignores dependency environment directories when checking changed project scope", async () => {
+		const cwd = await createTempDir();
+		await initGitRepo(cwd);
+		await fs.mkdir(path.join(cwd, ".venv", "bin"), { recursive: true });
+		await fs.mkdir(path.join(cwd, "node_modules", ".bin"), { recursive: true });
+		await Bun.write(
+			path.join(cwd, "task.md"),
+			["Validation Command:", "true", "Allowed paths: src/allowed.ts, workflow-output/**, progress.md."].join("\n"),
+		);
+		await Bun.write(path.join(cwd, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
+		await Bun.write(path.join(cwd, "node_modules", ".bin", "tool"), "#!/usr/bin/env sh\n");
+
+		const result = await runSemanticArchiveGuard(cwd);
+
+		expect(result.verdict).toBe("PASS");
+		expect(result.data.findings).toEqual([]);
+		expect(
+			(await Bun.file(path.join(cwd, "workflow-output", "semantic-archive-guard.json")).json()).changedFiles,
+		).toEqual([]);
+	});
+
 	it("rejects archiving round evidence that claims downstream guard or archive completion", async () => {
 		const cwd = await createTempDir();
 		await fs.mkdir(path.join(cwd, "workflow-output", "round-2"), { recursive: true });
@@ -1357,6 +1378,39 @@ describe("agent-build-review-loop flow contract", () => {
 		await expect(runArchiveLoop(cwd, { decision: "complete" })).rejects.toThrow(
 			"changed files are outside task allowed paths",
 		);
+	});
+
+	it("omits dependency environment directories from final archive changed files", async () => {
+		const cwd = await createTempDir();
+		await initGitRepo(cwd);
+		await fs.mkdir(path.join(cwd, ".venv", "bin"), { recursive: true });
+		await fs.mkdir(path.join(cwd, "src"), { recursive: true });
+		await fs.mkdir(path.join(cwd, "workflow-output", "round-1"), { recursive: true });
+		await Bun.write(
+			path.join(cwd, "task.md"),
+			["Validation Command:", "true", "Allowed paths: src/allowed.ts, workflow-output/**, progress.md."].join("\n"),
+		);
+		await Bun.write(
+			path.join(cwd, "progress.md"),
+			"ROUND 1: changed allowed behavior; validation=true; result=pass\n",
+		);
+		await Bun.write(path.join(cwd, "src", "allowed.ts"), "export const allowed = true;\n");
+		await Bun.write(path.join(cwd, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stdout.txt"), "ok\n");
+		await Bun.write(path.join(cwd, "workflow-output", "round-1", "validation-stderr.txt"), "\n");
+
+		await runArchiveLoop(cwd, {
+			decision: "complete",
+			reason: "review accepted the scoped change",
+			reviewVerdict: "complete",
+		});
+
+		const archive = await Bun.file(path.join(cwd, "workflow-output", "final-agent-loop-archive.md")).text();
+		expect(archive).toContain("- src/allowed.ts");
+		expect(archive).not.toContain(".venv");
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			changed_files: ["src/allowed.ts"],
+		});
 	});
 
 	it("rejects archiving a complete route whose reviewer still requests another build round", async () => {

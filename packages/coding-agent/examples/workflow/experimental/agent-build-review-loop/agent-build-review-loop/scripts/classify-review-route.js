@@ -519,8 +519,16 @@ function ignoredEvidencePath(file) {
 		file === "monitor-assignment.json" ||
 		file === "evidence-ledger.jsonl" ||
 		file.startsWith("workflow-output/") ||
-		file.startsWith("transcripts/")
+		file.startsWith("transcripts/") ||
+		ignoredProjectArtifactPath(file)
 	);
+}
+
+function ignoredProjectArtifactPath(file) {
+	const ignoredSegments = new Set([".venv", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__pycache__"]);
+	return normalizeEvidencePath(file)
+		.split("/")
+		.some(segment => ignoredSegments.has(segment));
 }
 
 function uniqueSorted(files) {

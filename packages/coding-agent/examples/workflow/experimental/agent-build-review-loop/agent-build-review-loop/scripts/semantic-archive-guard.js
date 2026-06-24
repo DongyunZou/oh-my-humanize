@@ -445,10 +445,22 @@ function ignoredEvidencePath(file) {
 		file === "task.md" ||
 		file === "progress.md" ||
 		file.startsWith("workflow-output/") ||
-		file.includes("/.pytest_cache/") ||
-		file.includes("/node_modules/") ||
-		file.includes("/.venv/") ||
-		file.includes("/dist/") ||
-		file.includes("/build/")
+		ignoredProjectArtifactPath(file)
 	);
+}
+
+function ignoredProjectArtifactPath(file) {
+	const ignoredSegments = new Set([
+		".venv",
+		"node_modules",
+		".pytest_cache",
+		".mypy_cache",
+		".ruff_cache",
+		"__pycache__",
+		"dist",
+		"build",
+	]);
+	return normalizeEvidencePath(file)
+		.split("/")
+		.some(segment => ignoredSegments.has(segment));
 }
