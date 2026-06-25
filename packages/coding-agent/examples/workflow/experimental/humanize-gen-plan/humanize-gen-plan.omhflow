@@ -1,0 +1,233 @@
+---
+name: humanize-gen-plan
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Humanize Gen Plan
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    plan: object
+    /plan/request/draft: string
+    /plan/codexAnalysis: object
+    /plan/candidate: object
+    /plan/final: object
+resources:
+  - path: prompts/collect-plan-request.md
+    kind: prompt
+  - path: scripts/load-plan-request.js
+    kind: script
+  - path: scripts/materialize-plan.js
+    kind: script
+  - path: prompts/relevance-check.md
+    kind: prompt
+  - path: prompts/first-pass-analysis.md
+    kind: prompt
+  - path: prompts/candidate-plan.md
+    kind: prompt
+  - path: prompts/convergence-review.md
+    kind: prompt
+  - path: prompts/final-plan.md
+    kind: prompt
+  - path: templates/gen-plan-template.md
+    kind: data
+capabilities:
+  agents:
+    - task
+    - reviewer
+  tools:
+    - eval
+nodes:
+  - id: collectPlanRequest
+    type: human
+    prompt:
+      file: prompts/collect-plan-request.md
+    writes:
+      - /plan/requestInput
+  - id: loadPlanRequest
+    type: script
+    script:
+      language: js
+      file: scripts/load-plan-request.js
+    reads:
+      - /plan/requestInput
+    writes:
+      - /plan
+  - id: relevanceCheck
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /plan/request
+    prompt:
+      template:
+        file: prompts/relevance-check.md
+        bindings:
+          request:
+            state: /plan/request
+    gates:
+      - RELEVANT
+      - NOT_RELEVANT
+    fallbackVerdict: NOT_RELEVANT
+  - id: firstPassAnalysis
+    type: agent
+    agent: task
+    model:
+      role: reviewer
+    reads:
+      - /plan/request
+    writes:
+      - /plan/codexAnalysis
+    prompt:
+      template:
+        file: prompts/first-pass-analysis.md
+        bindings:
+          request:
+            state: /plan/request
+  - id: candidatePlan
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /plan/request
+      - /plan/codexAnalysis
+    writes:
+      - /plan/candidate
+    prompt:
+      template:
+        file: prompts/candidate-plan.md
+        bindings:
+          request:
+            state: /plan/request
+          codexAnalysis:
+            state: /plan/codexAnalysis
+          priorCandidate:
+            inline: "No prior candidate exists. Produce candidate v1."
+          convergenceReview:
+            inline: "No convergence review has run yet."
+  - id: convergenceReview
+    type: review
+    agent: reviewer
+    model:
+      role: reviewer
+    reads:
+      - /plan/candidate
+      - /plan/codexAnalysis
+    prompt:
+      template:
+        file: prompts/convergence-review.md
+        bindings:
+          candidate:
+            state: /plan/candidate
+          codexAnalysis:
+            state: /plan/codexAnalysis
+    gates:
+      - REVISE
+      - CONVERGED
+    fallbackVerdict: REVISE
+  - id: reviseCandidatePlan
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /plan/request
+      - /plan/codexAnalysis
+      - /plan/candidate
+      - /summary
+    writes:
+      - /plan/candidate
+    prompt:
+      template:
+        file: prompts/candidate-plan.md
+        bindings:
+          request:
+            state: /plan/request
+          codexAnalysis:
+            state: /plan/codexAnalysis
+          priorCandidate:
+            state: /plan/candidate
+          convergenceReview:
+            output:
+              node: convergenceReview
+              path: /summary
+              activation: latest-completed
+  - id: finalPlan
+    type: agent
+    agent: task
+    model:
+      role: builder
+    reads:
+      - /plan/request
+      - /plan/codexAnalysis
+      - /plan/candidate
+      - /summary
+    writes:
+      - /plan/final
+    prompt:
+      template:
+        file: prompts/final-plan.md
+        bindings:
+          request:
+            state: /plan/request
+          codexAnalysis:
+            state: /plan/codexAnalysis
+          candidate:
+            state: /plan/candidate
+          convergenceReview:
+            output:
+              node: convergenceReview
+              path: /summary
+              activation: latest-completed
+  - id: materializePlan
+    type: script
+    script:
+      language: js
+      file: scripts/materialize-plan.js
+    reads:
+      - /plan
+    writes:
+      - /plan
+edges:
+  - from: collectPlanRequest
+    to: loadPlanRequest
+  - from: loadPlanRequest
+    to: relevanceCheck
+  - from: relevanceCheck
+    to: firstPassAnalysis
+    when: outputs.relevanceCheck.verdict == "RELEVANT"
+  - from: relevanceCheck
+    to: materializePlan
+    when: outputs.relevanceCheck.verdict == "NOT_RELEVANT"
+  - from: firstPassAnalysis
+    to: candidatePlan
+  - from: candidatePlan
+    to: convergenceReview
+  - from: convergenceReview
+    to: reviseCandidatePlan
+    when: outputs.convergenceReview.verdict == "REVISE"
+  - from: reviseCandidatePlan
+    to: convergenceReview
+  - from: convergenceReview
+    to: finalPlan
+    when: outputs.convergenceReview.verdict == "CONVERGED"
+  - from: finalPlan
+    to: materializePlan
+```

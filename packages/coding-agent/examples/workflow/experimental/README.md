@@ -15,6 +15,8 @@ Current promoted built-ins: none.
 | `agent-build-review-loop` | Real build/review loop evidence on HTTPX plus recent Vite semantic canaries. | 100h cumulative clean evidence across diverse contexts. |
 | `humanize-rlcr` | Real RLCR-style implementation/review evidence and recent Axum semantic canaries. | Longer clean current-commit evidence and broader contexts. |
 | `kda-humanize` | Nested subflow composition and KDA-style candidate validation evidence. | Fresh clean long-running runs after recent KDA flow-control repairs. |
+| `humanize-gen-idea` | Seeded candidate for repo-grounded idea drafting before plan generation. | First fresh canary-grade success sample and compatibility evidence with gen-plan. |
+| `humanize-gen-plan` | Seeded candidate for draft-to-plan generation before Humanize RLCR. | First fresh canary-grade success sample and downstream RLCR handoff evidence. |
 | `parallel-implementation-review` | Real parallel implementation/review evidence and repaired durable final archive contract. | Fresh clean long-running runs after finalizer repair. |
 | `bug-triage-repro-fix` | Seeded candidate for reproduce-first bug repair. | First fresh canary-grade success sample or recorded-and-repaired defect. |
 | `documentation-audit` | Seeded candidate for project-scoped documentation consistency repair. | First fresh canary-grade success sample or recorded-and-repaired defect. |

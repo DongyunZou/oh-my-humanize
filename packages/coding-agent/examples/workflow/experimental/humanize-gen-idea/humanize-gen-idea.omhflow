@@ -1,0 +1,258 @@
+---
+name: humanize-gen-idea
+version: 1
+schema: omhflow/v1
+models:
+  roles:
+    builder: gpt-5.5
+    reviewer: gpt-5.5
+  defaults:
+    agent: builder
+    review: reviewer
+  unavailable: fallback-to-parent
+checkpoint:
+  stopDeadlineMs: 300000
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Humanize Gen Idea
+
+```yaml workflow
+stateSchema:
+  version: 1
+  shape:
+    idea: object
+    /idea/input/body: string
+    /idea/directions: object
+    /idea/synthesis: object
+resources:
+  - path: prompts/collect-idea-request.md
+    kind: prompt
+  - path: scripts/load-idea-request.js
+    kind: script
+  - path: scripts/materialize-idea-draft.js
+    kind: script
+  - path: prompts/generate-directions.md
+    kind: prompt
+  - path: prompts/explore-direction.md
+    kind: prompt
+  - path: prompts/synthesize-draft.md
+    kind: prompt
+  - path: templates/gen-idea-template.md
+    kind: data
+capabilities:
+  agents:
+    - task
+  tools:
+    - eval
+sequence:
+  - node:
+      id: collectIdeaRequest
+      type: human
+      prompt:
+        file: prompts/collect-idea-request.md
+      writes:
+        - /idea/request
+  - node:
+      id: loadIdeaRequest
+      type: script
+      script:
+        language: js
+        file: scripts/load-idea-request.js
+      reads:
+        - /idea/request
+      writes:
+        - /idea
+  - node:
+      id: generateDirections
+      type: agent
+      agent: task
+      model:
+        role: builder
+      reads:
+        - /idea/input
+      writes:
+        - /idea/directions
+      prompt:
+        template:
+          file: prompts/generate-directions.md
+          bindings:
+            ideaInput:
+              state: /idea/input
+  - parallel:
+      - node:
+          id: exploreDirection1
+          type: agent
+          agent: task
+          model:
+            role: builder
+          reads:
+            - /idea/input
+            - /idea/directions
+          prompt:
+            template:
+              file: prompts/explore-direction.md
+              bindings:
+                ideaInput:
+                  state: /idea/input
+                directions:
+                  state: /idea/directions
+                directionIndex:
+                  inline: "1"
+      - node:
+          id: exploreDirection2
+          type: agent
+          agent: task
+          model:
+            role: builder
+          reads:
+            - /idea/input
+            - /idea/directions
+          prompt:
+            template:
+              file: prompts/explore-direction.md
+              bindings:
+                ideaInput:
+                  state: /idea/input
+                directions:
+                  state: /idea/directions
+                directionIndex:
+                  inline: "2"
+      - node:
+          id: exploreDirection3
+          type: agent
+          agent: task
+          model:
+            role: builder
+          reads:
+            - /idea/input
+            - /idea/directions
+          prompt:
+            template:
+              file: prompts/explore-direction.md
+              bindings:
+                ideaInput:
+                  state: /idea/input
+                directions:
+                  state: /idea/directions
+                directionIndex:
+                  inline: "3"
+      - node:
+          id: exploreDirection4
+          type: agent
+          agent: task
+          model:
+            role: builder
+          reads:
+            - /idea/input
+            - /idea/directions
+          prompt:
+            template:
+              file: prompts/explore-direction.md
+              bindings:
+                ideaInput:
+                  state: /idea/input
+                directions:
+                  state: /idea/directions
+                directionIndex:
+                  inline: "4"
+      - node:
+          id: exploreDirection5
+          type: agent
+          agent: task
+          model:
+            role: builder
+          reads:
+            - /idea/input
+            - /idea/directions
+          prompt:
+            template:
+              file: prompts/explore-direction.md
+              bindings:
+                ideaInput:
+                  state: /idea/input
+                directions:
+                  state: /idea/directions
+                directionIndex:
+                  inline: "5"
+      - node:
+          id: exploreDirection6
+          type: agent
+          agent: task
+          model:
+            role: builder
+          reads:
+            - /idea/input
+            - /idea/directions
+          prompt:
+            template:
+              file: prompts/explore-direction.md
+              bindings:
+                ideaInput:
+                  state: /idea/input
+                directions:
+                  state: /idea/directions
+                directionIndex:
+                  inline: "6"
+    join:
+      id: synthesizeIdeaDraft
+      type: agent
+      agent: task
+      model:
+        role: builder
+      reads:
+        - /idea/input
+        - /idea/directions
+        - /summary
+      writes:
+        - /idea/synthesis
+      prompt:
+        template:
+          file: prompts/synthesize-draft.md
+          bindings:
+            ideaInput:
+              state: /idea/input
+            directions:
+              state: /idea/directions
+            direction1:
+              output:
+                node: exploreDirection1
+                path: /summary
+                activation: latest-completed
+            direction2:
+              output:
+                node: exploreDirection2
+                path: /summary
+                activation: latest-completed
+            direction3:
+              output:
+                node: exploreDirection3
+                path: /summary
+                activation: latest-completed
+            direction4:
+              output:
+                node: exploreDirection4
+                path: /summary
+                activation: latest-completed
+            direction5:
+              output:
+                node: exploreDirection5
+                path: /summary
+                activation: latest-completed
+            direction6:
+              output:
+                node: exploreDirection6
+                path: /summary
+                activation: latest-completed
+  - node:
+      id: materializeIdeaDraft
+      type: script
+      script:
+        language: js
+        file: scripts/materialize-idea-draft.js
+      reads:
+        - /idea
+      writes:
+        - /idea
+```
