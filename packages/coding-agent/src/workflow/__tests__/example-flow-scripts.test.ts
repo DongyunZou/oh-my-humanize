@@ -11,6 +11,7 @@ import { createSessionWorkflowRuntimeHost } from "../session-runtime";
 const PARALLEL_REVIEW_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/parallel-implementation-review/parallel-implementation-review/scripts`;
 const DOCUMENTATION_AUDIT_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/documentation-audit/documentation-audit/scripts`;
 const TEST_GENERATION_HARDENING_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/test-generation-hardening/test-generation-hardening`;
+const KDA_HUMANIZE_SUBFLOW_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/kda-humanize/kda-humanize/humanize-rlcr-subflow`;
 
 describe("example workflow scripts", () => {
 	it("records the manifest run id as the canonical tuple id in the task contract", async () => {
@@ -219,6 +220,66 @@ describe("example workflow scripts", () => {
 		expect(reviewPrompt).toContain("test-hardening-repair-evidence");
 		expect(archiveScript).toContain("workflow-output/test-hardening-repair-evidence.md");
 	});
+
+	it("treats nested Humanize stop paths as structured handoffs instead of script failures", async () => {
+		using tempDir = TempDir.createSync("@omh-kda-humanize-stop-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const stopScript = await Bun.file(`${KDA_HUMANIZE_SUBFLOW_DIR}/scripts/stop-subflow.js`).text();
+
+		const result = await runExampleDefinition({
+			cwd,
+			previousCwd,
+			definition: {
+				name: "kda-humanize-stop-contract",
+				version: 1,
+				models: { roles: {}, defaults: {} },
+				nodes: [
+					{
+						id: "planCompliance",
+						type: "script",
+						script: {
+							language: "js",
+							code: 'return { summary: "plan needs a narrower implementation route", data: { verdict: "FAIL_RELEVANCE" } };',
+						},
+					},
+					{
+						id: "stopSubflow",
+						type: "script",
+						script: {
+							language: "js",
+							code: stopScript,
+						},
+						writes: ["/humanize", "/finalizeSummary"],
+					},
+				],
+				edges: [{ from: "planCompliance", to: "stopSubflow" }],
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "stopSubflow")?.status).toBe(
+			"completed",
+		);
+		expect(result.scheduler.activations.every(activation => activation.status !== "failed")).toBe(true);
+		expect(result.scheduler.state.humanize).toMatchObject({
+			subflowStop: {
+				verdict: "FAIL_RELEVANCE",
+				sourceNodeId: "planCompliance",
+			},
+		});
+		expect(result.scheduler.state.finalizeSummary).toMatchObject({
+			status: "stopped",
+			verdict: "FAIL_RELEVANCE",
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/humanize-stop-summary.md`).text()).toContain("FAIL_RELEVANCE");
+	});
+
+	it("does not require completed validation evidence before Humanize accepts an executable KDA plan", async () => {
+		const prompt = await Bun.file(`${KDA_HUMANIZE_SUBFLOW_DIR}/prompts/plan-compliance.md`).text();
+
+		expect(prompt).toMatch(/does not\s+need completed validation evidence before implementation/u);
+		expect(prompt).toContain("concrete validation plan");
+	});
 });
 
 class MemoryWorkflowHost {
@@ -301,6 +362,44 @@ async function runExampleScript({
 			definition: await singleScriptDefinitionFrom({ nodeId, scriptFileName, scriptDir, writes }),
 			runId: `run-${nodeId}`,
 			startNodeId: nodeId,
+			runtimeHost: host,
+			initialState,
+		});
+	} finally {
+		process.chdir(previousCwd);
+	}
+}
+
+async function runExampleDefinition({
+	cwd,
+	previousCwd,
+	definition,
+	initialState,
+}: {
+	cwd: string;
+	previousCwd: string;
+	definition: WorkflowDefinition;
+	initialState?: Record<string, unknown>;
+}): Promise<WorkflowRunnerResult> {
+	const settings = await Settings.init();
+	const session: ToolSession = {
+		cwd,
+		hasUI: false,
+		getSessionFile: () => null,
+		getSessionSpawns: () => null,
+		settings,
+	};
+	const host = createSessionWorkflowRuntimeHost({
+		cwd,
+		runEvalScript: createEvalToolScriptRunner(session),
+	});
+	try {
+		process.chdir(cwd);
+		return await runWorkflow({
+			host: new MemoryWorkflowHost(),
+			definition,
+			runId: `run-${definition.name}`,
+			startNodeId: definition.nodes[0]?.id ?? "",
 			runtimeHost: host,
 			initialState,
 		});

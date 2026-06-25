@@ -95,6 +95,9 @@ nodes:
       file: scripts/stop-subflow.js
     reads:
       - /humanize
+    writes:
+      - /humanize
+      - /finalizeSummary
   - id: initializeGoalTracker
     type: agent
     agent: task

@@ -4,8 +4,10 @@ subflow.
 {{plan}}
 
 Return `PASS` only when the plan is relevant to the task contract, names a
-bounded project scope, includes validation evidence, and does not require an
-unsafe branch/worktree switch. Return `FAIL_RELEVANCE` when the plan is too
+bounded project scope, includes a concrete validation plan and evidence
+requirements, and does not require an unsafe branch/worktree switch. It does not
+need completed validation evidence before implementation; the plan can say what
+evidence must be produced later. Return `FAIL_RELEVANCE` when the plan is too
 vague, off-scope, missing acceptance criteria, or not executable in the current
 project. Return `FAIL_BRANCH_SWITCH` when the plan asks to switch branches,
 rewrite unrelated history, or leave the current worktree.
