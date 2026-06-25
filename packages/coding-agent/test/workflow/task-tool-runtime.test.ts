@@ -281,6 +281,7 @@ describe("workflow task tool runtime adapter", () => {
 
 		expect(result.exitCode).toBe(0);
 		expect(capturedSession?.taskAgentCompletionLifecycle).toBe("park");
+		expect(capturedSession?.shellEnvironmentPolicy).toBe("workflow");
 	});
 
 	it("passes workflow abort signals into TaskTool execution", async () => {

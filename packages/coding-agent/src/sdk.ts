@@ -50,6 +50,7 @@ import { disposeAllJuliaKernelSessions, disposeJuliaKernelSessionsByOwner } from
 import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./eval/py/executor";
 import { disposeAllRubyKernelSessions, disposeRubyKernelSessionsByOwner } from "./eval/rb/executor";
 import { defaultEvalSessionId } from "./eval/session-id";
+import type { ShellEnvironmentPolicy } from "./exec/shell-environment-policy";
 import {
 	type CustomCommandsLoadResult,
 	type LoadedCustomCommand,
@@ -404,6 +405,8 @@ export interface CreateAgentSessionOptions {
 	 */
 	defaultSubagentModelOverride?: string | string[];
 	defaultSubagentModelOverrideAuthFallback?: boolean;
+	/** Shell environment policy used by bash tools in this session. */
+	shellEnvironmentPolicy?: ShellEnvironmentPolicy;
 
 	/** Provider-facing system prompt override. Replaces the fully rendered default blocks. */
 	systemPrompt?: string | string[] | ((defaultPrompt: string[]) => string | string[]);
@@ -1517,6 +1520,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			taskDepth: options.taskDepth ?? 0,
 			defaultSubagentModelOverride: options.defaultSubagentModelOverride,
 			defaultSubagentModelOverrideAuthFallback: options.defaultSubagentModelOverrideAuthFallback,
+			shellEnvironmentPolicy: options.shellEnvironmentPolicy,
 			getSessionFile: () => sessionManager.getSessionFile() ?? null,
 			getEvalKernelOwnerId: () => evalKernelOwnerId,
 			getEvalSessionId: () =>

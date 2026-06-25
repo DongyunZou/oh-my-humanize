@@ -1,5 +1,5 @@
 import { ptree } from "@oh-my-pi/pi-utils";
-import { buildNonInteractiveEnv } from "../exec/non-interactive-env";
+import { buildWorkflowShellEnvironment } from "../exec/shell-environment-policy";
 import type { ToolSession } from "../tools";
 import { workflowScriptEnvironment } from "./script-runtime-env";
 import type {
@@ -51,21 +51,7 @@ function workflowShellAbortError(output: string, error: ptree.Exception, timeout
 }
 
 function workflowShellEnv(request: WorkflowShellScriptRequest): Record<string, string> {
-	const env = {
-		...workflowInheritedShellEnv(Bun.env),
-		...buildNonInteractiveEnv(workflowScriptEnvironment(request)),
-	};
-	delete env.PYTHONNOUSERSITE;
-	delete env.PYTHONPATH;
-	return env;
-}
-
-function workflowInheritedShellEnv(baseEnv: Record<string, string | undefined>): Record<string, string> {
-	const env: Record<string, string> = {};
-	for (const [key, value] of Object.entries(baseEnv)) {
-		if (value !== undefined) env[key] = value;
-	}
-	return env;
+	return buildWorkflowShellEnvironment(workflowScriptEnvironment(request));
 }
 
 function workflowShellOutput(stdout: string, stderr: string): string {

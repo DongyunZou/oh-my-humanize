@@ -10,6 +10,7 @@ import { EditTool } from "../edit";
 import { checkJuliaKernelAvailability } from "../eval/jl/kernel";
 import { checkPythonKernelAvailability } from "../eval/py/kernel";
 import { checkRubyKernelAvailability } from "../eval/rb/kernel";
+import type { ShellEnvironmentPolicy } from "../exec/shell-environment-policy";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
 import type { Skill } from "../extensibility/skills";
 import type { GoalModeState, GoalRuntime } from "../goals";
@@ -165,6 +166,8 @@ export interface ToolSession {
 	 * captured, preserving transcript history without leaving a live mutable peer.
 	 */
 	taskAgentCompletionLifecycle?: "adopt" | "park";
+	/** Shell environment policy used by bash tools in this session. */
+	shellEnvironmentPolicy?: ShellEnvironmentPolicy;
 	/**
 	 * Suppress the spawn specialization/coordination advisory appended to `task`
 	 * results. Set by internal/programmatic callers (e.g. the commit agent's

@@ -20,6 +20,7 @@ import {
 import type { PromptTemplate } from "../config/prompt-templates";
 import { Settings } from "../config/settings";
 import { SETTINGS_SCHEMA, type SettingPath } from "../config/settings-schema";
+import type { ShellEnvironmentPolicy } from "../exec/shell-environment-policy";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
@@ -300,6 +301,7 @@ export interface ExecutorOptions {
 	modelOverrideAuthFallback?: boolean;
 	defaultSubagentModelOverride?: string | string[];
 	defaultSubagentModelOverrideAuthFallback?: boolean;
+	shellEnvironmentPolicy?: ShellEnvironmentPolicy;
 	/**
 	 * Active model selector of the parent session, used as an auth-aware fallback
 	 * if the resolved subagent model has no working credentials. See #985.
@@ -2136,6 +2138,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					options.modelOverrideAuthFallback === false && options.modelOverride !== undefined
 						? false
 						: options.defaultSubagentModelOverrideAuthFallback,
+				shellEnvironmentPolicy: options.shellEnvironmentPolicy,
 				toolNames,
 				outputSchema,
 				requireYieldTool: true,

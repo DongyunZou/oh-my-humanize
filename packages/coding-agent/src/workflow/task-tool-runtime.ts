@@ -71,7 +71,7 @@ async function synchronousTaskToolSession(toolSession: ToolSession): Promise<Too
 		"retry.maxDelayMs",
 		Math.max(settings.get("retry.maxDelayMs"), retryBaseDelayMs, WORKFLOW_TASK_RETRY_MAX_DELAY_MS),
 	);
-	return { ...toolSession, taskAgentCompletionLifecycle: "park", settings };
+	return { ...toolSession, taskAgentCompletionLifecycle: "park", shellEnvironmentPolicy: "workflow", settings };
 }
 
 function textContent(content: Array<{ type: string; text?: string }>): string {

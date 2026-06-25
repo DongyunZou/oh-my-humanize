@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Fixed workflow-owned agent bash tools so they use the workflow shell
+  environment policy instead of hiding operator-visible Python user-site tools.
 - Fixed workflow runs so agent outputs with an explicit `fail_closed_*` status
   fail the activation before downstream nodes are scheduled.
 - Fixed workflow shell scripts so they can use Python user-site packages from
