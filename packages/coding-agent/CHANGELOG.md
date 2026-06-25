@@ -17,6 +17,10 @@
   fail the activation before downstream nodes are scheduled.
 - Fixed workflow shell scripts so they can use Python user-site packages from
   the operator environment while still stripping ambient `PYTHONPATH`.
+- Fixed workflow shell scripts so they inherit the operator shell environment
+  before applying non-interactive safety defaults.
+- Fixed workflow fail-closed detection for statuses that include
+  `fail_closed` as a terminal marker instead of only as a prefix.
 - Fixed the experimental refactor-migration-plan workflow so compatibility
   designs that are explicitly fail-closed or blocked by missing validation
   tooling stop before caller migration instead of mutating source after a

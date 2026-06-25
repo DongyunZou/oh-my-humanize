@@ -21,7 +21,7 @@ describe("runWorkflow lifecycle", () => {
 			runAgentNode: async () => ({
 				summary: "validation unavailable",
 				data: {
-					status: "fail_closed_no_source_changes",
+					status: "mapped_fail_closed_no_edits",
 					blocker: "pytest is not available in this environment",
 				},
 			}),

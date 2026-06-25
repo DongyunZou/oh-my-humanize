@@ -586,7 +586,7 @@ function workflowOutputStatus(output: WorkflowActivationOutput): string | undefi
 }
 
 function workflowOutputStatusIsFailClosed(status: string): boolean {
-	return status.toLowerCase().startsWith("fail_closed");
+	return /(^|[^a-z0-9])fail[_-]?closed([^a-z0-9]|$)/u.test(status.toLowerCase());
 }
 
 function workflowOutputFailureReason(output: WorkflowActivationOutput): string | undefined {

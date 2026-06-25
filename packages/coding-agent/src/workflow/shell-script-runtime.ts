@@ -51,8 +51,20 @@ function workflowShellAbortError(output: string, error: ptree.Exception, timeout
 }
 
 function workflowShellEnv(request: WorkflowShellScriptRequest): Record<string, string> {
-	const env = buildNonInteractiveEnv(workflowScriptEnvironment(request));
+	const env = {
+		...workflowInheritedShellEnv(Bun.env),
+		...buildNonInteractiveEnv(workflowScriptEnvironment(request)),
+	};
 	delete env.PYTHONNOUSERSITE;
+	delete env.PYTHONPATH;
+	return env;
+}
+
+function workflowInheritedShellEnv(baseEnv: Record<string, string | undefined>): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(baseEnv)) {
+		if (value !== undefined) env[key] = value;
+	}
 	return env;
 }
 
