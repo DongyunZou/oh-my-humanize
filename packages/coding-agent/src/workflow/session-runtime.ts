@@ -692,6 +692,13 @@ function parseReviewTaskOutput(
 	if (parsed) {
 		return parseReviewObject(nodeId, parsed, trimmed, gates, fallbackVerdict);
 	}
+	const correctness = reviewerCorrectnessFromText(trimmed);
+	if (correctness !== undefined) {
+		return {
+			verdict: verdictFromReviewerCorrectness(correctness, gates, fallbackVerdict),
+			summary: trimmed,
+		};
+	}
 	const trimmedGate = declaredGateFor(trimmed, gates);
 	if (trimmedGate !== undefined) {
 		return { verdict: trimmedGate, summary: trimmed };
@@ -838,6 +845,19 @@ function reviewVerdictFromObjectText(
 		if (finalLineGate !== undefined) {
 			return { verdict: finalLineGate, summary };
 		}
+	}
+	return undefined;
+}
+
+function reviewerCorrectnessFromText(output: string): "correct" | "incorrect" | undefined {
+	for (const line of nonEmptyLines(output)) {
+		const parsed = parseJsonObject(line);
+		const correctness = parsed?.overall_correctness;
+		if (correctness === "correct" || correctness === "incorrect") return correctness;
+		const match = /\boverall_correctness\b\s*[:=]\s*["']?(correct|incorrect)\b/iu.exec(line);
+		if (!match) continue;
+		const value = match[1]?.toLowerCase();
+		if (value === "correct" || value === "incorrect") return value;
 	}
 	return undefined;
 }

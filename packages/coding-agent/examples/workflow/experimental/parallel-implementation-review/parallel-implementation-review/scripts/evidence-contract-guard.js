@@ -610,6 +610,7 @@ function referencedWorkflowArtifactsFromText(text) {
 
 function normalizeReferencedWorkflowArtifact(value) {
 	const normalized = value.replace(/[\\),.;:\]}]+$/gu, "");
+	if (normalized.includes("...[truncated")) return "";
 	if (normalized.includes("<") || normalized.includes(">")) return "";
 	if (!normalized.startsWith("workflow-output/")) return "";
 	return normalized;
@@ -631,13 +632,28 @@ async function referencedArtifactExists(artifact) {
 }
 
 function referencedArtifactCandidates(artifact) {
+	const candidates = [artifact];
+	for (const alias of materializedArtifactAliases(artifact)) {
+		if (!candidates.includes(alias)) candidates.push(alias);
+	}
 	const alternative = /^(workflow-output\/.+)\.([A-Za-z0-9]+)\/([A-Za-z0-9]+)$/u.exec(artifact);
-	if (!alternative) return [artifact];
+	if (!alternative) return candidates;
 	const base = alternative[1] ?? "";
 	const firstExtension = alternative[2] ?? "";
 	const secondExtension = alternative[3] ?? "";
-	if (!workflowArtifactExtension(firstExtension) || !workflowArtifactExtension(secondExtension)) return [artifact];
-	return [`${base}.${firstExtension}`, `${base}.${secondExtension}`];
+	if (!workflowArtifactExtension(firstExtension) || !workflowArtifactExtension(secondExtension)) return candidates;
+	for (const candidate of [`${base}.${firstExtension}`, `${base}.${secondExtension}`]) {
+		if (!candidates.includes(candidate)) candidates.push(candidate);
+	}
+	return candidates;
+}
+
+function materializedArtifactAliases(artifact) {
+	const match = /^workflow-output\/(integration-review|review-handoff)-(.+)$/u.exec(artifact);
+	if (!match) return [];
+	const kind = match[1];
+	const suffix = match[2];
+	return [`workflow-output/${kind}-materialized-${suffix}`];
 }
 
 function workflowArtifactExtension(value) {

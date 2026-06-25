@@ -252,7 +252,7 @@ function stringField(value, key) {
 }
 
 async function changedProjectFiles() {
-	const proc = Bun.spawn(["git", "diff", "--name-only"], {
+	const proc = Bun.spawn(["git", "status", "--short", "--untracked-files=all"], {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -261,10 +261,43 @@ async function changedProjectFiles() {
 	const text = await new Response(proc.stdout).text();
 	return text
 		.split(/\r?\n/u)
-		.map(line => line.trim())
+		.map(statusLineToPath)
 		.filter(Boolean)
-		.filter(file => !file.startsWith("workflow-output/") && file !== "progress.md" && file !== "task.md")
+		.filter(file => !ignoredChangedProjectFile(file))
 		.sort((left, right) => left.localeCompare(right, "en"));
+}
+
+function statusLineToPath(line) {
+	const trimmed = line.trim();
+	if (!trimmed) return "";
+	const rename = /^R[ MDA?]?\s+(.+?)\s+->\s+(.+)$/u.exec(trimmed);
+	if (rename) return normalizeGitPath(rename[2]?.trim() ?? "");
+	return normalizeGitPath(trimmed.slice(2).trim());
+}
+
+function normalizeGitPath(filePath) {
+	if (filePath.startsWith('"') && filePath.endsWith('"')) return filePath.slice(1, -1);
+	return filePath;
+}
+
+function ignoredChangedProjectFile(file) {
+	return (
+		file === "evidence-ledger.jsonl" ||
+		file === "manifest-entry.json" ||
+		file === "monitor-assignment.json" ||
+		file === "task.md" ||
+		file === "progress.md" ||
+		file.startsWith("workflow-output/") ||
+		ignoredProjectArtifactPath(file)
+	);
+}
+
+function ignoredProjectArtifactPath(file) {
+	const ignoredSegments = new Set([".venv", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__pycache__"]);
+	return file
+		.replace(/\\/gu, "/")
+		.split("/")
+		.some(segment => ignoredSegments.has(segment));
 }
 
 async function workflowEvidenceFiles() {

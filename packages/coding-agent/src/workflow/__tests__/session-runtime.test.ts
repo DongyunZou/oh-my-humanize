@@ -273,6 +273,17 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		expect(result.scheduler.state).toEqual({ verdict: "COMPLETE" });
 	});
 
+	it("does not let a final finish token override an explicit incorrect reviewer verdict", async () => {
+		const result = await runPerformanceReview(
+			['{"overall_correctness":"incorrect","summary":"validation failed; not ready for selection"}', "finish"].join(
+				"\n",
+			),
+		);
+
+		expect(result.scheduler.activations.map(activation => activation.nodeId)).toEqual(["review", "retry"]);
+		expect(result.scheduler.state).toEqual({ verdict: "continue" });
+	});
+
 	it("routes reviewer object summary verdict prefixes before falling back", async () => {
 		const result = await runRetryReview(
 			JSON.stringify({ summary: "COMPLETE Validation passed after the required loop round." }),
@@ -535,6 +546,28 @@ async function runRetryReview(reviewOutput: string) {
 	});
 }
 
+async function runPerformanceReview(reviewOutput: string) {
+	const host = createSessionWorkflowRuntimeHost({
+		cwd: "/workspace",
+		runAgentTask: async () => ({
+			exitCode: 0,
+			output: reviewOutput,
+		}),
+		runShellScript: async input => ({
+			exitCode: 0,
+			output: `${input.nodeId} completed`,
+		}),
+	});
+
+	return runWorkflow({
+		host: new MemoryWorkflowHost(),
+		definition: performanceReviewDefinition(),
+		runId: "run-performance-review",
+		startNodeId: "review",
+		runtimeHost: host,
+	});
+}
+
 class MemoryWorkflowHost {
 	appendCustomEntry(): string {
 		return "entry-1";
@@ -573,6 +606,38 @@ function retryReviewDefinition(): WorkflowDefinition {
 		edges: [
 			{ from: "review", to: "retry", condition: { source: 'outputs.review.verdict == "CONTINUE"' } },
 			{ from: "review", to: "done", condition: { source: 'outputs.review.verdict != "CONTINUE"' } },
+		],
+	};
+}
+
+function performanceReviewDefinition(): WorkflowDefinition {
+	return {
+		name: "performance-review",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [
+			{
+				id: "review",
+				type: "review",
+				prompt: "Return continue or finish.",
+				gates: ["continue", "finish"],
+				fallbackVerdict: "continue",
+				writes: ["/verdict"],
+			},
+			{
+				id: "retry",
+				type: "script",
+				script: { language: "sh", code: "retry" },
+			},
+			{
+				id: "done",
+				type: "script",
+				script: { language: "sh", code: "done" },
+			},
+		],
+		edges: [
+			{ from: "review", to: "retry", condition: { source: 'outputs.review.verdict == "continue"' } },
+			{ from: "review", to: "done", condition: { source: 'outputs.review.verdict == "finish"' } },
 		],
 	};
 }

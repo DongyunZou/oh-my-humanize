@@ -1467,7 +1467,9 @@ async function driveSessionToYield(
 
 	try {
 		await awaitAbortable(session.prompt(task, { attribution: "agent" }));
-		await awaitAbortable(session.waitForIdle());
+		if (!monitor.yieldCalled()) {
+			await awaitAbortable(session.waitForIdle());
+		}
 
 		const reminderToolChoice = buildNamedToolChoice("yield", session.model);
 
@@ -1494,7 +1496,9 @@ async function driveSessionToYield(
 						...(isFinalRetry && reminderToolChoice ? { toolChoice: reminderToolChoice } : {}),
 					}),
 				);
-				await awaitAbortable(session.waitForIdle());
+				if (!monitor.yieldCalled()) {
+					await awaitAbortable(session.waitForIdle());
+				}
 			} catch (err) {
 				if (abortSignal.aborted || err instanceof ToolAbortError) {
 					// Benign control-flow exit — user cancel (^C) or compaction aborting
@@ -1510,7 +1514,9 @@ async function driveSessionToYield(
 			}
 		}
 
-		await awaitAbortable(session.waitForIdle());
+		if (!monitor.yieldCalled()) {
+			await awaitAbortable(session.waitForIdle());
+		}
 
 		const lastAssistant = session.getLastAssistantMessage();
 		if (lastAssistant) {

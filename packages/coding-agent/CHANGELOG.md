@@ -13,6 +13,14 @@
 
 ### Fixed
 
+- Fixed workflow-owned subagents so a successful terminal `yield` is committed
+  without waiting for an extra idle phase, preventing stop deadlines from
+  checkpointing already-yielded nodes as aborted.
+- Fixed workflow review parsing so explicit `overall_correctness: incorrect`
+  evidence is not overridden by a later contradictory finish token.
+- Fixed the experimental parallel implementation/review workflow so evidence
+  guards ignore UI-truncated artifact snippets, accept materialized review
+  artifact aliases, and include untracked project files in final tuple state.
 - Fixed workflow human checkpoints so Reject is the default response and the
   workflow dashboard surfaces the active prompt plus explicit approval guidance.
 - Fixed the experimental KDA/Humanize workflow so a nested Humanize stop path

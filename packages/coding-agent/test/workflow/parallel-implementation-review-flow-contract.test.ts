@@ -1326,7 +1326,11 @@ describe("parallel-implementation-review flow contract", () => {
 
 	it("normalizes human artifact references before checking materialized handoffs", async () => {
 		const cwd = await createTempDir();
-		await writeReadyEvidence(cwd, "P06-T06-test");
+		await writeReadyEvidence(cwd, "P06-T06-test", { integrationReviewArtifact: false });
+		await Bun.write(
+			path.join(cwd, "workflow-output", "integration-review-materialized-P06-T06-test.json"),
+			'{"status":"materialized"}\n',
+		);
 
 		const result = await runScript(cwd, "evidence-contract-guard.js", {
 			state: {
@@ -1335,6 +1339,7 @@ describe("parallel-implementation-review flow contract", () => {
 					"Tests lane: workflow-output/tests-lane-P06-T06-test.json,",
 					"Docs lane shorthand: workflow-output/docs-lane-P06-T06-test.md/json",
 					"Integration: workflow-output/integration-review-P06-T06-test.json).",
+					"Rendered UI snippet: workflow-output/validation-P06-T06-test.tx...[truncated",
 				].join("\n"),
 			},
 		});
@@ -2341,6 +2346,26 @@ describe("parallel-implementation-review flow contract", () => {
 			status: "completed",
 			terminal: true,
 			final_artifact: "workflow-output/final-review-P06-T06-test.json",
+		});
+	});
+
+	it("includes untracked project files in final tuple state changed files", async () => {
+		const cwd = await createTempDir();
+		await initGitRepo(cwd);
+		await fs.mkdir(path.join(cwd, "tests"), { recursive: true });
+		await Bun.write(path.join(cwd, "tests", "new_regression.rs"), "#[test]\nfn regression() {}\n");
+		await writeReadyEvidence(cwd, "P06-T06-test");
+
+		const result = await runScript(cwd, "finalize-strong-review.js", {
+			state: {
+				verdict: { verdict: "promote" },
+				evidenceContract: { verdict: "READY" },
+			},
+		});
+
+		expect(result.verdict).toBe("promote");
+		await expect(Bun.file(path.join(cwd, "workflow-output", "tuple-state.json")).json()).resolves.toMatchObject({
+			changed_files: ["tests/new_regression.rs"],
 		});
 	});
 

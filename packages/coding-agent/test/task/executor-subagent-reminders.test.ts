@@ -226,6 +226,44 @@ describe("runSubprocess yield reminders", () => {
 		expect(result.output).toContain('"ok": true');
 	});
 
+	it("does not wait for idle after a workflow subagent has yielded", async () => {
+		const controller = new AbortController();
+		const session = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-yield-before-idle",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { apiDocsAudit: { findings: ["stale docs"] } } },
+				},
+				isError: false,
+			});
+		});
+		session.waitForIdle = async () => {
+			await new Promise(() => {});
+		};
+		mockCreateAgentSession(session);
+
+		const run = runSubprocess({
+			...baseOptions,
+			id: "subagent-yield-before-idle",
+			completionLifecycle: "park",
+			signal: controller.signal,
+		});
+
+		const result = await Promise.race([
+			run,
+			Bun.sleep(50).then(() => {
+				controller.abort("test timed out waiting for yielded result");
+				throw new Error("runSubprocess waited for idle after yield");
+			}),
+		]);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("apiDocsAudit");
+	});
+
 	it("waits for session_start extension user messages before prompting the subagent", async () => {
 		let extensionSendUserMessage: ExtensionActions["sendUserMessage"] | undefined;
 		let messageInFlight = false;
