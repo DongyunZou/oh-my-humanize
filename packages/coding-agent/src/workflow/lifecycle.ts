@@ -3,6 +3,7 @@ import type { WorkflowDefinition } from "./definition";
 import type { FlowFreeze } from "./freeze";
 import type { WorkflowModelResolutionAudit } from "./model-resolution";
 import type { WorkflowGraphPatchOperation } from "./patches";
+import type { WorkflowActivationInputSnapshot } from "./prompt-source";
 import type { WorkflowActivationOutput } from "./state";
 
 export const WORKFLOW_LIFECYCLE_EVENT_TYPE = "workflow-lifecycle-event";
@@ -72,6 +73,7 @@ export interface WorkflowAttemptActivationRecord {
 	nodeId: string;
 	parentActivationIds: string[];
 	status: WorkflowAttemptActivationStatus;
+	input?: WorkflowActivationInputSnapshot;
 	output?: WorkflowActivationOutput;
 	error?: string;
 	reason?: string;
@@ -151,6 +153,7 @@ export interface AppendWorkflowAttemptActivationStartedOptions {
 	activationId: string;
 	nodeId: string;
 	parentActivationIds: string[];
+	input?: WorkflowActivationInputSnapshot;
 }
 
 export interface AppendWorkflowAttemptActivationCompletedOptions {
@@ -294,6 +297,7 @@ interface WorkflowActivationStartedEvent {
 	activationId: string;
 	nodeId: string;
 	parentActivationIds: string[];
+	input?: WorkflowActivationInputSnapshot;
 }
 
 interface WorkflowActivationCompletedEvent {
@@ -468,13 +472,15 @@ export function appendWorkflowAttemptActivationStarted(
 	host: WorkflowLifecycleStoreHost,
 	options: AppendWorkflowAttemptActivationStartedOptions,
 ): void {
-	appendLifecycleEvent(host, {
+	const event: WorkflowActivationStartedEvent = {
 		event: "activation_started",
 		attemptId: options.attemptId,
 		activationId: options.activationId,
 		nodeId: options.nodeId,
 		parentActivationIds: [...options.parentActivationIds],
-	});
+	};
+	if (options.input !== undefined) event.input = clone(options.input);
+	appendLifecycleEvent(host, event);
 }
 
 export function appendWorkflowAttemptActivationCompleted(
@@ -1226,6 +1232,7 @@ export function reconstructWorkflowFamilies(entries: WorkflowLifecycleBranchEntr
 				nodeId: event.nodeId,
 				parentActivationIds: [...event.parentActivationIds],
 				status: "running",
+				...(event.input !== undefined ? { input: clone(event.input) } : {}),
 			});
 			continue;
 		}

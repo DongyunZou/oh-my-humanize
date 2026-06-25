@@ -39,7 +39,7 @@ describe("workflow human input ask tool runtime adapter", () => {
 			select: async (title: string, options: ExtensionUISelectItem[]) => {
 				capturedTitle = title;
 				capturedOptions = options;
-				return "Approve (Recommended)";
+				return "Approve";
 			},
 			editor: async () => undefined,
 		} as unknown as ExtensionUIContext;
@@ -53,8 +53,8 @@ describe("workflow human input ask tool runtime adapter", () => {
 
 		expect(capturedTitle).toBe("Approve this workflow result?");
 		expect(capturedOptions?.map(option => (typeof option === "string" ? option : option.label))).toEqual([
-			"Approve (Recommended)",
-			"Reject",
+			"Reject (Recommended)",
+			"Approve",
 			"Other (type your own)",
 		]);
 		expect(result).toEqual({

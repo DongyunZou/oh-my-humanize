@@ -68,6 +68,14 @@ describe("workflow lifecycle event store", () => {
 			activationId: "activation-1",
 			nodeId: "build",
 			parentActivationIds: [],
+			input: {
+				prompt: {
+					value: "Build and verify the release candidate.",
+					byteLength: 39,
+					contentHash: "sha256:build-prompt",
+					source: { kind: "inline", text: "Build and verify the release candidate." },
+				},
+			},
 		});
 		appendWorkflowAttemptActivationCompleted(host, {
 			attemptId: "attempt-1",
@@ -190,6 +198,9 @@ describe("workflow lifecycle event store", () => {
 			["activation-1", "completed"],
 			["activation-2", "aborted"],
 		]);
+		expect(reconstructed[0]?.attempts[0]?.activations[0]?.input?.prompt?.value).toBe(
+			"Build and verify the release candidate.",
+		);
 	});
 
 	it("assigns frozen flows to explicit families when lifecycle histories are interleaved", () => {

@@ -112,6 +112,7 @@ export interface WorkflowGraphFocusView {
 	summary?: string;
 	error?: string;
 	reason?: string;
+	humanPrompt?: string;
 	recentOutput?: string[];
 	controls?: string[];
 	artifacts?: string[];
@@ -131,6 +132,7 @@ export interface WorkflowGraphNodeActivationView {
 	tool?: string;
 	stats?: string;
 	activity?: string;
+	humanPrompt?: string;
 	recentOutput?: string[];
 	artifacts?: string[];
 }
@@ -145,6 +147,7 @@ export interface WorkflowGraphNodeView {
 	summary?: string;
 	error?: string;
 	reason?: string;
+	humanPrompt?: string;
 	focused: boolean;
 }
 
@@ -260,6 +263,8 @@ export function buildWorkflowGraphView(
 			if (status.summary !== undefined) view.summary = status.summary;
 			if (status.error !== undefined) view.error = status.error;
 			if (status.reason !== undefined) view.reason = status.reason;
+			const focusedActivation = selectedWorkflowGraphNodeActivation(view, undefined);
+			if (focusedActivation?.humanPrompt !== undefined) view.humanPrompt = focusedActivation.humanPrompt;
 			return view;
 		}) ?? [];
 	const edges =
@@ -1845,6 +1850,7 @@ function buildWorkflowGraphNodeActivations(
 		const activity = formatWorkflowActiveAgentActivity(progress);
 		const stats = formatWorkflowActiveAgentStats(progress);
 		const recentOutput = formatWorkflowActiveAgentRecentOutput(progress);
+		const humanPrompt = node?.type === "human" ? workflowGraphHumanPromptForActivation(activation) : undefined;
 		const view: WorkflowGraphNodeActivationView = {
 			id: activation.id,
 			ordinal: generation,
@@ -1862,6 +1868,7 @@ function buildWorkflowGraphNodeActivations(
 		if (tool !== undefined) view.tool = tool;
 		if (stats !== undefined) view.stats = stats;
 		if (activity !== undefined) view.activity = activity;
+		if (humanPrompt !== undefined) view.humanPrompt = humanPrompt;
 		if (recentOutput.length > 0) view.recentOutput = recentOutput;
 		const activations = activationsByNodeId.get(activation.nodeId) ?? [];
 		activations.push(view);
@@ -1914,6 +1921,14 @@ function formatActiveWorkflowAgents(
 
 function workflowNodeIsAgentLike(node: WorkflowNode): boolean {
 	return node.type === "agent" || node.type === "review";
+}
+
+function workflowGraphHumanPromptForActivation(activation: WorkflowAttemptActivationRecord): string | undefined {
+	const inputPrompt = activation.input?.prompt?.value;
+	if (typeof inputPrompt === "string" && inputPrompt.trim().length > 0) return inputPrompt.trim();
+	const outputQuestion = activation.output?.data?.question;
+	if (typeof outputQuestion === "string" && outputQuestion.trim().length > 0) return outputQuestion.trim();
+	return undefined;
 }
 
 function buildWorkflowGraphFocus(
@@ -2007,6 +2022,7 @@ function workflowGraphFocusFromNode(
 	if (node.summary !== undefined && focus.summary === undefined) focus.summary = node.summary;
 	if (node.error !== undefined && focus.error === undefined) focus.error = node.error;
 	if (node.reason !== undefined && focus.reason === undefined) focus.reason = node.reason;
+	if (node.humanPrompt !== undefined && focus.humanPrompt === undefined) focus.humanPrompt = node.humanPrompt;
 	if (
 		node.status === "running" &&
 		attemptId !== undefined &&
@@ -2053,6 +2069,7 @@ function applyWorkflowGraphActivationFocus(
 	if (activation.summary !== undefined) focus.summary = activation.summary;
 	if (activation.error !== undefined) focus.error = activation.error;
 	if (activation.reason !== undefined) focus.reason = activation.reason;
+	if (activation.humanPrompt !== undefined) focus.humanPrompt = activation.humanPrompt;
 	if (activation.recentOutput !== undefined) focus.recentOutput = activation.recentOutput;
 	if (activation.artifacts !== undefined) focus.artifacts = [...activation.artifacts];
 }
@@ -2222,7 +2239,7 @@ export function formatWorkflowOnFlightLines(view: WorkflowGraphView): string[] {
 	const lines = (view.activeAgents ?? []).map(agent => formatActiveWorkflowAgent(agent));
 	if (lines.length > 0) return lines;
 	const runningNodes = view.nodes.filter(node => node.status === "running");
-	return runningNodes.map(node => `${formatWorkflowNodeDisplayName(node.id)} running`);
+	return runningNodes.map(formatRunningWorkflowNode);
 }
 
 export function formatWorkflowRecentActivityLines(view: WorkflowGraphView): string[] {
@@ -2266,6 +2283,12 @@ export function formatWorkflowFocusLines(view: WorkflowGraphView): string[] {
 	lines.push(`${focus.role} · ${focus.label} ${formatWorkflowFocusStatus(focus)}${generation}${model}${tool}${stats}`);
 	const activationLine = formatWorkflowFocusActivationLine(focus);
 	if (activationLine !== undefined) lines.push(activationLine);
+	if (focus.humanPrompt !== undefined) {
+		lines.push(`human prompt: ${formatSingleLineWorkflowDetail(focus.humanPrompt)}`);
+		lines.push(
+			"human input: default Reject; choose Approve only after reading the prompt and evidence; h help for controls",
+		);
+	}
 	if (focus.activity !== undefined) {
 		lines.push(`activity: ${formatSingleLineWorkflowDetail(focus.activity)}`);
 	}
@@ -2297,6 +2320,12 @@ function formatWorkflowFocusActivationLine(focus: WorkflowGraphFocusView): strin
 function formatWorkflowFocusStatus(focus: WorkflowGraphFocusView): string {
 	if (focus.status === "running" && focus.focusAgentId !== undefined) return "live";
 	return focus.status;
+}
+
+function formatRunningWorkflowNode(node: WorkflowGraphNodeView): string {
+	const label = formatWorkflowNodeDisplayName(node.id);
+	if (node.kind === "Human checkpoint") return `${label} waiting for operator input (default Reject)`;
+	return `${label} running`;
 }
 
 export function formatWorkflowChangeReviewLines(view: WorkflowGraphView): string[] {

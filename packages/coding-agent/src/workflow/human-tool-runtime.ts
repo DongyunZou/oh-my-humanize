@@ -19,7 +19,16 @@ export function createAskToolHumanInputRunner(
 					{
 						id: "response",
 						question: request.question,
-						options: [{ label: "Approve" }, { label: "Reject" }],
+						options: [
+							{
+								label: "Reject",
+								description: "Do not proceed; keep the workflow at the human checkpoint.",
+							},
+							{
+								label: "Approve",
+								description: "Proceed only after reading the prompt and evidence.",
+							},
+						],
 						recommended: 0,
 					},
 				],

@@ -1158,6 +1158,47 @@ describe("workflow graph view rendering", () => {
 		);
 	});
 
+	it("surfaces active human checkpoint prompts with fail-closed guidance", () => {
+		const definition: WorkflowDefinition = {
+			name: "human-gate",
+			version: 1,
+			models: { roles: {}, defaults: {} },
+			nodes: [
+				{ id: "planUnderstandingQuiz", type: "human" },
+				{ id: "recordOperatorGate", type: "script" },
+			],
+			edges: [{ from: "planUnderstandingQuiz", to: "recordOperatorGate" }],
+		};
+		const family = createFamily(definition);
+		const attempt = family.attempts[0]!;
+		attempt.activations.push({
+			id: "activation-human-gate",
+			nodeId: "planUnderstandingQuiz",
+			parentActivationIds: [],
+			status: "running",
+			input: {
+				prompt: {
+					value: "Verify the operator understands scope and evidence before proceeding.",
+					byteLength: 66,
+					contentHash: "sha256:human-gate",
+					source: {
+						kind: "inline",
+						text: "Verify the operator understands scope and evidence before proceeding.",
+					},
+				},
+			},
+		});
+
+		const view = buildWorkflowGraphView(family, { liveAttemptIds: new Set([attempt.id]) });
+		const text = renderWorkflowGraphText(view);
+
+		expect(view.focus?.nodeId).toBe("planUnderstandingQuiz");
+		expect(text).toContain("Human checkpoint");
+		expect(text).toContain("human prompt: Verify the operator understands scope and evidence before proceeding.");
+		expect(text).toContain("human input: default Reject");
+		expect(text).toContain("choose Approve only after reading the prompt");
+	});
+
 	it("renders edge annotations with directed connectors but without composed arrow fragments", () => {
 		const view = createView({
 			name: "conditional-loop",

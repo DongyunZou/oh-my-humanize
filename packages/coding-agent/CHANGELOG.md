@@ -13,6 +13,8 @@
 
 ### Fixed
 
+- Fixed workflow human checkpoints so Reject is the default response and the
+  workflow dashboard surfaces the active prompt plus explicit approval guidance.
 - Fixed workflow subagent `yield` completion so successful workflow agent nodes
   end through the agent loop's terminal-result path instead of producing
   post-yield `Request was aborted` transcript noise.

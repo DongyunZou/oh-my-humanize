@@ -8,6 +8,7 @@ import type { Settings } from "../config/settings";
 import type { WorkflowDefinition, WorkflowNode } from "./definition";
 import type { FlowFreeze, FlowFreezeResourceSnapshot } from "./freeze";
 import {
+	type AppendWorkflowAttemptActivationStartedOptions,
 	appendWorkflowAttemptActivationAborted,
 	appendWorkflowAttemptActivationCompleted,
 	appendWorkflowAttemptActivationFailed,
@@ -368,7 +369,7 @@ async function executeAndPersistActivation(
 			parentActivationIds: activation.parentActivationIds,
 			input,
 		});
-		appendLifecycleActivationStarted(options, activation, node);
+		appendLifecycleActivationStarted(options, activation, node, input);
 		started = true;
 		const promptedNode = resolvedPrompt ? { ...node, prompt: resolvedPrompt.value } : node;
 		const nodeForExecution = await resolveScriptForExecution(options, promptedNode);
@@ -540,15 +541,18 @@ function appendLifecycleActivationStarted(
 	options: WorkflowRunnerOptions,
 	activation: WorkflowActivation,
 	node: WorkflowNode,
+	input?: WorkflowActivationInputSnapshot,
 ): void {
 	const lifecycle = options.lifecycle;
 	if (!lifecycle) return;
-	appendWorkflowAttemptActivationStarted(options.host, {
+	const startOptions: AppendWorkflowAttemptActivationStartedOptions = {
 		attemptId: lifecycle.attemptId,
 		activationId: activation.id,
 		nodeId: node.id,
 		parentActivationIds: activation.parentActivationIds,
-	});
+	};
+	if (input !== undefined) startOptions.input = input;
+	appendWorkflowAttemptActivationStarted(options.host, startOptions);
 }
 
 function appendLifecycleActivationCompleted(
