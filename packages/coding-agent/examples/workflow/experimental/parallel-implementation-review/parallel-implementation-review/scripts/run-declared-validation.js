@@ -299,7 +299,9 @@ function validationPathFieldNames(kind) {
 	}
 	return [
 		"exit_code_path",
+		"exit_code_artifact",
 		"exitcode_path",
+		"exitcode_artifact",
 		"latest_exit_code",
 		"latest_exitcode",
 		"latest_attempt_exit_code",
@@ -316,8 +318,12 @@ function validationPathFieldNames(kind) {
 
 function validationAliasObjects(data, validation) {
 	return [
+		optionalObjectField(validation, "artifacts"),
+		optionalObjectField(validation, "artifact_paths"),
 		optionalObjectField(validation, "latest_aliases"),
 		optionalObjectField(validation, "canonical_latest_aliases"),
+		optionalObjectField(data, "artifacts"),
+		optionalObjectField(data, "artifact_paths"),
 		optionalObjectField(data, "latest_aliases"),
 		optionalObjectField(data, "canonical_latest_aliases"),
 	].filter(Boolean);

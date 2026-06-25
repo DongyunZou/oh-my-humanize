@@ -17,6 +17,9 @@
   preserves validation command shell-prefix environment assignments, and
   performance optimization search fails closed when tracked or untracked lane
   scratch lives inside the project tree.
+- Fixed the experimental parallel implementation/review workflow so final
+  validation can reuse test-lane evidence recorded with `validation.artifacts`
+  and `exit_code_artifact` aliases.
 - Fixed workflow JavaScript script nodes so they use the workflow script
   runtime budget by default instead of inheriting the interactive eval tool's
   30-second timeout.
