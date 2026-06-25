@@ -32,6 +32,30 @@ if (projectChangedFiles.length > 0) {
 	};
 }
 
+const projectLocalScratchPaths = await existingProjectLocalScratchPaths();
+if (projectLocalScratchPaths.length > 0) {
+	const outputPath = "workflow-output/performance-benchmark.md";
+	await Bun.write(outputPath, projectLocalScratchIsolationViolationMarkdown(projectLocalScratchPaths));
+	return {
+		summary: `parallel lane isolation violation: ${projectLocalScratchPaths.length} project-local scratch path(s) found`,
+		data: { isolationViolation: true, projectLocalScratchPaths },
+		statePatch: [
+			{
+				op: "set",
+				path: "/benchmark",
+				value: {
+					status: "fail",
+					isolationViolation: true,
+					projectLocalScratchPaths,
+					benchmarkCommand,
+					validationCommand,
+					outputPath,
+				},
+			},
+		],
+	};
+}
+
 const benchmark = await runShell(benchmarkCommand);
 const validation = await runShell(validationCommand);
 const outputPath = "workflow-output/performance-benchmark.md";
@@ -76,6 +100,23 @@ async function gitDiffHeadChangedFiles() {
 		.split(/\r?\n/u)
 		.map((line) => line.trim())
 		.filter((line) => line && !line.startsWith("workflow-output/") && line !== "task.md");
+}
+
+async function existingProjectLocalScratchPaths() {
+	const reservedScratchPaths = ["workflow-output/tmp"];
+	const existingPaths = [];
+	for (const scratchPath of reservedScratchPaths) {
+		if (await pathExists(scratchPath)) existingPaths.push(scratchPath);
+	}
+	return existingPaths;
+}
+
+async function pathExists(path) {
+	const glob = new Bun.Glob(path);
+	for await (const _match of glob.scan({ cwd: process.cwd(), onlyFiles: false })) return true;
+	const childGlob = new Bun.Glob(`${path}/**`);
+	for await (const _match of childGlob.scan({ cwd: process.cwd(), onlyFiles: false })) return true;
+	return false;
 }
 
 async function runShell(command) {
@@ -123,6 +164,22 @@ function evidenceMarkdown(benchmarkCommand, benchmark, validationCommand, valida
 		"```text",
 		validation.stdout || validation.stderr || "(empty)",
 		"```",
+		"",
+	].join("\n");
+}
+
+function projectLocalScratchIsolationViolationMarkdown(projectLocalScratchPaths) {
+	return [
+		"# Performance Benchmark Evidence",
+		"",
+		"## Project-Local Scratch Isolation Violation",
+		"",
+		"Parallel optimization lanes must keep scratch copies, worktrees, benchmark fixtures, and temporary data outside the project tree.",
+		"Durable candidate patches and reports belong in `workflow-output/`, but lane-local execution scratch must not live under `workflow-output/tmp` or another project-scanned path.",
+		"",
+		"## Project-Local Scratch Paths",
+		"",
+		projectLocalScratchPaths.map((file) => `- ${file}`).join("\n"),
 		"",
 	].join("\n");
 }

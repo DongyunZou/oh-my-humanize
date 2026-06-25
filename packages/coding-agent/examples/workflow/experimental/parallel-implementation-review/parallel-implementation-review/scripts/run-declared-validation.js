@@ -579,21 +579,78 @@ function validationCommandFromTask(text) {
 }
 
 function validationEnvironmentFromTask(text) {
+	const commandEnvironment = validationEnvironmentFromCommand(validationCommandFromTask(text));
 	const lines = text.split(/\r?\n/u);
 	for (let index = 0; index < lines.length; index += 1) {
 		const match = validationEnvironmentLineMatch(lines[index] ?? "");
 		if (!match) continue;
 		const inlineValue = match[1]?.trim();
 		const entries = inlineValue ? [stripMarkdownInlineCode(inlineValue)] : followingEnvironmentLines(lines, index + 1);
-		return Object.fromEntries(
+		const explicitEnvironment = Object.fromEntries(
 			entries
 				.flatMap(entry => entry.split(/\s+/u))
 				.map(entry => /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/u.exec(stripMarkdownInlineCode(entry)))
 				.filter(Boolean)
 				.map(matchResult => [matchResult[1] ?? "", matchResult[2] ?? ""]),
 		);
+		return { ...commandEnvironment, ...explicitEnvironment };
 	}
-	return {};
+	return commandEnvironment;
+}
+
+function validationEnvironmentFromCommand(command) {
+	const environment = {};
+	for (const token of leadingShellAssignmentTokens(command)) {
+		const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/u.exec(token);
+		if (!match) break;
+		environment[match[1] ?? ""] = unquoteShellAssignmentValue(match[2] ?? "");
+	}
+	return environment;
+}
+
+function leadingShellAssignmentTokens(command) {
+	const tokens = [];
+	let index = 0;
+	while (index < command.length) {
+		while (index < command.length && /\s/u.test(command[index] ?? "")) index += 1;
+		if (index >= command.length) break;
+		const start = index;
+		let quote = "";
+		while (index < command.length) {
+			const char = command[index] ?? "";
+			if (quote) {
+				if (char === "\\" && quote === "\"" && index + 1 < command.length) {
+					index += 2;
+					continue;
+				}
+				if (char === quote) quote = "";
+				index += 1;
+				continue;
+			}
+			if (char === "'" || char === "\"") {
+				quote = char;
+				index += 1;
+				continue;
+			}
+			if (/\s/u.test(char)) break;
+			index += 1;
+		}
+		const token = command.slice(start, index);
+		if (!/^[A-Za-z_][A-Za-z0-9_]*=/u.test(token)) break;
+		tokens.push(token);
+	}
+	return tokens;
+}
+
+function unquoteShellAssignmentValue(value) {
+	const trimmed = value.trim();
+	if (
+		(trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+		(trimmed.startsWith("\"") && trimmed.endsWith("\""))
+	) {
+		return trimmed.slice(1, -1);
+	}
+	return trimmed;
 }
 
 function validationCommandLineMatch(line) {

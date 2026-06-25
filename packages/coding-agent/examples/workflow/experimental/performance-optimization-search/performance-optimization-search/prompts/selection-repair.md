@@ -24,6 +24,10 @@ that the reviewer can evaluate:
   `workflow-output/` artifacts and `task.md`; if parallel lanes left project
   edits behind, revert those edits and preserve the isolation violation as flow
   evidence before judging winners;
+- also check for project-local scratch such as `workflow-output/tmp`; lane
+  scratch, worktrees, benchmark fixtures, and temporary data must live outside
+  the project tree, while only durable candidate patches and reports belong in
+  `workflow-output/`;
 - if validation or benchmark failed, preserve the failure evidence and explain
   the minimal next repair needed;
 - if one branch has a measured positive result, apply at most one selected candidate patch
@@ -48,6 +52,7 @@ Before yielding, write `workflow-output/performance-selection-repair.md` with:
 - selected branch, no-win branch, or blocker;
 - project files retained, reverted, or intentionally left unchanged, including
   whether the shared workspace was clean before selection;
+- whether project-local scratch was absent before selection;
 - exact rollback/no-change evidence;
 - the branch report files you updated.
 

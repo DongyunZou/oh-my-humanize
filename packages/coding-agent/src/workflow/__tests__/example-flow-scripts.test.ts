@@ -159,6 +159,87 @@ describe("example workflow scripts", () => {
 		});
 	});
 
+	it("promotes validation command shell-prefix assignments into the declared environment", async () => {
+		using tempDir = TempDir.createSync("@omh-parallel-review-env-prefix-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const tupleId = "P06-T06-env-prefix";
+		const validationCommand = "TMPDIR=/tmp OMP_WORKFLOW_TMP=./temp echo validate";
+		const validationEnvironment = { TMPDIR: "/tmp", OMP_WORKFLOW_TMP: "./temp" };
+		const stdoutArtifact = `workflow-output/validation-attempt-1-stdout-${tupleId}.txt`;
+		const stderrArtifact = `workflow-output/validation-attempt-1-stderr-${tupleId}.txt`;
+		const exitCodeArtifact = `workflow-output/validation-attempt-1-exitcode-${tupleId}.txt`;
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Preserve shell-prefix validation environment assignments.",
+				"",
+				"Acceptance Criteria:",
+				"- The declared validation environment records command-prefix assignments.",
+				"",
+				"Validation Command:",
+				validationCommand,
+			].join("\n"),
+		);
+		await Bun.write(`${cwd}/manifest-entry.json`, `${JSON.stringify({ runId: tupleId }, null, 2)}\n`);
+		await Bun.write(`${cwd}/${stdoutArtifact}`, "validate\n");
+		await Bun.write(`${cwd}/${stderrArtifact}`, "");
+		await Bun.write(`${cwd}/${exitCodeArtifact}`, "0\n");
+		await Bun.write(
+			`${cwd}/workflow-output/tests-lane-${tupleId}.json`,
+			`${JSON.stringify(
+				{
+					schema: "tests-lane-v1",
+					tuple_id: tupleId,
+					producer_node: "implementTests",
+					status: "complete",
+					declared_validation: {
+						command: validationCommand,
+						environment: validationEnvironment,
+						result: "pass",
+						exit_code: 0,
+						attempts: [
+							{
+								attempt: 1,
+								result: "pass",
+								exit_code: 0,
+								stdout_path: stdoutArtifact,
+								stderr_path: stderrArtifact,
+								exitcode_path: exitCodeArtifact,
+							},
+						],
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "runDeclaredValidation",
+			scriptFileName: "run-declared-validation.js",
+		});
+
+		expect(result.scheduler.state.declaredValidation).toMatchObject({
+			tuple_id: tupleId,
+			validation: {
+				command: validationCommand,
+				environment: validationEnvironment,
+				result: "passed",
+				exitCode: 0,
+			},
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/validation-${tupleId}.json`).json()).toMatchObject({
+			validation: {
+				environment: validationEnvironment,
+			},
+		});
+	});
+
 	it("bounds documentation audit fan-in before consolidation", async () => {
 		using tempDir = TempDir.createSync("@omh-documentation-audit-compact-");
 		const cwd = tempDir.path();
@@ -329,9 +410,13 @@ describe("example workflow scripts", () => {
 		expect(optimizationPrompt).toContain("Do not leave project-file edits in the shared workspace");
 		expect(optimizationPrompt).toContain("candidate patch");
 		expect(optimizationPrompt).toContain("git apply --check");
+		expect(optimizationPrompt).toContain("outside the project tree");
+		expect(optimizationPrompt).not.toContain("workflow-output/tmp/{{strategy}}-*");
 		expect(repairPrompt).toContain("apply at most one selected candidate patch");
 		expect(repairPrompt).toContain("clean shared workspace");
+		expect(repairPrompt).toContain("project-local scratch");
 		expect(reviewPrompt).toContain("branch left no project-file edits in the shared workspace");
+		expect(reviewPrompt).toContain("outside the project tree");
 	});
 
 	it("blocks performance benchmark joins when parallel lanes leave shared project edits", async () => {
@@ -373,6 +458,48 @@ describe("example workflow scripts", () => {
 		});
 		expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
 			"Parallel Lane Isolation Violation",
+		);
+	});
+
+	it("blocks performance benchmark joins when lane scratch lives inside the project tree", async () => {
+		using tempDir = TempDir.createSync("@omh-performance-project-scratch-guard-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(`${cwd}/src.txt`, "baseline\n");
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Benchmark Command:", "echo benchmark", "", "Validation Command:", "echo validation"].join("\n"),
+		);
+		await runGit(cwd, ["init"]);
+		await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+		await runGit(cwd, ["config", "user.name", "OMH Test"]);
+		await runGit(cwd, ["add", "src.txt", "task.md"]);
+		await runGit(cwd, ["commit", "-m", "baseline"]);
+		await Bun.write(`${cwd}/workflow-output/tmp/algorithmic-worktree/marker.txt`, "project-local scratch\n");
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "benchmarkCandidates",
+			scriptFileName: "run-benchmark-validation.js",
+			scriptDir: PERFORMANCE_OPTIMIZATION_SCRIPT_DIR,
+			writes: ["/benchmark"],
+			initialState: {
+				task: {
+					benchmarkCommand: "echo benchmark",
+					validationCommand: "echo validation",
+				},
+			},
+		});
+
+		expect(result.scheduler.state.benchmark).toMatchObject({
+			status: "fail",
+			isolationViolation: true,
+			projectLocalScratchPaths: ["workflow-output/tmp"],
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
+			"Project-Local Scratch Isolation Violation",
 		);
 	});
 

@@ -1301,6 +1301,44 @@ describe("parallel-implementation-review flow contract", () => {
 		});
 	});
 
+	it("rejects declared validation evidence that drops shell-prefix environment assignments", async () => {
+		const cwd = await createTempDir();
+		const tupleId = "P06-T06-test";
+		const command = "TMPDIR=/tmp true";
+		await writeReadyEvidence(cwd, tupleId);
+		await Bun.write(path.join(cwd, "task.md"), `Validation Command:\n${command}\n`);
+		await Bun.write(
+			path.join(cwd, "workflow-output", `validation-${tupleId}.json`),
+			`${JSON.stringify(
+				{
+					tuple_id: tupleId,
+					artifact: `workflow-output/validation-${tupleId}.json`,
+					producer_node: "runDeclaredValidation",
+					producer_kind: "workflow-script",
+					validation: {
+						command,
+						environment: {},
+						result: "passed",
+						status: "passed",
+						exitCode: 0,
+						stdoutArtifact: `workflow-output/validation-${tupleId}.stdout`,
+						stderrArtifact: `workflow-output/validation-${tupleId}.stderr`,
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+
+		const result = await runScript(cwd, "evidence-contract-guard.js", {});
+
+		expect(result.verdict).toBe("REPAIR");
+		expect(result.data?.validation_environment).toEqual({ TMPDIR: "/tmp" });
+		expect(result.data?.reasons?.join("\n")).toContain(
+			"undeclared validation environment or missing declared environment",
+		);
+	});
+
 	it("reports plan-referenced lane artifacts that were never materialized", async () => {
 		const cwd = await createTempDir();
 		await writeReadyEvidence(cwd, "P06-T06-test");

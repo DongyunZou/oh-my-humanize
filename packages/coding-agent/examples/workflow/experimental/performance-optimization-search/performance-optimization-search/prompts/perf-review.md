@@ -21,8 +21,11 @@ Return `finish` only when:
 - the task-declared Benchmark Command produced real output;
 - every parallel branch left no project-file edits in the shared workspace
   before selection; candidate code must be represented as a branch-local patch
-  and lane-local measurement evidence until the selection repair node applies
-  at most one selected candidate;
+  and project-external lane-local measurement evidence until the selection
+  repair node applies at most one selected candidate;
+- lane scratch, worktrees, benchmark fixtures, and temporary data stayed outside the project tree;
+  durable candidate patches and reports may live under `workflow-output/`, but
+  execution scratch must not live under `workflow-output/tmp`;
 - there is a clearly selected positive optimization or a documented no-win
   result with rollback evidence;
 - losing or negative branches are reverted or explicitly isolated;
