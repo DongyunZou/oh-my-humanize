@@ -13,6 +13,56 @@ import type { WorkflowActivation } from "../scheduler";
 import { assertWorkflowCheckpointWorkspaceMatches } from "../workspace-checkpoint";
 
 describe("runWorkflow lifecycle", () => {
+	it("fails fast when an agent output declares a fail-closed terminal status", async () => {
+		const host = new MemoryWorkflowHost();
+		const definition = failClosedAgentDefinition();
+		const freeze = freezeForDefinition(definition);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async () => ({
+				summary: "validation unavailable",
+				data: {
+					status: "fail_closed_no_source_changes",
+					blocker: "pytest is not available in this environment",
+				},
+			}),
+			runScriptNode: async () => {
+				throw new Error("after node should not run");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			graphRevisionId: "graph-1",
+			startNodeId: "inspect",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				freeze,
+				runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+			},
+		});
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["inspect", "failed"],
+		]);
+		expect(result.scheduler.activations[0]?.error).toContain("pytest is not available");
+		expect(result.scheduler.state).toEqual({});
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		expect(family.attempts[0]).toMatchObject({
+			status: "failed",
+			error: expect.stringContaining("pytest is not available"),
+		});
+		expect(family.checkpoints[0]).toMatchObject({
+			frontierNodeIds: ["inspect"],
+			state: {},
+			completedActivationIds: [],
+		});
+	});
+
 	it("creates a restartable checkpoint when an activation fails", async () => {
 		const host = new MemoryWorkflowHost();
 		const definition = failureRecoveryDefinition();
@@ -227,6 +277,30 @@ class MemoryWorkflowHost {
 	getBranch(): WorkflowLifecycleBranchEntry[] {
 		return this.#entries;
 	}
+}
+
+function failClosedAgentDefinition(): WorkflowDefinition {
+	return {
+		name: "fail-closed-agent",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [
+			{
+				id: "inspect",
+				type: "agent",
+				agent: "task",
+				prompt: "Inspect the project.",
+				writes: ["/inspection"],
+			},
+			{
+				id: "after",
+				type: "script",
+				script: { language: "sh", code: "after" },
+				writes: ["/done"],
+			},
+		],
+		edges: [{ from: "inspect", to: "after" }],
+	};
 }
 
 function failureRecoveryDefinition(): WorkflowDefinition {

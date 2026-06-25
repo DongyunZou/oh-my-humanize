@@ -409,6 +409,7 @@ async function executeAndPersistActivation(
 			allowedWritePaths: node.writes,
 			stateSchema: options.definition.stateSchema,
 		});
+		assertWorkflowOutputAllowsContinuation(node, output);
 		if (output.statePatch) {
 			appendWorkflowStatePatch(options.host, run.id, {
 				patch: output.statePatch,
@@ -567,6 +568,35 @@ function materializeSingleWriteData(node: WorkflowNode, output: WorkflowActivati
 function hasStructuredWorkflowData(data: Record<string, unknown> | undefined): data is Record<string, unknown> {
 	if (data === undefined) return false;
 	return Object.keys(data).some(key => key !== "exitCode" && key !== "summaryTruncated" && key !== "summaryBytes");
+}
+
+function assertWorkflowOutputAllowsContinuation(node: WorkflowNode, output: WorkflowActivationOutput): void {
+	const status = workflowOutputStatus(output);
+	if (status === undefined || !workflowOutputStatusIsFailClosed(status)) return;
+	const reason = workflowOutputFailureReason(output);
+	const suffix = reason === undefined ? "" : `: ${reason}`;
+	throw new WorkflowRunnerError(
+		`workflow node "${node.id}" returned terminal fail-closed status "${status}"${suffix}`,
+	);
+}
+
+function workflowOutputStatus(output: WorkflowActivationOutput): string | undefined {
+	const status = output.data?.status;
+	return typeof status === "string" && status.trim().length > 0 ? status.trim() : undefined;
+}
+
+function workflowOutputStatusIsFailClosed(status: string): boolean {
+	return status.toLowerCase().startsWith("fail_closed");
+}
+
+function workflowOutputFailureReason(output: WorkflowActivationOutput): string | undefined {
+	if (output.data !== undefined) {
+		for (const key of ["blocker", "reason", "error", "message"]) {
+			const value = output.data[key];
+			if (typeof value === "string" && value.trim().length > 0) return value.trim();
+		}
+	}
+	return output.summary;
 }
 
 function appendLifecycleActivationStarted(

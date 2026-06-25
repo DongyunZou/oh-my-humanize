@@ -153,7 +153,7 @@ describe.skipIf(!zshPath)("createShellScriptRunner", () => {
 		expect(result.output).toBe("resource-ok");
 	});
 
-	it("does not inherit ambient Python import paths into workflow shell scripts", async () => {
+	it("does not force Python user-site isolation in workflow shell scripts", async () => {
 		using tempDir = TempDir.createSync("@omp-workflow-sh-python-env-");
 		previousShell = Bun.env.SHELL;
 		previousPythonPath = Bun.env.PYTHONPATH;
@@ -189,7 +189,7 @@ describe.skipIf(!zshPath)("createShellScriptRunner", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.error).toBeUndefined();
 		expect(result.output).toContain("PYTHONPATH=unset");
-		expect(result.output).toContain("PYTHONNOUSERSITE=1");
+		expect(result.output).toContain("PYTHONNOUSERSITE=unset");
 	});
 
 	it("cancels a running sh workflow script through the abort signal", async () => {

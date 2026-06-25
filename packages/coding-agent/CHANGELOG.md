@@ -13,6 +13,10 @@
 
 ### Fixed
 
+- Fixed workflow runs so agent outputs with an explicit `fail_closed_*` status
+  fail the activation before downstream nodes are scheduled.
+- Fixed workflow shell scripts so they can use Python user-site packages from
+  the operator environment while still stripping ambient `PYTHONPATH`.
 - Fixed the experimental refactor-migration-plan workflow so compatibility
   designs that are explicitly fail-closed or blocked by missing validation
   tooling stop before caller migration instead of mutating source after a
