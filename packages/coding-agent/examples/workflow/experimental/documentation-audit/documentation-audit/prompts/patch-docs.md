@@ -38,3 +38,23 @@ Patch-node evidence contract:
 - If you need patch evidence, use patch-scoped names such as
   `workflow-output/documentation-patch.md`; never present patch evidence as the
   final workflow archive or reviewer verdict.
+
+Final response contract:
+
+Return a JSON object as the final answer so the workflow can store it at
+`/patch` for reviewer binding. Use this shape:
+
+```json
+{
+  "status": "patched",
+  "summary": "one sentence describing the bounded repair",
+  "changed_files": ["docs/example.md"],
+  "rollback_notes": [
+    "Restore the edited subsection if validation fails or upstream behavior changes."
+  ],
+  "patch_evidence": "workflow-output/documentation-patch.md"
+}
+```
+
+Use `"status": "blocked"` instead of `"patched"` when no safe repair can be
+made. Do not leave the final response as prose only.

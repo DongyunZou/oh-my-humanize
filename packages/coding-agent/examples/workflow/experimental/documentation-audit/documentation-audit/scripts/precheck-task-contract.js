@@ -54,6 +54,16 @@ return {
 				summary: "No documentation validation has run yet.",
 			},
 		},
+		{
+			op: "set",
+			path: "/patch",
+			value: {
+				status: "not-run",
+				summary: "No documentation repair has run yet.",
+				changed_files: [],
+				rollback_notes: [],
+			},
+		},
 	],
 };
 

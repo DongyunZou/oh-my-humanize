@@ -76,6 +76,7 @@ sequence:
         - /runtime
         - /review
         - /validation
+        - /patch
   - node:
       id: inventoryDocs
       type: agent

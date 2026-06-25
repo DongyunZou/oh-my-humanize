@@ -218,6 +218,47 @@ describe("example workflow scripts", () => {
 		expect(prompt).toContain("workflow-output/review-decision.md");
 		expect(prompt).toContain("workflow-output/final");
 		expect(prompt).toContain("workflow-output/documentation-rollback.md");
+		expect(prompt).toContain("Final response contract");
+		expect(prompt).toContain("changed_files");
+		expect(prompt).toContain("rollback_notes");
+	});
+
+	it("initializes documentation patch state before reviewer binding", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-audit-patch-state-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Repair stale documentation examples.",
+				"",
+				"Validation Command:",
+				"python -m pytest tests/test_docs.py",
+			].join("\n"),
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "precheckTaskContract",
+			scriptFileName: "precheck-task-contract.js",
+			scriptDir: DOCUMENTATION_AUDIT_SCRIPT_DIR,
+			writes: ["/task", "/runtime", "/review", "/validation", "/patch"],
+		});
+
+		expect(result.scheduler.state.patch).toMatchObject({
+			status: "not-run",
+			summary: "No documentation repair has run yet.",
+			changed_files: [],
+			rollback_notes: [],
+		});
+
+		const flow = await Bun.file(
+			`${import.meta.dir}/../../../examples/workflow/experimental/documentation-audit/documentation-audit.omhflow`,
+		).text();
+		expect(flow).toMatch(/id:\s*precheckTaskContract[\s\S]*?writes:[\s\S]*?- \/patch/u);
 	});
 
 	it("fails performance optimization closed when the baseline command is not reproducible", async () => {
