@@ -8,6 +8,7 @@ if (suite.status !== "pass") {
 const archivePath = "workflow-output/test-hardening-archive.md";
 const taskText = await readOptionalText("task.md");
 const suiteText = await readOptionalText("workflow-output/test-suite.md");
+const repairEvidenceText = await readOptionalText("workflow-output/test-hardening-repair-evidence.md");
 const rollbackText = await readOptionalText("workflow-output/test-hardening-rollback.md");
 
 await Bun.write(
@@ -22,6 +23,10 @@ await Bun.write(
 		"## Suite Evidence",
 		"",
 		boundedLines(suiteText, 160),
+		"",
+		"## Repair Evidence",
+		"",
+		repairEvidenceText.trim() ? boundedLines(repairEvidenceText, 160) : "No repair evidence was present.",
 		"",
 		"## Rollback",
 		"",

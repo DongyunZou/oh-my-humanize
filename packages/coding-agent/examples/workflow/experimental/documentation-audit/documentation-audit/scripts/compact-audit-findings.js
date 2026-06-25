@@ -1,6 +1,8 @@
 const state = workflowContext.state && typeof workflowContext.state === "object" ? workflowContext.state : {};
+const SECTION_CHAR_LIMIT = 1600;
 
 const auditDigest = {
+	inventory: compactSection("inventory", state.inventory),
 	apiDocsAudit: compactSection("apiDocsAudit", state.apiDocsAudit),
 	tutorialAudit: compactSection("tutorialAudit", state.tutorialAudit),
 	examplesAudit: compactSection("examplesAudit", state.examplesAudit),
@@ -19,8 +21,8 @@ function compactSection(name, value) {
 	return {
 		source: name,
 		originalChars: text.length,
-		excerpt: truncateMiddle(text, 6000),
-		truncated: text.length > 6000,
+		excerpt: truncateMiddle(text, SECTION_CHAR_LIMIT),
+		truncated: text.length > SECTION_CHAR_LIMIT,
 	};
 }
 

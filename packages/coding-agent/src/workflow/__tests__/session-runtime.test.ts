@@ -7,6 +7,7 @@ import { createEvalToolScriptRunner } from "../eval-tool-runtime";
 import { runWorkflow } from "../runner";
 import {
 	createSessionWorkflowRuntimeHost,
+	type WorkflowHumanInputRequest,
 	type WorkflowScriptEvalRequest,
 	type WorkflowShellScriptRequest,
 } from "../session-runtime";
@@ -152,6 +153,42 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		).rejects.toThrow('workflow agent node "build" failed: implementation review rejected the candidate');
 
 		expect(calls).toBe(1);
+	});
+
+	it("preserves the human node prompt in activation output for closeout audit", async () => {
+		const requests: WorkflowHumanInputRequest[] = [];
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: "/workspace",
+			runHumanInput: async request => {
+				requests.push(request);
+				return {
+					response: "Approve",
+					selectedOptions: ["Approve"],
+				};
+			},
+		});
+		if (host.runHumanNode === undefined) throw new Error("human runtime missing");
+
+		const node: WorkflowNode = { id: "operatorGate", type: "human", prompt: "Approve the plan after reading it." };
+		const output = await host.runHumanNode({
+			node,
+			activation: workflowActivation(node.id),
+			prompt: node.prompt,
+		});
+
+		expect(requests).toEqual([
+			{
+				activationId: "operatorGate:activation-1",
+				nodeId: "operatorGate",
+				question: "Approve the plan after reading it.",
+			},
+		]);
+		expect(output.data).toMatchObject({
+			question: "Approve the plan after reading it.",
+			response: "Approve",
+			selectedOptions: ["Approve"],
+		});
+		expect(output.summary).toBe("Approve");
 	});
 
 	it("retries transient provider failures for review nodes before parsing verdicts", async () => {

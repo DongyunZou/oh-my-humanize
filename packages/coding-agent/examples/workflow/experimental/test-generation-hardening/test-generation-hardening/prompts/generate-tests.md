@@ -16,7 +16,11 @@ Rules:
 - Prefer existing test style, fixtures, and helper APIs.
 - Avoid brittle sleeps, environment-specific assumptions, fake assertions, and
   broad refactors.
+- Record coverage-gap, generated-test intent, changed files, and residual risk
+  in `workflow-output/test-hardening-repair-evidence.md`.
 - Record rollback notes in `workflow-output/test-hardening-rollback.md`.
+- Do not edit `workflow-output/test-suite.md`; that file is owned by the
+  validation node and may be overwritten after your node completes.
 - Return changed files, coverage intent, and any validation you ran.
 
 Do not edit `task.md`.

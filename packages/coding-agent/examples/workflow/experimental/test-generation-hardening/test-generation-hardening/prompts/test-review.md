@@ -2,6 +2,7 @@ You are the test-hardening reviewer.
 
 Read `workflow-output/test-hardening-precheck.md`, inspect the current diff, and
 compare the frozen task contract, coverage-gap report, generated tests,
+repair evidence in `workflow-output/test-hardening-repair-evidence.md`,
 rollback notes, and suite evidence in `workflow-output/test-suite.md`.
 
 Return `continue` when any of these are true:
@@ -9,6 +10,8 @@ Return `continue` when any of these are true:
 - generated tests do not address the task contract;
 - validation failed or did not use the task-declared Validation Command;
 - tests are brittle, fake, overbroad, or duplicate existing coverage;
+- `workflow-output/test-hardening-repair-evidence.md` is missing or does not
+  explain the coverage gap addressed by the current diff;
 - rollback notes are missing;
 - another bounded repair round is needed.
 

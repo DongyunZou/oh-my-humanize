@@ -234,6 +234,7 @@ function coerceToolResult(raw: unknown): { result: AgentToolResult<unknown>; mal
 	// aggregator that catches per-entry errors and synthesizes a combined
 	// result). Preserve the flag so agent-loop can surface it on the wire.
 	const explicitError = Boolean(rawObj && "isError" in rawObj && rawObj.isError);
+	const terminal = Boolean(rawObj && "terminal" in rawObj && rawObj.terminal);
 	// Tools may flag the result contextually useless (zero matches, elapsed
 	// wait) so compaction can elide it once consumed. Errors are never useless.
 	const useless = Boolean(rawObj && "useless" in rawObj && rawObj.useless);
@@ -285,6 +286,7 @@ function coerceToolResult(raw: unknown): { result: AgentToolResult<unknown>; mal
 			content,
 			details,
 			...(isError ? { isError: true } : {}),
+			...(terminal && !isError ? { terminal: true } : {}),
 			...(useless && !isError ? { useless: true } : {}),
 		},
 		malformed: invalidBlocks > 0,
@@ -946,6 +948,7 @@ async function runLoopBody(
 				const softNonCompliant = softGateActive && !calledOnlyRequiredTool;
 
 				const toolResults: ToolResultMessage[] = [];
+				let terminalRequested = false;
 				if (softNonCompliant && softRequiredTool !== undefined) {
 					if (softEscalations >= MAX_SOFT_TOOL_ESCALATIONS) {
 						throw new Error(
@@ -989,6 +992,7 @@ async function runLoopBody(
 					);
 
 					toolResults.push(...executionResult.toolResults);
+					terminalRequested = executionResult.terminalRequested;
 
 					for (const result of toolResults) {
 						currentContext.messages.push(result);
@@ -1033,6 +1037,11 @@ async function runLoopBody(
 				}
 
 				await emitTurnEnd(stream, currentContext, message, toolResults, config, signal);
+
+				if (terminalRequested) {
+					endAgentStream(stream, newMessages, telemetry, stepCounter.count);
+					return;
+				}
 
 				if (isDeadlineExceeded(config.deadline)) {
 					endAgentStream(stream, newMessages, telemetry, stepCounter.count);
@@ -1595,7 +1604,7 @@ async function executeToolCalls(
 	config: AgentLoopConfig,
 	telemetry: AgentTelemetry | undefined,
 	invokeAgentSpan: Span | undefined,
-): Promise<{ toolResults: ToolResultMessage[] }> {
+): Promise<{ toolResults: ToolResultMessage[]; terminalRequested: boolean }> {
 	const tools = currentContext.tools;
 	const {
 		hasSteeringMessages,
@@ -1618,6 +1627,7 @@ async function executeToolCalls(
 		? AbortSignal.any([signal, steeringAbortController.signal])
 		: steeringAbortController.signal;
 	const interruptState = { triggered: false };
+	let terminalRequested = false;
 
 	const records = toolCalls.map(toolCall => ({
 		toolCall,
@@ -1700,6 +1710,9 @@ async function executeToolCalls(
 		record.toolResultMessage = toolResultMessage;
 		record.resultEmitted = true;
 		emittedToolResults.push(toolResultMessage);
+		if (result.terminal === true && !isError) {
+			terminalRequested = true;
+		}
 
 		stream.push({ type: "message_start", message: toolResultMessage });
 		stream.push({ type: "message_end", message: toolResultMessage });
@@ -1898,6 +1911,7 @@ async function executeToolCalls(
 							content: after.content ?? result.content,
 							details: after.details ?? result.details,
 							isError: after.isError ?? result.isError,
+							terminal: after.terminal ?? result.terminal,
 							useless: after.useless ?? result.useless,
 						});
 						result = coerced.result;
@@ -2016,7 +2030,7 @@ async function executeToolCalls(
 		}
 	}
 
-	return { toolResults: emittedToolResults };
+	return { toolResults: emittedToolResults, terminalRequested };
 }
 
 /**

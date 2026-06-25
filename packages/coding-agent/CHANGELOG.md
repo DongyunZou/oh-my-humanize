@@ -13,6 +13,16 @@
 
 ### Fixed
 
+- Fixed workflow subagent `yield` completion so successful workflow agent nodes
+  end through the agent loop's terminal-result path instead of producing
+  post-yield `Request was aborted` transcript noise.
+- Fixed human workflow node activation output so closeout audits preserve the
+  full prompt text alongside the selected human response.
+- Fixed the experimental documentation-audit workflow so parallel lane fan-in is
+  compacted before consolidation instead of passing oversized raw inventories
+  into a reviewer prompt.
+- Fixed the experimental test-generation-hardening workflow so builder/repair
+  evidence is archived separately from validation-owned `test-suite.md` output.
 - Fixed the experimental parallel implementation/review workflow so all lane
   and finalization artifacts share one canonical tuple id from run artifacts,
   preventing reusable validation evidence from being missed when task prose

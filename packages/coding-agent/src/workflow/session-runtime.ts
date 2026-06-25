@@ -110,6 +110,7 @@ export interface WorkflowHumanInputRequest {
 
 export interface WorkflowHumanInputResult {
 	response: string;
+	question?: string;
 	selectedOptions?: string[];
 	customInput?: string;
 }
@@ -176,7 +177,7 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				nodeId: input.node.id,
 				question,
 			});
-			return activationOutputFromHumanInputResult(result);
+			return activationOutputFromHumanInputResult({ ...result, question });
 		},
 		runReviewNode: async input => {
 			if (!options.runAgentTask) {
@@ -601,6 +602,7 @@ function activationOutputFromHumanInputResult(result: WorkflowHumanInputResult):
 	const data: Record<string, unknown> = {
 		response: result.response,
 	};
+	if (result.question !== undefined) data.question = result.question;
 	if (result.selectedOptions !== undefined) data.selectedOptions = result.selectedOptions;
 	if (result.customInput !== undefined) data.customInput = result.customInput;
 	return {

@@ -434,6 +434,35 @@ describe("runSubprocess yield reminders", () => {
 		expect(result.stderr).toBe("");
 		expect(result.rawOutput).toContain('"ok": true');
 	});
+
+	it("does not abort the subagent session after a successful yield", async () => {
+		const abortSpy = vi.fn(async () => {});
+		const session = createMockSession(({ emit }) => {
+			emit({
+				type: "tool_execution_end",
+				toolCallId: "tool-clean-yield",
+				toolName: "yield",
+				result: {
+					content: [{ type: "text", text: "Result submitted." }],
+					details: { status: "success", data: { ok: true } },
+					terminal: true,
+				},
+				isError: false,
+			});
+		});
+		session.abort = abortSpy as AgentSession["abort"];
+		mockCreateAgentSession(session);
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-clean-yield",
+			completionLifecycle: "park",
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(result.abortReason).toBeUndefined();
+		expect(abortSpy).not.toHaveBeenCalled();
+	});
 	it("uses provided thinking level when model override has no explicit suffix", async () => {
 		vi.clearAllMocks();
 		const session = createMockSession(({ emit }) => {

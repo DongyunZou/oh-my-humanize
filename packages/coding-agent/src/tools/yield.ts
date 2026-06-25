@@ -246,6 +246,7 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 		return {
 			content: [{ type: "text", text: responseText }],
 			details: { data, status, error: errorMessage, schemaOverridden: schemaValidationOverridden || undefined },
+			terminal: true,
 		};
 	}
 }
@@ -265,5 +266,4 @@ subprocessToolRegistry.register<YieldDetails>("yield", {
 			schemaOverridden: record.schemaOverridden === true ? true : undefined,
 		};
 	},
-	shouldTerminate: event => !event.isError,
 });

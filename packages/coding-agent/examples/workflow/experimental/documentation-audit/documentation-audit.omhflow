@@ -185,7 +185,6 @@ sequence:
                 role: writer
               reads:
                 - /task
-                - /inventory
                 - /auditDigest
               prompt:
                 template:
@@ -193,8 +192,6 @@ sequence:
                   bindings:
                     task:
                       state: /task
-                    inventory:
-                      state: /inventory
                     auditDigest:
                       state: /auditDigest
               writes:
@@ -207,7 +204,7 @@ sequence:
                 role: writer
               reads:
                 - /task
-                - /inventory
+                - /auditDigest
                 - /audit
                 - /validation
                 - /review
@@ -217,8 +214,8 @@ sequence:
                   bindings:
                     task:
                       state: /task
-                    inventory:
-                      state: /inventory
+                    auditDigest:
+                      state: /auditDigest
                     audit:
                       state: /audit
                     validation:
@@ -246,7 +243,7 @@ sequence:
           role: reviewer
         reads:
           - /task
-          - /inventory
+          - /auditDigest
           - /audit
           - /patch
           - /validation
@@ -256,8 +253,8 @@ sequence:
             bindings:
               task:
                 state: /task
-              inventory:
-                state: /inventory
+              auditDigest:
+                state: /auditDigest
               audit:
                 state: /audit
               patch:

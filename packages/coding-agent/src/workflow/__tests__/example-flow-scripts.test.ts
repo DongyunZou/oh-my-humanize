@@ -9,6 +9,8 @@ import { runWorkflow, type WorkflowRunnerResult } from "../runner";
 import { createSessionWorkflowRuntimeHost } from "../session-runtime";
 
 const PARALLEL_REVIEW_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/parallel-implementation-review/parallel-implementation-review/scripts`;
+const DOCUMENTATION_AUDIT_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/documentation-audit/documentation-audit/scripts`;
+const TEST_GENERATION_HARDENING_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/test-generation-hardening/test-generation-hardening`;
 
 describe("example workflow scripts", () => {
 	it("records the manifest run id as the canonical tuple id in the task contract", async () => {
@@ -153,6 +155,70 @@ describe("example workflow scripts", () => {
 			},
 		});
 	});
+
+	it("bounds documentation audit fan-in before consolidation", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-audit-compact-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const largeEvidence = "stale doc finding with reproducible evidence\n".repeat(500);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "compactAuditFindings",
+			scriptFileName: "compact-audit-findings.js",
+			scriptDir: DOCUMENTATION_AUDIT_SCRIPT_DIR,
+			writes: ["/auditDigest"],
+			initialState: {
+				task: {
+					objective: "Keep documentation consistent with shell completion behavior.",
+					validationCommand: "python -m pytest tests/test_shell_completion.py",
+				},
+				inventory: {
+					docs: ["docs/shell-completion.md", "docs/testing.md"],
+				},
+				apiDocsAudit: { findings: [largeEvidence, largeEvidence] },
+				tutorialAudit: { findings: [largeEvidence, largeEvidence] },
+				examplesAudit: { findings: [largeEvidence, largeEvidence] },
+			},
+		});
+
+		expect(result.scheduler.state.auditDigest).toMatchObject({
+			apiDocsAudit: {
+				source: "apiDocsAudit",
+				truncated: true,
+			},
+			tutorialAudit: {
+				source: "tutorialAudit",
+				truncated: true,
+			},
+			examplesAudit: {
+				source: "examplesAudit",
+				truncated: true,
+			},
+		});
+		const digest = JSON.stringify(result.scheduler.state.auditDigest);
+		expect(digest.length).toBeLessThan(10000);
+		expect(digest).toContain("omitted");
+		expect(await Bun.file(`${cwd}/workflow-output/documentation-audit-digest.md`).text()).toContain(
+			"# Documentation Audit Digest",
+		);
+	});
+
+	it("keeps test-hardening repair evidence separate from suite output", async () => {
+		const generatePrompt = await Bun.file(`${TEST_GENERATION_HARDENING_DIR}/prompts/generate-tests.md`).text();
+		const repairPrompt = await Bun.file(`${TEST_GENERATION_HARDENING_DIR}/prompts/repair-tests.md`).text();
+		const reviewPrompt = await Bun.file(`${TEST_GENERATION_HARDENING_DIR}/prompts/test-review.md`).text();
+		const archiveScript = await Bun.file(`${TEST_GENERATION_HARDENING_DIR}/scripts/archive-tests.js`).text();
+
+		for (const prompt of [generatePrompt, repairPrompt, reviewPrompt]) {
+			expect(prompt).toContain("workflow-output/test-hardening-repair-evidence.md");
+		}
+		expect(generatePrompt).toContain("Do not edit `workflow-output/test-suite.md`");
+		expect(repairPrompt).toContain("Do not edit `workflow-output/test-suite.md`");
+		expect(reviewPrompt).toContain("test-hardening-repair-evidence");
+		expect(archiveScript).toContain("workflow-output/test-hardening-repair-evidence.md");
+	});
 });
 
 class MemoryWorkflowHost {
@@ -169,7 +235,17 @@ class MemoryWorkflowHost {
 	}
 }
 
-async function singleScriptDefinition(nodeId: string, scriptFileName: string): Promise<WorkflowDefinition> {
+async function singleScriptDefinitionFrom({
+	nodeId,
+	scriptFileName,
+	scriptDir,
+	writes,
+}: {
+	nodeId: string;
+	scriptFileName: string;
+	scriptDir: string;
+	writes: string[];
+}): Promise<WorkflowDefinition> {
 	return {
 		name: "example-flow-script-test",
 		version: 1,
@@ -180,9 +256,9 @@ async function singleScriptDefinition(nodeId: string, scriptFileName: string): P
 				type: "script",
 				script: {
 					language: "js",
-					code: await Bun.file(`${PARALLEL_REVIEW_SCRIPT_DIR}/${scriptFileName}`).text(),
+					code: await Bun.file(`${scriptDir}/${scriptFileName}`).text(),
 				},
-				writes: ["/declaredValidation", "/taskContract", "/runtime"],
+				writes,
 			},
 		],
 		edges: [],
@@ -194,11 +270,17 @@ async function runExampleScript({
 	previousCwd,
 	nodeId,
 	scriptFileName,
+	scriptDir = PARALLEL_REVIEW_SCRIPT_DIR,
+	writes = ["/declaredValidation", "/taskContract", "/runtime"],
+	initialState,
 }: {
 	cwd: string;
 	previousCwd: string;
 	nodeId: string;
 	scriptFileName: string;
+	scriptDir?: string;
+	writes?: string[];
+	initialState?: Record<string, unknown>;
 }): Promise<WorkflowRunnerResult> {
 	const settings = await Settings.init();
 	const session: ToolSession = {
@@ -216,10 +298,11 @@ async function runExampleScript({
 		process.chdir(cwd);
 		return await runWorkflow({
 			host: new MemoryWorkflowHost(),
-			definition: await singleScriptDefinition(nodeId, `${scriptFileName}`),
+			definition: await singleScriptDefinitionFrom({ nodeId, scriptFileName, scriptDir, writes }),
 			runId: `run-${nodeId}`,
 			startNodeId: nodeId,
 			runtimeHost: host,
+			initialState,
 		});
 	} finally {
 		process.chdir(previousCwd);

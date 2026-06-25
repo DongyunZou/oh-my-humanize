@@ -4,11 +4,7 @@ Task:
 
 {{jsonStringify task}}
 
-Inventory:
-
-{{jsonStringify inventory}}
-
-Bounded audit digest:
+Bounded audit digest, including the inventory summary and lane findings:
 
 {{jsonStringify auditDigest}}
 

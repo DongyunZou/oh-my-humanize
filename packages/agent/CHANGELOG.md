@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added terminal tool results so final-result tools can end an agent loop cleanly
+  without synthesizing an aborted assistant message.
+
 ## [16.1.16] - 2026-06-23
 
 ### Added

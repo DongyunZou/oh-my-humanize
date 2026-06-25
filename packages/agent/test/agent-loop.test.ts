@@ -99,6 +99,48 @@ describe("agentLoop with AgentMessage", () => {
 		expect(result.coverage?.modelsUsed).toEqual([mock.model.id]);
 	});
 
+	it("stops normally after a terminal tool result without another model request", async () => {
+		const terminalToolSchema = type({});
+		const terminalTool: AgentTool<typeof terminalToolSchema, { ok: boolean }> = {
+			name: "finish",
+			label: "Finish",
+			description: "Finish the task",
+			parameters: terminalToolSchema,
+			async execute() {
+				return {
+					content: [{ type: "text", text: "finished" }],
+					details: { ok: true },
+					terminal: true,
+				};
+			},
+		};
+		const context: AgentContext = {
+			systemPrompt: ["You are helpful."],
+			messages: [],
+			tools: [terminalTool],
+		};
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-finish", name: "finish", arguments: {} }] },
+				{ content: ["should not be requested"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("finish")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const messages = await stream.result();
+
+		expect(mock.calls).toHaveLength(1);
+		expect(messages.map(message => message.role)).toEqual(["user", "assistant", "toolResult"]);
+		expect(events.filter(event => event.type === "agent_end")).toHaveLength(1);
+		const assistantMessages = messages.filter((message): message is AssistantMessage => message.role === "assistant");
+		expect(assistantMessages[0]?.stopReason).not.toBe("aborted");
+	});
+
 	it("re-samples when an assistant turn ends with a pause_turn stop", async () => {
 		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
 		const secondCallRoles: string[] = [];
