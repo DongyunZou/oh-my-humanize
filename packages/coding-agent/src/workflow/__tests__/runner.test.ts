@@ -1,4 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { $ } from "bun";
 import type { WorkflowDefinition } from "../definition";
 import type { FlowFreeze } from "../freeze";
 import type { RuntimeBindingSnapshot, WorkflowLifecycleBranchEntry } from "../lifecycle";
@@ -6,6 +10,7 @@ import { reconstructWorkflowFamilies } from "../lifecycle";
 import type { WorkflowNodeRuntimeHost } from "../node-runtime";
 import { runWorkflow } from "../runner";
 import type { WorkflowActivation } from "../scheduler";
+import { assertWorkflowCheckpointWorkspaceMatches } from "../workspace-checkpoint";
 
 describe("runWorkflow lifecycle", () => {
 	it("creates a restartable checkpoint when an activation fails", async () => {
@@ -98,6 +103,116 @@ describe("runWorkflow lifecycle", () => {
 		expect(recoveredAttempt.checkpointId).toBe("attempt-1:checkpoint-1");
 		expect(recoveredAttempt.activations.map(activation => activation.nodeId)).toEqual(["middle", "after"]);
 	});
+
+	it("records the workspace snapshot when a stopped activation leaves dirty files", async () => {
+		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-checkpoint-workspace-"));
+		try {
+			await initializeGitWorkspace(workspace);
+			const host = new MemoryWorkflowHost();
+			const definition = stoppedWorkspaceDefinition();
+			const freeze = freezeForDefinition(definition);
+			const controller = new AbortController();
+			const wrotePartialFile = Promise.withResolvers<void>();
+			const runtimeHost: WorkflowNodeRuntimeHost = {
+				runScriptNode: async input => {
+					await Bun.write(path.join(workspace, "src", "partial.ts"), "export const partial = true;\n");
+					wrotePartialFile.resolve();
+					const parked = Promise.withResolvers<never>();
+					input.signal?.addEventListener("abort", () => parked.reject(new Error("workflow activation stopped")), {
+						once: true,
+					});
+					return parked.promise;
+				},
+			};
+
+			const runPromise = runWorkflow({
+				host,
+				definition,
+				runId: "run-1",
+				graphRevisionId: "graph-1",
+				startNodeId: "writePartial",
+				runtimeHost,
+				workspaceRoot: workspace,
+				signal: controller.signal,
+				nodeAbortSignal: controller.signal,
+				lifecycle: {
+					familyId: "family-1",
+					attemptId: "attempt-1",
+					freeze,
+					runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+				},
+			});
+			await wrotePartialFile.promise;
+			controller.abort("operator stop");
+			await runPromise;
+
+			const checkpoint = reconstructWorkflowFamilies(host.getBranch())[0]?.checkpoints[0];
+			expect(checkpoint?.abortedActivationIds).toEqual(["activation-1"]);
+			expect(checkpoint?.workspace).toMatchObject({
+				kind: "git",
+				status: "dirty",
+				dirtyPaths: ["src/partial.ts"],
+			});
+			expect(checkpoint?.workspace?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+		} finally {
+			await fs.rm(workspace, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects restart validation when the checkpoint workspace snapshot no longer matches", async () => {
+		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-checkpoint-restart-"));
+		try {
+			await initializeGitWorkspace(workspace);
+			const host = new MemoryWorkflowHost();
+			const definition = stoppedWorkspaceDefinition();
+			const freeze = freezeForDefinition(definition);
+			const controller = new AbortController();
+			const wrotePartialFile = Promise.withResolvers<void>();
+			const runtimeHost: WorkflowNodeRuntimeHost = {
+				runScriptNode: async input => {
+					await Bun.write(path.join(workspace, "src", "partial.ts"), "export const partial = true;\n");
+					wrotePartialFile.resolve();
+					const parked = Promise.withResolvers<never>();
+					input.signal?.addEventListener("abort", () => parked.reject(new Error("workflow activation stopped")), {
+						once: true,
+					});
+					return parked.promise;
+				},
+			};
+
+			const runPromise = runWorkflow({
+				host,
+				definition,
+				runId: "run-1",
+				graphRevisionId: "graph-1",
+				startNodeId: "writePartial",
+				runtimeHost,
+				workspaceRoot: workspace,
+				signal: controller.signal,
+				nodeAbortSignal: controller.signal,
+				lifecycle: {
+					familyId: "family-1",
+					attemptId: "attempt-1",
+					freeze,
+					runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+				},
+			});
+			await wrotePartialFile.promise;
+			controller.abort("operator stop");
+			await runPromise;
+
+			const checkpoint = reconstructWorkflowFamilies(host.getBranch())[0]?.checkpoints[0];
+			if (checkpoint === undefined) throw new Error("expected workflow checkpoint");
+			await expect(assertWorkflowCheckpointWorkspaceMatches(checkpoint, workspace)).resolves.toBeUndefined();
+
+			await Bun.write(path.join(workspace, "src", "unexpected.ts"), "export const unexpected = true;\n");
+			await expect(assertWorkflowCheckpointWorkspaceMatches(checkpoint, workspace)).rejects.toThrow(
+				"Workflow checkpoint workspace state does not match current workspace",
+			);
+		} finally {
+			await fs.rm(workspace, { recursive: true, force: true });
+		}
+	});
 });
 
 class MemoryWorkflowHost {
@@ -146,6 +261,22 @@ function failureRecoveryDefinition(): WorkflowDefinition {
 	};
 }
 
+function stoppedWorkspaceDefinition(): WorkflowDefinition {
+	return {
+		name: "stopped-workspace",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [
+			{
+				id: "writePartial",
+				type: "script",
+				script: { language: "sh", code: "write partial" },
+			},
+		],
+		edges: [],
+	};
+}
+
 function freezeForDefinition(definition: WorkflowDefinition): FlowFreeze {
 	return {
 		id: "flowfreeze:test",
@@ -175,4 +306,13 @@ function bindingSnapshot(id: string): RuntimeBindingSnapshot {
 		unavailable: [],
 		warnings: [],
 	};
+}
+
+async function initializeGitWorkspace(workspace: string): Promise<void> {
+	await $`git init`.cwd(workspace).quiet();
+	await Bun.write(path.join(workspace, "README.md"), "baseline\n");
+	await $`git add README.md`.cwd(workspace).quiet();
+	await $`git -c user.name=omh-test -c user.email=omh-test@example.invalid -c commit.gpgsign=false commit -m baseline`
+		.cwd(workspace)
+		.quiet();
 }

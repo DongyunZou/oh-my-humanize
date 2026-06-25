@@ -112,6 +112,21 @@ async function waitForFileText(filePath: string, needle: string): Promise<string
 	throw new Error(`Timed out waiting for ${filePath} to contain ${needle}`);
 }
 
+async function waitForWorkflowAttemptStatus(
+	entries: CapturedEntry[],
+	attemptId: string,
+	status: string,
+): Promise<void> {
+	for (let attempt = 0; attempt < 100; attempt += 1) {
+		const current = reconstructWorkflowFamilies(entries)
+			.flatMap(family => family.attempts)
+			.find(attemptRecord => attemptRecord.id === attemptId)?.status;
+		if (current === status) return;
+		await Bun.sleep(10);
+	}
+	throw new Error(`Timed out waiting for workflow attempt ${attemptId} to reach ${status}`);
+}
+
 async function waitForPersistedWorkflowCheckpoint(
 	sessionId: string,
 	cwd: string,
@@ -3576,7 +3591,7 @@ edges:
 		]);
 		expect(timeoutResult).toBe("aborted");
 		releaseBuild.resolve();
-		await Bun.sleep(10);
+		await waitForWorkflowAttemptStatus(entries, "run-runtime-timeout:attempt-1", "stopped");
 
 		const family = reconstructWorkflowFamilies(entries)[0];
 		expect(

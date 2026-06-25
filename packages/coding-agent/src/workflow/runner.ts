@@ -50,6 +50,7 @@ import {
 	type WorkflowSchedulerResult,
 } from "./scheduler";
 import { validateWorkflowActivationOutput, type WorkflowActivationOutput } from "./state";
+import { captureWorkflowCheckpointWorkspace } from "./workspace-checkpoint";
 
 export interface WorkflowRunnerModelResolutionOptions {
 	availableModels: Model<Api>[];
@@ -137,7 +138,7 @@ export async function runWorkflow(options: WorkflowRunnerOptions): Promise<Workf
 			executeNode: async (activation, node, context) =>
 				executeAndPersistActivation(options, run, activation, node, context, resourceDir),
 		});
-		finishLifecycleAttempt(options, scheduler, runtimeSignal.signal);
+		await finishLifecycleAttempt(options, scheduler, runtimeSignal.signal);
 		return { run, scheduler };
 	} finally {
 		runtimeSignal.dispose();
@@ -223,11 +224,11 @@ function startLifecycleAttempt(options: WorkflowRunnerOptions): void {
 	startWorkflowAttempt(options.host, attemptOptions);
 }
 
-function finishLifecycleAttempt(
+async function finishLifecycleAttempt(
 	options: WorkflowRunnerOptions,
 	scheduler: WorkflowSchedulerResult,
 	signal: AbortSignal | undefined,
-): void {
+): Promise<void> {
 	const lifecycle = options.lifecycle;
 	if (!lifecycle) return;
 	const failed = scheduler.activations.find(activation => activation.status === "failed");
@@ -250,6 +251,7 @@ function finishLifecycleAttempt(
 			frontierNodeIds: failedFrontierNodeIds,
 			state: scheduler.state,
 			sourceMapping: lifecycleCheckpointSourceMapping(options, failedFrontierNodeIds),
+			workspace: await captureWorkflowCheckpointWorkspace(options.workspaceRoot),
 		});
 		return;
 	}
@@ -269,6 +271,7 @@ function finishLifecycleAttempt(
 			frontierNodeIds: scheduler.frontierNodeIds,
 			state: scheduler.state,
 			sourceMapping: lifecycleCheckpointSourceMapping(options, scheduler.frontierNodeIds),
+			workspace: await captureWorkflowCheckpointWorkspace(options.workspaceRoot),
 		});
 		return;
 	}

@@ -88,6 +88,18 @@ export interface WorkflowCheckpointSnapshot {
 	frontierNodeIds: string[];
 	state: Record<string, unknown>;
 	sourceMapping: Record<string, string>;
+	workspace?: WorkflowCheckpointWorkspaceSnapshot;
+}
+
+export type WorkflowCheckpointWorkspaceStatus = "clean" | "dirty" | "unavailable";
+
+export interface WorkflowCheckpointWorkspaceSnapshot {
+	kind: "git" | "unknown";
+	status: WorkflowCheckpointWorkspaceStatus;
+	digest: string;
+	dirtyPaths: string[];
+	statusText?: string;
+	error?: string;
 }
 
 export type WorkflowChangeRequestOrigin =
@@ -223,6 +235,7 @@ export interface CreateWorkflowCheckpointOptions {
 	frontierNodeIds: string[];
 	state: Record<string, unknown>;
 	sourceMapping: Record<string, string>;
+	workspace?: WorkflowCheckpointWorkspaceSnapshot;
 }
 
 export interface CompleteWorkflowAttemptOptions {
@@ -678,6 +691,7 @@ export function createWorkflowCheckpoint(
 		state: clone(options.state),
 		sourceMapping: clone(options.sourceMapping),
 	};
+	if (options.workspace !== undefined) checkpoint.workspace = clone(options.workspace);
 	appendLifecycleEvent(host, { event: "checkpoint_created", checkpoint: clone(checkpoint) });
 	return checkpoint;
 }

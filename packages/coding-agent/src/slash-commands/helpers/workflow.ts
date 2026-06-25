@@ -73,6 +73,7 @@ import {
 import { workflowRuntimeBindingUnavailableError } from "../../workflow/runtime-binding";
 import { DEFAULT_WORKFLOW_MAX_RUNTIME_MS } from "../../workflow/runtime-timeout";
 import type { WorkflowActivation } from "../../workflow/scheduler";
+import { assertWorkflowCheckpointWorkspaceMatches } from "../../workflow/workspace-checkpoint";
 import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
 import { createMarketplaceManager } from "./marketplace-manager";
 import { commandConsumed, errorMessage, parseSubcommand, usage } from "./parse";
@@ -946,6 +947,11 @@ async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime):
 	}
 	if (startNodeIds.length === 0) {
 		return usage(`Workflow checkpoint has no restartable frontier: ${parsed.checkpointId}`, runtime);
+	}
+	try {
+		await assertWorkflowCheckpointWorkspaceMatches(located.checkpoint, runtime.cwd);
+	} catch (error) {
+		return usage(errorMessage(error), runtime);
 	}
 	const startNodeId = startNodeIds[0]!;
 	const attemptId = nextWorkflowRestartAttemptId(located.family);
@@ -2339,13 +2345,19 @@ function checkpointCompletedActivations(
 }
 
 function formatWorkflowCheckpoint(checkpoint: WorkflowCheckpointSnapshot): string {
-	return [
+	const lines = [
 		`Workflow checkpoint: ${checkpoint.id}`,
 		`Attempt: ${checkpoint.attemptId}`,
 		`Completed activations: ${checkpoint.completedActivationIds.length}`,
 		`Aborted activations: ${checkpoint.abortedActivationIds.length}`,
 		`Frontier: ${checkpoint.frontierNodeIds.join(", ") || "none"}`,
-	].join("\n");
+	];
+	if (checkpoint.workspace !== undefined) {
+		lines.push(
+			`Workspace: ${checkpoint.workspace.status} (${checkpoint.workspace.dirtyPaths.length} dirty paths, ${checkpoint.workspace.digest})`,
+		);
+	}
+	return lines.join("\n");
 }
 
 async function readWorkflowChangeRequest(
