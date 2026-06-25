@@ -2,17 +2,16 @@ import { ptree } from "@oh-my-pi/pi-utils";
 import { buildWorkflowShellEnvironment } from "../exec/shell-environment-policy";
 import type { ToolSession } from "../tools";
 import { workflowScriptEnvironment } from "./script-runtime-env";
+import { resolveWorkflowScriptTimeoutMs } from "./script-timeout-policy";
 import type {
 	WorkflowScriptEvalResult,
 	WorkflowShellScriptRequest,
 	WorkflowShellScriptRunner,
 } from "./session-runtime";
 
-const WORKFLOW_SHELL_TIMEOUT_MS = 60 * 60 * 1000;
-
 export function createShellScriptRunner(toolSession: ToolSession): WorkflowShellScriptRunner {
 	return async request => {
-		const timeoutMs = request.timeoutMs ?? WORKFLOW_SHELL_TIMEOUT_MS;
+		const timeoutMs = resolveWorkflowScriptTimeoutMs(request.timeoutMs);
 		const result = await ptree.exec(["sh"], {
 			cwd: toolSession.cwd,
 			input: `${request.code}\n`,

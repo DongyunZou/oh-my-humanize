@@ -1,7 +1,8 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import type { ToolSession } from "../../tools";
+import { EvalTool, type EvalToolParams } from "../../tools/eval";
 import type { WorkflowDefinition, WorkflowNode } from "../definition";
 import { createEvalToolScriptRunner } from "../eval-tool-runtime";
 import { runWorkflow } from "../runner";
@@ -479,6 +480,42 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		});
 
 		expect(result.scheduler.state).toEqual({ ledger: { round: 3 } });
+	});
+
+	it("gives js workflow script nodes the workflow script timeout by default", async () => {
+		const calls: EvalToolParams[] = [];
+		const executeSpy = spyOn(EvalTool.prototype, "execute").mockImplementation(async (_toolCallId, params) => {
+			calls.push(params);
+			return {
+				content: [{ type: "text", text: "ok" }],
+				details: undefined,
+			};
+		});
+		try {
+			using tempDir = TempDir.createSync("@omp-workflow-eval-timeout-");
+			const settings = await Settings.init();
+			const session: ToolSession = {
+				cwd: tempDir.path(),
+				hasUI: false,
+				getSessionFile: () => null,
+				getSessionSpawns: () => null,
+				settings,
+			};
+			const runner = createEvalToolScriptRunner(session);
+
+			const result = await runner({
+				activationId: "activation-timeout-js",
+				nodeId: "runValidation",
+				code: "return { summary: 'ok' };",
+				language: "js",
+				title: "run-validation.js",
+			});
+
+			expect(result.exitCode).toBe(0);
+			expect(calls[0]?.timeout).toBe(3600);
+		} finally {
+			executeSpy.mockRestore();
+		}
 	});
 
 	it("cancels a running js workflow script through the real eval tool runner", async () => {

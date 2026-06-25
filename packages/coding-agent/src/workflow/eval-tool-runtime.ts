@@ -2,6 +2,7 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { EvalToolDetails } from "../eval/types";
 import type { ToolSession } from "../tools";
 import { EvalTool, type EvalToolParams } from "../tools/eval";
+import { resolveWorkflowScriptTimeoutMs } from "./script-timeout-policy";
 import type { WorkflowScriptEvalResult, WorkflowScriptEvalRunner } from "./session-runtime";
 
 export function createEvalToolScriptRunner(toolSession: ToolSession): WorkflowScriptEvalRunner {
@@ -12,10 +13,7 @@ export function createEvalToolScriptRunner(toolSession: ToolSession): WorkflowSc
 			code: request.code,
 			title: request.title,
 		};
-		const timeout = workflowScriptEvalTimeoutSeconds(request.timeoutMs);
-		if (timeout !== undefined) {
-			params.timeout = timeout;
-		}
+		params.timeout = workflowScriptEvalTimeoutSeconds(resolveWorkflowScriptTimeoutMs(request.timeoutMs));
 		const result = await evalTool.execute(`workflow-${request.activationId}`, params, request.signal);
 		return workflowScriptResultFromEvalTool(request.language, result);
 	};
@@ -60,8 +58,7 @@ function exitCodeFromEvalDetails(details: EvalToolDetails | undefined): number {
 	return details?.isError ? 1 : 0;
 }
 
-function workflowScriptEvalTimeoutSeconds(timeoutMs: number | undefined): number | undefined {
-	if (timeoutMs === undefined) return undefined;
+function workflowScriptEvalTimeoutSeconds(timeoutMs: number): number {
 	return Math.max(1, Math.min(3600, Math.ceil(timeoutMs / 1000)));
 }
 
