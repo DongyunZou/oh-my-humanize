@@ -30,6 +30,7 @@ stateSchema:
     auditDigest: object
     audit: object
     patch: object
+    reviewRepair: object
     validationStartup: object
     validation: object
     review: string
@@ -41,6 +42,8 @@ resources:
   - path: scripts/check-validation-startup.js
     kind: script
   - path: scripts/compact-audit-findings.js
+    kind: script
+  - path: scripts/guard-review-repair.js
     kind: script
   - path: scripts/run-doc-validation.js
     kind: script
@@ -246,11 +249,23 @@ sequence:
               writes:
                 - /patch
           - node:
+              id: guardReviewRepair
+              type: script
+              reads:
+                - /review
+                - /patch
+              script:
+                language: js
+                file: scripts/guard-review-repair.js
+              writes:
+                - /reviewRepair
+          - node:
               id: runDocsValidation
               type: script
               reads:
                 - /task
                 - /patch
+                - /reviewRepair
               script:
                 language: js
                 file: scripts/run-doc-validation.js
@@ -268,6 +283,7 @@ sequence:
           - /auditDigest
           - /audit
           - /patch
+          - /reviewRepair
           - /validation
         prompt:
           template:
@@ -279,10 +295,12 @@ sequence:
                 state: /auditDigest
               audit:
                 state: /audit
-              patch:
-                state: /patch
-              validation:
-                state: /validation
+                    patch:
+                      state: /patch
+                    reviewRepair:
+                      state: /reviewRepair
+                    validation:
+                      state: /validation
         gates:
           - continue
           - finish
@@ -297,6 +315,7 @@ sequence:
         - /task
         - /audit
         - /patch
+        - /reviewRepair
         - /validation
         - /review
       script:

@@ -25,6 +25,12 @@ audit and task scope. Keep the project reviewable. Do not change the
 task-declared validation command. Write rollback notes if the change is not
 obvious from the diff.
 
+If prior review feedback contains a `continue` decision or asks for a concrete
+repair, treat that feedback as the highest-priority patch input. Do not rerun
+general discovery as a substitute for repairing it. Either make a targeted
+repair for every reviewer finding, or return `"status": "blocked"` with the
+specific blocker.
+
 Patch-node evidence contract:
 
 - Do not write terminal workflow artifacts. The validation, review, and archive
@@ -55,6 +61,12 @@ Return a JSON object as the final answer so the workflow can store it at
   "status": "patched",
   "summary": "one sentence describing the bounded repair",
   "changed_files": ["docs/example.md"],
+  "resolved_review_feedback": [
+    {
+      "feedback": "reviewer finding or empty when this is the first patch",
+      "evidence": "file or diff evidence showing the finding was resolved"
+    }
+  ],
   "rollback_notes": [
     "Restore the edited subsection if validation fails or upstream behavior changes."
   ],

@@ -810,7 +810,70 @@ describe("example workflow scripts", () => {
 		expect(prompt).toContain("workflow-output/documentation-rollback.md");
 		expect(prompt).toContain("Final response contract");
 		expect(prompt).toContain("changed_files");
+		expect(prompt).toContain("resolved_review_feedback");
 		expect(prompt).toContain("rollback_notes");
+	});
+
+	it("blocks documentation patch validation when prior review feedback is unresolved", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-review-repair-unresolved-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "guardReviewRepair",
+			scriptFileName: "guard-review-repair.js",
+			scriptDir: DOCUMENTATION_AUDIT_SCRIPT_DIR,
+			writes: ["/reviewRepair"],
+			initialState: {
+				review: "continue: restore the build_request url/base_url note before archiving",
+				patch: {
+					status: "patched",
+					changed_files: ["httpx/_client.py"],
+				},
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "guardReviewRepair")?.status).toBe(
+			"failed",
+		);
+	});
+
+	it("allows documentation patch validation when prior review feedback is resolved", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-review-repair-resolved-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "guardReviewRepair",
+			scriptFileName: "guard-review-repair.js",
+			scriptDir: DOCUMENTATION_AUDIT_SCRIPT_DIR,
+			writes: ["/reviewRepair"],
+			initialState: {
+				review: "continue: restore the build_request url/base_url note before archiving",
+				patch: {
+					status: "patched",
+					changed_files: ["httpx/_client.py"],
+					resolved_review_feedback: [
+						{
+							feedback: "restore the build_request url/base_url note",
+							evidence: "httpx/_client.py keeps that note and adds header precedence separately",
+						},
+					],
+				},
+			},
+		});
+
+		expect(result.scheduler.state.reviewRepair).toMatchObject({
+			status: "pass",
+			priorFeedbackRequired: true,
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/documentation-review-repair.md`).text()).toContain(
+			"priorFeedbackRequired: yes",
+		);
 	});
 
 	it("initializes documentation patch state before reviewer binding", async () => {
@@ -951,6 +1014,143 @@ describe("example workflow scripts", () => {
 		const evidence = await Bun.file(`${cwd}/workflow-output/documentation-validation-startup.md`).text();
 		expect(evidence).toContain("started validation");
 		expect(evidence).toContain("Exit code: 1");
+	});
+
+	it("blocks documentation archive when prior review feedback has no patch resolution evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-audit-unresolved-review-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const archiveScript = await Bun.file(`${DOCUMENTATION_AUDIT_SCRIPT_DIR}/archive-docs.js`).text();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Objective:", "Repair stale docs without dropping unrelated documented behavior."].join("\n"),
+		);
+		await Bun.write(`${cwd}/workflow-output/documentation-validation.md`, "44 passed\n");
+		await Bun.write(`${cwd}/workflow-output/documentation-rollback.md`, "Restore changed docs.\n");
+
+		const result = await runExampleDefinition({
+			cwd,
+			previousCwd,
+			initialState: {
+				patch: {
+					status: "patched",
+					changed_files: ["httpx/_client.py"],
+				},
+				validation: {
+					status: "pass",
+				},
+			},
+			definition: {
+				name: "documentation-review-resolution-guard",
+				version: 1,
+				models: { roles: {}, defaults: {} },
+				nodes: [
+					{
+						id: "consistencyReview",
+						type: "script",
+						script: {
+							language: "js",
+							code: [
+								"return {",
+								"  verdict: 'continue',",
+								"  summary: 'Restore the build_request url/base_url note before archiving.',",
+								"  statePatch: [{ op: 'set', path: '/review', value: 'continue: restore build_request url/base_url note' }],",
+								"};",
+							].join("\n"),
+						},
+						writes: ["/review"],
+					},
+					{
+						id: "archiveDocs",
+						type: "script",
+						script: {
+							language: "js",
+							code: archiveScript,
+						},
+						writes: ["/archive"],
+					},
+				],
+				edges: [{ from: "consistencyReview", to: "archiveDocs" }],
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "archiveDocs")?.status).toBe(
+			"failed",
+		);
+	});
+
+	it("archives documentation audit when prior review feedback has explicit resolution evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-audit-resolved-review-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const archiveScript = await Bun.file(`${DOCUMENTATION_AUDIT_SCRIPT_DIR}/archive-docs.js`).text();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Objective:", "Repair stale docs without dropping unrelated documented behavior."].join("\n"),
+		);
+		await Bun.write(`${cwd}/workflow-output/documentation-validation.md`, "44 passed\n");
+		await Bun.write(`${cwd}/workflow-output/documentation-rollback.md`, "Restore changed docs.\n");
+
+		const result = await runExampleDefinition({
+			cwd,
+			previousCwd,
+			initialState: {
+				patch: {
+					status: "patched",
+					changed_files: ["httpx/_client.py"],
+					resolved_review_feedback: [
+						{
+							feedback: "Restore the build_request url/base_url note.",
+							evidence: "httpx/_client.py keeps the base_url bullet and adds header precedence separately.",
+						},
+					],
+				},
+				validation: {
+					status: "pass",
+				},
+			},
+			definition: {
+				name: "documentation-review-resolution-guard",
+				version: 1,
+				models: { roles: {}, defaults: {} },
+				nodes: [
+					{
+						id: "consistencyReview",
+						type: "script",
+						script: {
+							language: "js",
+							code: [
+								"return {",
+								"  verdict: 'continue',",
+								"  summary: 'Restore the build_request url/base_url note before archiving.',",
+								"  statePatch: [{ op: 'set', path: '/review', value: 'continue: restore build_request url/base_url note' }],",
+								"};",
+							].join("\n"),
+						},
+						writes: ["/review"],
+					},
+					{
+						id: "archiveDocs",
+						type: "script",
+						script: {
+							language: "js",
+							code: archiveScript,
+						},
+						writes: ["/archive"],
+					},
+				],
+				edges: [{ from: "consistencyReview", to: "archiveDocs" }],
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "archiveDocs")?.status).toBe(
+			"completed",
+		);
+		expect(result.scheduler.state.archive).toMatchObject({
+			validation: "pass",
+		});
 	});
 
 	it("blocks release archive when audit blockers lack repair or waiver evidence", async () => {

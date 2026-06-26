@@ -1,8 +1,20 @@
 const state = workflowContext.state && typeof workflowContext.state === "object" ? workflowContext.state : {};
 const validation = state.validation && typeof state.validation === "object" ? state.validation : {};
+const patch = state.patch && typeof state.patch === "object" ? state.patch : {};
 
 if (validation.status !== "pass") {
 	throw new Error("cannot archive documentation audit flow before task-declared validation passes");
+}
+
+const priorReviewFeedback = priorContinueReviewFeedback();
+const resolvedReviewFeedback = resolvedReviewFeedbackFromPatch(patch);
+if (priorReviewFeedback.length > 0 && resolvedReviewFeedback.length === 0) {
+	throw new Error(
+		[
+			"cannot archive documentation audit flow before prior reviewer feedback has explicit patch resolution evidence",
+			`prior feedback: ${priorReviewFeedback.slice(0, 3).join("; ")}`,
+		].join("; "),
+	);
 }
 
 const archivePath = "workflow-output/documentation-audit-archive.md";
@@ -27,6 +39,12 @@ await Bun.write(
 		"",
 		rollbackText.trim() ? boundedLines(rollbackText, 120) : "No rollback notes were present.",
 		"",
+		"## Review Repair Evidence",
+		"",
+		resolvedReviewFeedback.length > 0
+			? resolvedReviewFeedback.map(item => `- ${item}`).join("\n")
+			: "No prior continue review required explicit repair evidence.",
+		"",
 	].join("\n"),
 );
 
@@ -39,10 +57,71 @@ return {
 			value: {
 				file: archivePath,
 				validation: "pass",
+				resolvedReviewFeedback,
 			},
 		},
 	],
 };
+
+function priorContinueReviewFeedback() {
+	const activations = Array.isArray(workflowContext.completedActivations) ? workflowContext.completedActivations : [];
+	const feedback = activations
+		.filter(activation => activation?.nodeId === "consistencyReview" && activation.status === "completed")
+		.filter(activation => verdictFromOutput(activation.output) === "continue")
+		.map(activation => summaryFromOutput(activation.output))
+		.filter(Boolean);
+	const stateReviewFeedback = priorStateReviewFeedback(state.review);
+	if (stateReviewFeedback) feedback.push(stateReviewFeedback);
+	return feedback;
+}
+
+function priorStateReviewFeedback(value) {
+	if (typeof value !== "string") return "";
+	const text = value.trim();
+	if (!text || /^no previous documentation review yet\.?$/iu.test(text)) return "";
+	if (/\bcontinue\b/iu.test(text)) return text;
+	return "";
+}
+
+function verdictFromOutput(output) {
+	if (!output || typeof output !== "object") return "";
+	const verdict = output.verdict ?? output.status;
+	if (typeof verdict === "string") return verdict.trim().toLowerCase();
+	const data = output.data;
+	if (data && typeof data === "object") {
+		const dataVerdict = data.verdict ?? data.status;
+		if (typeof dataVerdict === "string") return dataVerdict.trim().toLowerCase();
+	}
+	return "";
+}
+
+function summaryFromOutput(output) {
+	if (!output || typeof output !== "object") return "";
+	const summary = output.summary ?? output.reason ?? output.explanation;
+	if (typeof summary === "string") return summary.trim();
+	const data = output.data;
+	if (data && typeof data === "object") {
+		const dataSummary = data.summary ?? data.reason ?? data.explanation;
+		if (typeof dataSummary === "string") return dataSummary.trim();
+	}
+	return "";
+}
+
+function resolvedReviewFeedbackFromPatch(value) {
+	const field = value.resolved_review_feedback ?? value.resolvedReviewFeedback;
+	if (Array.isArray(field)) return field.map(reviewFeedbackItemText).filter(Boolean);
+	if (typeof field === "string" && field.trim()) return [field.trim()];
+	return [];
+}
+
+function reviewFeedbackItemText(item) {
+	if (typeof item === "string") return item.trim();
+	if (!item || typeof item !== "object") return "";
+	const feedback = typeof item.feedback === "string" ? item.feedback.trim() : "";
+	const evidence = typeof item.evidence === "string" ? item.evidence.trim() : "";
+	if (feedback && evidence) return `${feedback} — ${evidence}`;
+	return feedback || evidence;
+}
 
 async function readOptionalText(filePath) {
 	try {

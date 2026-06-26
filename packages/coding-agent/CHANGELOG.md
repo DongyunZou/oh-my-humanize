@@ -19,6 +19,9 @@
 
 ### Fixed
 
+- Fixed the experimental documentation-audit workflow so review-driven retry
+  loops fail closed unless the next patch records explicit resolution evidence
+  for prior reviewer feedback before validation/archive can proceed.
 - Fixed the experimental parallel implementation/review workflow so its
   evidence contract accepts canonical lane artifacts when older planner or
   review handoffs cite legacy lane artifact names.
