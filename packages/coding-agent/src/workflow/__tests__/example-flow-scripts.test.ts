@@ -320,6 +320,105 @@ describe("example workflow scripts", () => {
 		});
 	});
 
+	it("does not require optional parallel lane archive references when canonical lane evidence exists", async () => {
+		using tempDir = TempDir.createSync("@omh-parallel-review-optional-lane-archive-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const tupleId = "P07-T03C-e5dab47a8-fd-cli-option-sync";
+		const validationCommand = "echo validate";
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Guard canonical lane evidence without requiring optional lane archives.",
+				"",
+				"Acceptance Criteria:",
+				"- Strong review may cite optional lane archive suggestions.",
+				"",
+				"Validation Command:",
+				validationCommand,
+				"",
+				"Lane Ownership:",
+				"core owns source; tests owns validation; docs owns operator evidence.",
+			].join("\n"),
+		);
+		await Bun.write(`${cwd}/manifest-entry.json`, `${JSON.stringify({ runId: tupleId }, null, 2)}\n`);
+		await Bun.write(
+			`${cwd}/workflow-output/core-lane-${tupleId}.json`,
+			`${JSON.stringify({ tuple_id: tupleId, producer_node: "implementCore", status: "complete" }, null, 2)}\n`,
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/tests-lane-${tupleId}.json`,
+			`${JSON.stringify({ tuple_id: tupleId, producer_node: "implementTests", status: "complete" }, null, 2)}\n`,
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/docs-lane-${tupleId}.json`,
+			`${JSON.stringify({ tuple_id: tupleId, producer_node: "implementDocs", status: "complete" }, null, 2)}\n`,
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/integration-review-materialized-${tupleId}.json`,
+			`${JSON.stringify({ tuple_id: tupleId, producer_node: "materializeIntegrationReview" }, null, 2)}\n`,
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/validation-${tupleId}.json`,
+			`${JSON.stringify(
+				{
+					tuple_id: tupleId,
+					producer_node: "runDeclaredValidation",
+					producer_kind: "workflow-script",
+					validation: {
+						command: validationCommand,
+						environment: {},
+						result: "passed",
+						status: "passed",
+						exitCode: 0,
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "evidenceContractGuard",
+			scriptFileName: "evidence-contract-guard.js",
+			writes: ["/evidenceContract"],
+			initialState: {
+				laneHardStopGuard: {
+					status: "continue",
+				},
+				planHandoff: [
+					`canonical core evidence workflow-output/core-lane-${tupleId}.json`,
+					`optional core archive workflow-output/lane-archive-implementCore-${tupleId}.md`,
+					`canonical tests evidence workflow-output/tests-lane-${tupleId}.json`,
+					`optional tests archive workflow-output/lane-archive-implementTests-${tupleId}.md`,
+				].join("\n"),
+				reviewHandoff: {
+					artifacts: [
+						`workflow-output/docs-lane-${tupleId}.json`,
+						`workflow-output/integration-review-materialized-${tupleId}.json`,
+					],
+				},
+			},
+		});
+
+		expect(result.scheduler.state.evidenceContract).toMatchObject({
+			verdict: "READY",
+			checked_inputs: {
+				missing_referenced_artifacts: [],
+			},
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/evidence-contract-guard-${tupleId}.json`).json()).toMatchObject({
+			verdict: "READY",
+			checked_inputs: {
+				missing_referenced_artifacts: [],
+			},
+		});
+	});
+
 	it("bounds documentation audit fan-in before consolidation", async () => {
 		using tempDir = TempDir.createSync("@omh-documentation-audit-compact-");
 		const cwd = tempDir.path();

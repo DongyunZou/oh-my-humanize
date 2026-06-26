@@ -19,6 +19,10 @@
 
 ### Fixed
 
+- Fixed the experimental parallel implementation/review workflow so optional
+  lane archive references do not block evidence-contract approval when the
+  canonical lane, integration-review, rollback, and trusted validation
+  artifacts are present.
 - Fixed workflow checkpoints so runtime scratch files from `OMH_RUN_TMP` or
   `TMPDIR` are excluded when the checkpoint snapshot is created, preventing
   restart mismatches after transient runner files disappear.

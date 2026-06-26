@@ -646,11 +646,18 @@ function expectedReferencedArtifactsFromState(state, tupleId) {
 	for (const pointer of ["/planHandoff", "/reviewHandoff"]) {
 		for (const artifact of referencedWorkflowArtifacts(stateValueAtPath(state, pointer))) {
 			if (ignoredEvidenceArtifact(artifact)) continue;
+			if (isOptionalLaneArchiveArtifact(artifact)) continue;
 			if (tupleId && !artifact.includes(tupleId)) continue;
 			artifacts.add(artifact);
 		}
 	}
 	return [...artifacts].sort((left, right) => left.localeCompare(right, "en"));
+}
+
+function isOptionalLaneArchiveArtifact(file) {
+	return /(^|\/)lane-archive-(?:implementCore|implementTests|implementDocs|core|tests?|docs?)-[^/]*\.(?:json|md|txt)$/iu.test(
+		file,
+	);
 }
 
 function referencedWorkflowArtifacts(value) {
