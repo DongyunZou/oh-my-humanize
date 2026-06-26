@@ -82,6 +82,18 @@ export class WorkflowNodeRuntimeError extends Error {
 	}
 }
 
+export class WorkflowNodeAbortedError extends Error {
+	constructor(message: string = "workflow node aborted") {
+		super(message);
+		this.name = "WorkflowNodeAbortedError";
+	}
+}
+
+export function workflowNodeAbortedErrorReason(error: unknown): string | undefined {
+	if (!(error instanceof WorkflowNodeAbortedError)) return undefined;
+	return error.message || "workflow node aborted";
+}
+
 export async function executeWorkflowNode(
 	node: WorkflowNode,
 	activation: WorkflowActivation,

@@ -1,6 +1,8 @@
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { ToolSession } from "../tools";
 import { AskTool } from "../tools/ask";
+import { ToolAbortError } from "../tools/tool-errors";
+import { WorkflowNodeAbortedError } from "./node-runtime";
 import type { WorkflowHumanInputResult, WorkflowHumanInputRunner } from "./session-runtime";
 
 export function createAskToolHumanInputRunner(
@@ -12,31 +14,38 @@ export function createAskToolHumanInputRunner(
 		if (!askTool) {
 			throw new Error(`workflow human node "${request.nodeId}" requires interactive mode`);
 		}
-		const result = await askTool.execute(
-			`workflow-${request.activationId}`,
-			{
-				questions: [
-					{
-						id: "response",
-						question: request.question,
-						options: [
-							{
-								label: "Reject",
-								description: "Do not proceed; keep the workflow at the human checkpoint.",
-							},
-							{
-								label: "Approve",
-								description: "Proceed only after reading the prompt and evidence.",
-							},
-						],
-						recommended: 0,
-					},
-				],
-			},
-			undefined,
-			undefined,
-			getToolContext(),
-		);
+		let result: { details?: WorkflowAskDetails };
+		try {
+			result = await askTool.execute(
+				`workflow-${request.activationId}`,
+				{
+					questions: [
+						{
+							id: "response",
+							question: request.question,
+							options: [
+								{
+									label: "Reject",
+									description: "Decline approval and let the workflow follow its rejection path.",
+								},
+								{
+									label: "Approve",
+									description: "Proceed only after reading the prompt and evidence.",
+								},
+							],
+							recommended: 0,
+						},
+					],
+				},
+				request.signal,
+				undefined,
+				getToolContext(),
+			);
+		} catch (error) {
+			const abortReason = workflowHumanInputAbortReason(error, request);
+			if (abortReason !== undefined) throw new WorkflowNodeAbortedError(abortReason);
+			throw error;
+		}
 		const details = result.details;
 		const response = responseFromAskDetails(details);
 		const output: WorkflowHumanInputResult = {
@@ -53,6 +62,23 @@ function responseFromAskDetails(details: WorkflowAskDetails | undefined): string
 	const selected = details?.selectedOptions?.[0];
 	if (selected) return selected;
 	return "User did not provide a response";
+}
+
+function workflowHumanInputAbortReason(
+	error: unknown,
+	request: { nodeId: string; signal?: AbortSignal },
+): string | undefined {
+	if (!(error instanceof ToolAbortError)) return undefined;
+	if (request.signal?.aborted === true) {
+		const reason = request.signal.reason;
+		if (reason instanceof Error) return reason.message;
+		if (typeof reason === "string" && reason.length > 0) return reason;
+		if (reason !== undefined && reason !== null) return String(reason);
+	}
+	if (error.message === "Ask input was cancelled" || error.message === "Ask tool was cancelled by the user") {
+		return `workflow human node "${request.nodeId}" input cancelled by operator`;
+	}
+	return undefined;
 }
 
 interface WorkflowAskDetails {

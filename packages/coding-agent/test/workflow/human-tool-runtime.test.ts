@@ -5,6 +5,7 @@ import type { ExtensionUIContext, ExtensionUISelectItem } from "../../src/extens
 import { initTheme } from "../../src/modes/theme/theme";
 import type { ToolSession } from "../../src/tools";
 import { createAskToolHumanInputRunner } from "../../src/workflow/human-tool-runtime";
+import { WorkflowNodeAbortedError } from "../../src/workflow/node-runtime";
 
 function createToolSession(): ToolSession {
 	return {
@@ -61,5 +62,28 @@ describe("workflow human input ask tool runtime adapter", () => {
 			response: "Approve",
 			selectedOptions: ["Approve"],
 		});
+	});
+
+	it("maps user cancellation to a workflow node abort instead of a failed checkpoint", async () => {
+		let aborted = false;
+		const ui = {
+			select: async () => undefined,
+			editor: async () => undefined,
+		} as unknown as ExtensionUIContext;
+		const runner = createAskToolHumanInputRunner(createToolSession(), () => ({
+			...createToolContext(ui),
+			abort: () => {
+				aborted = true;
+			},
+		}));
+
+		await expect(
+			runner({
+				activationId: "activation-cancel",
+				nodeId: "operatorGate",
+				question: "Approve this workflow mutation?",
+			}),
+		).rejects.toThrow(WorkflowNodeAbortedError);
+		expect(aborted).toBe(true);
 	});
 });

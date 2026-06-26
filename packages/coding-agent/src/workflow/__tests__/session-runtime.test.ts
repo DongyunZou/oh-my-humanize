@@ -192,6 +192,29 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		expect(output.summary).toBe("Approve");
 	});
 
+	it("passes the human node abort signal to the human input runner", async () => {
+		let capturedRequest: WorkflowHumanInputRequest | undefined;
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: "/workspace",
+			runHumanInput: async request => {
+				capturedRequest = request;
+				return { response: "Reject", selectedOptions: ["Reject"] };
+			},
+		});
+		if (host.runHumanNode === undefined) throw new Error("human runtime missing");
+
+		const controller = new AbortController();
+		const node: WorkflowNode = { id: "operatorGate", type: "human", prompt: "Approve the plan." };
+		await host.runHumanNode({
+			node,
+			activation: workflowActivation(node.id),
+			prompt: node.prompt,
+			signal: controller.signal,
+		});
+
+		expect(capturedRequest?.signal).toBe(controller.signal);
+	});
+
 	it("retries transient provider failures for review nodes before parsing verdicts", async () => {
 		let calls = 0;
 		const host = createSessionWorkflowRuntimeHost({

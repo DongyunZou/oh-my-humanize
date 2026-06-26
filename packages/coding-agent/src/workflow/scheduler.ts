@@ -1,5 +1,6 @@
 import { evaluateWorkflowCondition } from "./condition";
 import type { WorkflowDefinition, WorkflowNode } from "./definition";
+import { workflowNodeAbortedErrorReason } from "./node-runtime";
 import { applyWorkflowStatePatch, validateWorkflowActivationOutput, type WorkflowActivationOutput } from "./state";
 
 export type WorkflowActivationStatus = "queued" | "running" | "completed" | "failed" | "aborted";
@@ -46,6 +47,7 @@ export interface WorkflowSchedulerResult {
 	limitReached: boolean;
 	frontierNodeIds: string[];
 	state: Record<string, unknown>;
+	stopReason?: string;
 }
 
 interface RunningWorkflowActivation {
@@ -94,6 +96,7 @@ export async function runWorkflowScheduler(
 	const running = new Map<string, RunningWorkflowActivation>();
 	let limitReached = false;
 	let stoppedFrontierNodeIds: string[] | undefined;
+	let stopReason: string | undefined;
 	let stopScheduling = false;
 	const completedActivationSnapshot = (): WorkflowActivation[] => [
 		...externalCompletedActivations,
@@ -149,6 +152,7 @@ export async function runWorkflowScheduler(
 		if (result.aborted === true) {
 			result.activation.status = "aborted";
 			result.activation.reason = result.error ?? "workflow activation aborted";
+			stopReason ??= result.activation.reason;
 			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
 			pushUnique(stoppedFrontierNodeIds, result.activation.nodeId);
 			stopScheduling = true;
@@ -226,7 +230,14 @@ export async function runWorkflowScheduler(
 		startReadyActivations();
 	}
 
-	return { activations, limitReached, frontierNodeIds: stoppedFrontierNodeIds ?? uniqueNodeIds(queue), state };
+	const schedulerResult: WorkflowSchedulerResult = {
+		activations,
+		limitReached,
+		frontierNodeIds: stoppedFrontierNodeIds ?? uniqueNodeIds(queue),
+		state,
+	};
+	if (stopReason !== undefined) schedulerResult.stopReason = stopReason;
+	return schedulerResult;
 }
 
 function combineSchedulerAbortSignals(first: AbortSignal | undefined, second: AbortSignal): AbortSignal {
@@ -259,7 +270,10 @@ async function executeSchedulerActivation(
 			}),
 		};
 	} catch (error) {
-		const abortReason = workflowAbortReason(context.nodeAbortSignal) ?? workflowAbortReason(context.signal);
+		const abortReason =
+			workflowAbortReason(context.nodeAbortSignal) ??
+			workflowAbortReason(context.signal) ??
+			workflowNodeAbortedErrorReason(error);
 		if (abortReason) {
 			return {
 				activation,

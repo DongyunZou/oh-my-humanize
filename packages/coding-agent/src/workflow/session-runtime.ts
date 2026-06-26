@@ -106,6 +106,7 @@ export interface WorkflowHumanInputRequest {
 	activationId: string;
 	nodeId: string;
 	question: string;
+	signal?: AbortSignal;
 }
 
 export interface WorkflowHumanInputResult {
@@ -172,11 +173,13 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 			if (!question) {
 				throw new WorkflowNodeRuntimeError(`workflow human node "${input.node.id}" must define a question prompt`);
 			}
-			const result = await options.runHumanInput({
+			const request: WorkflowHumanInputRequest = {
 				activationId: input.activation.id,
 				nodeId: input.node.id,
 				question,
-			});
+			};
+			if (input.signal !== undefined) request.signal = input.signal;
+			const result = await options.runHumanInput(request);
 			return activationOutputFromHumanInputResult({ ...result, question });
 		},
 		runReviewNode: async input => {

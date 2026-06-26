@@ -7,7 +7,7 @@ import type { WorkflowDefinition } from "../definition";
 import type { FlowFreeze } from "../freeze";
 import type { RuntimeBindingSnapshot, WorkflowLifecycleBranchEntry } from "../lifecycle";
 import { reconstructWorkflowFamilies } from "../lifecycle";
-import type { WorkflowNodeRuntimeHost } from "../node-runtime";
+import { WorkflowNodeAbortedError, type WorkflowNodeRuntimeHost } from "../node-runtime";
 import { runWorkflow } from "../runner";
 import type { WorkflowActivation } from "../scheduler";
 import { assertWorkflowCheckpointWorkspaceMatches } from "../workspace-checkpoint";
@@ -209,6 +209,52 @@ describe("runWorkflow lifecycle", () => {
 		}
 	});
 
+	it("creates a restartable checkpoint when the operator leaves a human checkpoint prompt", async () => {
+		const host = new MemoryWorkflowHost();
+		const definition = humanCheckpointDefinition();
+		const freeze = freezeForDefinition(definition);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runHumanNode: async () => {
+				throw new WorkflowNodeAbortedError("operator left human checkpoint");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			graphRevisionId: "graph-1",
+			startNodeId: "operatorGate",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				freeze,
+				runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+			},
+		});
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["operatorGate", "aborted"],
+		]);
+		expect(result.scheduler.stopReason).toBe("operator left human checkpoint");
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		expect(family.attempts[0]).toMatchObject({
+			status: "stopped",
+			stop: {
+				reason: "operator left human checkpoint",
+			},
+		});
+		expect(family.checkpoints[0]).toMatchObject({
+			id: "attempt-1:checkpoint-1",
+			attemptId: "attempt-1",
+			frontierNodeIds: ["operatorGate"],
+			completedActivationIds: [],
+			abortedActivationIds: ["activation-1"],
+		});
+	});
+
 	it("rejects restart validation when the checkpoint workspace snapshot no longer matches", async () => {
 		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-checkpoint-restart-"));
 		try {
@@ -345,6 +391,22 @@ function stoppedWorkspaceDefinition(): WorkflowDefinition {
 				id: "writePartial",
 				type: "script",
 				script: { language: "sh", code: "write partial" },
+			},
+		],
+		edges: [],
+	};
+}
+
+function humanCheckpointDefinition(): WorkflowDefinition {
+	return {
+		name: "human-checkpoint",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [
+			{
+				id: "operatorGate",
+				type: "human",
+				prompt: "Approve after inspecting the adaptive workflow proposal.",
 			},
 		],
 		edges: [],

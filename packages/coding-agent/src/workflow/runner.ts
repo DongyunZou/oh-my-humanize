@@ -27,7 +27,7 @@ import {
 } from "./lifecycle";
 import { diagnoseWorkflowLiveness } from "./liveness";
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "./model-resolution";
-import { executeWorkflowNode, type WorkflowNodeRuntimeHost } from "./node-runtime";
+import { executeWorkflowNode, type WorkflowNodeRuntimeHost, workflowNodeAbortedErrorReason } from "./node-runtime";
 import {
 	resolveWorkflowPrompt,
 	type WorkflowActivationInputSnapshot,
@@ -306,7 +306,9 @@ function workflowCheckpointReason(
 	signal: AbortSignal | undefined,
 ): string | undefined {
 	if (scheduler.limitReached) return "activation limit reached";
-	if (scheduler.frontierNodeIds.length === 0 || !signal?.aborted) return undefined;
+	if (scheduler.frontierNodeIds.length === 0) return undefined;
+	if (scheduler.stopReason !== undefined) return scheduler.stopReason;
+	if (!signal?.aborted) return undefined;
 	const reason: unknown = signal.reason;
 	if (reason instanceof Error) return reason.message;
 	if (typeof reason === "string" && reason.length > 0) return reason;
@@ -434,7 +436,8 @@ async function executeAndPersistActivation(
 			appendLifecycleActivationStarted(options, activation, node);
 		}
 		const message = error instanceof Error ? error.message : String(error);
-		const abortReason = workflowNodeAbortReason(workflowNodeCompletionSignal(context));
+		const abortReason =
+			workflowNodeAbortReason(workflowNodeCompletionSignal(context)) ?? workflowNodeAbortedErrorReason(error);
 		if (abortReason !== undefined) {
 			appendWorkflowActivationAborted(options.host, run.id, {
 				activationId: activation.id,
