@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import type { ToolSession } from "../../tools";
@@ -1854,6 +1855,47 @@ describe("example workflow scripts", () => {
 		expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
 			"Parallel Lane Isolation Violation",
 		);
+	});
+
+	it("allows empty performance workflow tmp directories before benchmark joins", async () => {
+		using tempDir = TempDir.createSync("@omh-performance-empty-project-tmp-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(`${cwd}/src.txt`, "baseline\n");
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Benchmark Command:", "echo benchmark", "", "Validation Command:", "echo validation"].join("\n"),
+		);
+		await fs.mkdir(`${cwd}/workflow-output/tmp`, { recursive: true });
+		await runGit(cwd, ["init"]);
+		await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+		await runGit(cwd, ["config", "user.name", "OMH Test"]);
+		await runGit(cwd, ["add", "src.txt", "task.md"]);
+		await runGit(cwd, ["commit", "-m", "baseline"]);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "benchmarkCandidates",
+			scriptFileName: "run-benchmark-validation.js",
+			scriptDir: PERFORMANCE_OPTIMIZATION_SCRIPT_DIR,
+			writes: ["/benchmark"],
+			initialState: {
+				task: {
+					benchmarkCommand: "echo benchmark",
+					validationCommand: "echo validation",
+				},
+			},
+		});
+
+		expect(result.scheduler.state.benchmark).toMatchObject({
+			status: "pass",
+			benchmarkExitCode: 0,
+			validationExitCode: 0,
+		});
+		expect(result.scheduler.state.benchmark).not.toHaveProperty("isolationViolation");
+		expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain("echo benchmark");
 	});
 
 	it("blocks performance benchmark joins when lane scratch lives inside the project tree", async () => {

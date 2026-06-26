@@ -132,14 +132,12 @@ async function existingProjectLocalScratchPaths() {
 	const reservedScratchPaths = ["workflow-output/tmp"];
 	const existingPaths = [];
 	for (const scratchPath of reservedScratchPaths) {
-		if (await pathExists(scratchPath)) existingPaths.push(scratchPath);
+		if (await pathHasChildren(scratchPath)) existingPaths.push(scratchPath);
 	}
 	return existingPaths;
 }
 
-async function pathExists(path) {
-	const glob = new Bun.Glob(path);
-	for await (const _match of glob.scan({ cwd: process.cwd(), onlyFiles: false })) return true;
+async function pathHasChildren(path) {
 	const childGlob = new Bun.Glob(`${path}/**`);
 	for await (const _match of childGlob.scan({ cwd: process.cwd(), onlyFiles: false })) return true;
 	return false;

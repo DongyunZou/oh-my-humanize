@@ -19,6 +19,9 @@
 
 ### Fixed
 
+- Fixed the experimental performance-optimization-search workflow so empty
+  project-local temp directories do not falsely trip the parallel lane
+  isolation guard while non-empty scratch directories still fail closed.
 - Fixed the experimental documentation-audit workflow so review-driven retries
   reuse the initial discovery digest and focus on repair/review instead of
   re-running the full parallel audit fanout after every `continue` verdict.
