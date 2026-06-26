@@ -255,6 +255,60 @@ describe("runWorkflow lifecycle", () => {
 		});
 	});
 
+	it("creates a restartable checkpoint after a lifecycle checkpoint node completes", async () => {
+		const host = new MemoryWorkflowHost();
+		const definition = humanCheckpointAfterDefinition();
+		const freeze = freezeForDefinition(definition);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runHumanNode: async () => ({
+				summary: "operator approved maintenance window",
+				data: { response: "Approve" },
+				statePatch: [{ op: "set", path: "/gate", value: { response: "Approve" } }],
+			}),
+			runScriptNode: async () => {
+				throw new Error("continuation should wait for checkpoint restart");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			graphRevisionId: "graph-1",
+			startNodeId: "operatorGate",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				freeze,
+				runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+			},
+		});
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["operatorGate", "completed"],
+		]);
+		expect(result.scheduler.stopReason).toBe('workflow node "operatorGate" requested checkpoint after completion');
+		expect(result.scheduler.state).toEqual({ gate: { response: "Approve" } });
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		expect(family.attempts[0]).toMatchObject({
+			status: "stopped",
+			stop: {
+				reason: 'workflow node "operatorGate" requested checkpoint after completion',
+			},
+		});
+		expect(family.checkpoints[0]).toMatchObject({
+			id: "attempt-1:checkpoint-1",
+			attemptId: "attempt-1",
+			frontierNodeIds: ["continueWork"],
+			completedActivationIds: ["activation-1"],
+			abortedActivationIds: [],
+			state: { gate: { response: "Approve" } },
+			sourceMapping: { continueWork: "continueWork" },
+		});
+	});
+
 	it("rejects restart validation when the checkpoint workspace snapshot no longer matches", async () => {
 		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-checkpoint-restart-"));
 		try {
@@ -410,6 +464,33 @@ function humanCheckpointDefinition(): WorkflowDefinition {
 			},
 		],
 		edges: [],
+	};
+}
+
+function humanCheckpointAfterDefinition(): WorkflowDefinition {
+	return {
+		name: "human-checkpoint-after",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		stateSchema: {
+			version: 1,
+			shape: { gate: "object" },
+		},
+		nodes: [
+			{
+				id: "operatorGate",
+				type: "human",
+				prompt: "Approve after inspecting the adaptive workflow proposal.",
+				checkpoint: "after",
+				writes: ["/gate"],
+			},
+			{
+				id: "continueWork",
+				type: "script",
+				script: { language: "sh", code: "continue" },
+			},
+		],
+		edges: [{ from: "operatorGate", to: "continueWork" }],
 	};
 }
 

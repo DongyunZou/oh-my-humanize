@@ -650,6 +650,69 @@ edges:
 		expect(families[0]?.checkpoints[0]?.frontierNodeIds).toEqual(["review"]);
 	});
 
+	it("stops at a parsed checkpoint-after node with a restartable frontier", async () => {
+		const host = createHost();
+		const definition = parseWorkflowDefinition(
+			`
+name: checkpoint-after-demo
+version: 1
+nodes:
+  approve:
+    type: human
+    checkpoint: after
+    writes:
+      - /approval
+  continueWork:
+    type: script
+edges:
+  - from: approve
+    to: continueWork
+`,
+			{ sourcePath: "workflow.yml" },
+		);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runHumanNode: async () => ({
+				summary: "approved",
+				data: { response: "Approve" },
+				statePatch: [{ op: "set", path: "/approval", value: { response: "Approve" } }],
+			}),
+			runScriptNode: async () => {
+				throw new Error("continuation should not run before checkpoint restart");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-checkpoint-after",
+			startNodeId: "approve",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-checkpoint-after",
+				attemptId: "attempt-checkpoint-after-1",
+				freeze: createFreeze("flowfreeze:checkpoint-after", definition),
+				runtimeBindingSnapshot: binding("binding-checkpoint-after"),
+			},
+		});
+
+		expect(definition.nodes[0]?.checkpoint).toBe("after");
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["approve", "completed"],
+		]);
+		expect(result.scheduler.state).toEqual({ approval: { response: "Approve" } });
+		const family = reconstructWorkflowFamilies(host.getBranch())[0];
+		expect(family?.attempts[0]).toMatchObject({
+			status: "stopped",
+			stop: { reason: 'workflow node "approve" requested checkpoint after completion' },
+		});
+		expect(family?.checkpoints[0]).toMatchObject({
+			completedActivationIds: ["activation-1"],
+			abortedActivationIds: [],
+			frontierNodeIds: ["continueWork"],
+			sourceMapping: { continueWork: "continueWork" },
+		});
+	});
+
 	it("checkpoints deadline-aborted lifecycle activations instead of failing the attempt", async () => {
 		const host = createHost();
 		const definition = parseWorkflowDefinition(source, { sourcePath: "workflow.yml" });

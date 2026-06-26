@@ -197,17 +197,28 @@ export async function runWorkflowScheduler(
 		completed.push(result.activation);
 		completedByNode.set(result.activation.nodeId, completed);
 		completedById.set(result.activation.id, result.activation);
-		if (workflowAbortReason(schedulerSignal)) {
+		const frontierAfterCompletion = eligibleFrontierNodeIds(
+			definition,
+			result.activation,
+			nodesById,
+			completedByNode,
+			completedById,
+			state,
+			outputsByNode,
+		);
+		const checkpointReason = workflowNodeCheckpointReason(result.node);
+		if (checkpointReason !== undefined) {
 			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
-			for (const nodeId of eligibleFrontierNodeIds(
-				definition,
-				result.activation,
-				nodesById,
-				completedByNode,
-				completedById,
-				state,
-				outputsByNode,
-			)) {
+			for (const nodeId of frontierAfterCompletion) {
+				pushUnique(stoppedFrontierNodeIds, nodeId);
+			}
+			stopReason ??= checkpointReason;
+			stopScheduling = true;
+			continue;
+		}
+		if (workflowAbortReason(schedulerSignal) || stopScheduling) {
+			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
+			for (const nodeId of frontierAfterCompletion) {
 				pushUnique(stoppedFrontierNodeIds, nodeId);
 			}
 			stopScheduling = true;
@@ -238,6 +249,11 @@ export async function runWorkflowScheduler(
 	};
 	if (stopReason !== undefined) schedulerResult.stopReason = stopReason;
 	return schedulerResult;
+}
+
+function workflowNodeCheckpointReason(node: WorkflowNode): string | undefined {
+	if (node.checkpoint !== "after") return undefined;
+	return `workflow node "${node.id}" requested checkpoint after completion`;
 }
 
 function combineSchedulerAbortSignals(first: AbortSignal | undefined, second: AbortSignal): AbortSignal {

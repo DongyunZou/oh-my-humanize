@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a workflow node-level `checkpoint: after` primitive so a node can finish
+  normally, persist its output/state, stop downstream scheduling, and create a
+  restartable lifecycle checkpoint at its eligible frontier.
+
 ### Changed
 
 - Changed public branding from Oh My Pi / `omp` to Oh My Humanize / `omh` across package metadata, CLI help, ACP metadata, setup/welcome surfaces, workflow docs, and README examples while preserving `omp` as a compatibility bin alias.
