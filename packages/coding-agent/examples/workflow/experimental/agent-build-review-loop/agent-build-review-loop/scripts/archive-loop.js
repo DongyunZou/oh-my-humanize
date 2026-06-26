@@ -138,12 +138,8 @@ await writeTupleState({
 	tupleId,
 });
 
-if (isRejectArchive) {
-	throw new Error(`agent-build-review-loop rejected: ${reviewRoute.reason ?? "review route rejected"}; see ${archivePath}`);
-}
-
 return {
-	summary: "archived completed agent build/review loop",
+	summary: isRejectArchive ? "archived rejected agent build/review loop" : "archived completed agent build/review loop",
 	statePatch: [
 		{
 			op: "set",

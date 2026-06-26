@@ -96,6 +96,57 @@ describe("example workflow scripts", () => {
 		expect(await Bun.file(`${cwd}/workflow-output/initial-loop-snapshot.md`).text()).toContain("echo validate");
 	});
 
+	it("archives rejected agent build review loops as terminal outcomes, not script failures", async () => {
+		using tempDir = TempDir.createSync("@omh-agent-loop-reject-archive-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Reject a blocked build/review loop without reporting a runtime crash.",
+				"",
+				"Validation Command:",
+				"echo validate",
+			].join("\n"),
+		);
+		await Bun.write(`${cwd}/workflow-output/setup-blocker.md`, "Validation cannot start in this environment.\n");
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "archiveLoop",
+			scriptFileName: "archive-loop.js",
+			scriptDir: AGENT_BUILD_REVIEW_LOOP_SCRIPT_DIR,
+			writes: ["/archive"],
+			initialState: {
+				reviewRoute: {
+					decision: "reject",
+					reason: "validation setup blocker",
+					reviewVerdict: "continue",
+					setupBlockerEvidenceFiles: ["workflow-output/setup-blocker.md"],
+				},
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "archiveLoop")?.status).toBe(
+			"completed",
+		);
+		expect(result.scheduler.state.archive).toMatchObject({
+			file: "workflow-output/final-agent-loop-reject.md",
+			terminalDecision: "reject",
+			evidenceFiles: ["workflow-output/setup-blocker.md"],
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/tuple-state.json`).json()).toMatchObject({
+			flow: "agent-build-review-loop",
+			status: "rejected",
+			terminal: true,
+			verdict: "reject",
+			final_artifact: "workflow-output/final-agent-loop-reject.md",
+		});
+	});
+
 	it("records the manifest run id as the canonical tuple id in the task contract", async () => {
 		using tempDir = TempDir.createSync("@omh-parallel-review-precheck-");
 		const cwd = tempDir.path();

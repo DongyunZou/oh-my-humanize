@@ -19,6 +19,9 @@
 
 ### Fixed
 
+- Fixed the experimental agent build/review workflow so rejected terminal
+  archives complete with a rejected tuple state instead of surfacing as workflow
+  script crashes in the dashboard.
 - Fixed the experimental parallel implementation/review workflow so optional
   lane archive references do not block evidence-contract approval when the
   canonical lane, integration-review, rollback, and trusted validation
