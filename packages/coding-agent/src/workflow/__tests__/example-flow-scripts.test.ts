@@ -15,8 +15,41 @@ const REFACTOR_MIGRATION_SCRIPT_DIR = `${import.meta.dir}/../../../examples/work
 const TEST_GENERATION_HARDENING_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/test-generation-hardening/test-generation-hardening`;
 const KDA_HUMANIZE_SUBFLOW_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/kda-humanize/kda-humanize/humanize-rlcr-subflow`;
 const AGENT_BUILD_REVIEW_LOOP_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/agent-build-review-loop/agent-build-review-loop/scripts`;
+const RESEARCH_REPRODUCTION_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/research-reproduction/research-reproduction/scripts`;
 
 describe("example workflow scripts", () => {
+	it("does not count prose markers as research reproduction exercise evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-research-reproduction-marker-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "reproduceBaseline",
+			scriptFileName: "run-reproduction.js",
+			scriptDir: RESEARCH_REPRODUCTION_SCRIPT_DIR,
+			writes: ["/reproduction"],
+			initialState: {
+				task: {
+					reproductionCommand: "printf 'exercised validated\\n'",
+				},
+			},
+		});
+
+		expect(result.scheduler.state.reproduction).toMatchObject({
+			status: "fail",
+			exercised: false,
+			exitCode: 0,
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/reproduction-baseline.json`).json()).toMatchObject({
+			exerciseSummary: {
+				exercised: false,
+				positiveSignals: [],
+			},
+		});
+	});
+
 	it("accepts markdown validation command sections in agent build review tasks", async () => {
 		using tempDir = TempDir.createSync("@omh-agent-loop-validation-section-");
 		const cwd = tempDir.path();
