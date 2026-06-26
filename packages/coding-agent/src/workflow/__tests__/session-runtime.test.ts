@@ -219,8 +219,10 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 			prompt: node.prompt,
 		});
 
-		const mirroredOutput = `${cwd}/workflow-output/omh-runtime/artifacts/build_activation-1/1-build.md`;
-		const mirroredSession = `${cwd}/workflow-output/omh-runtime/artifacts/build_activation-1/2-build.jsonl`;
+		const mirroredOutput = "workflow-output/omh-runtime/artifacts/build_activation-1/1-build.md";
+		const mirroredSession = "workflow-output/omh-runtime/artifacts/build_activation-1/2-build.jsonl";
+		const mirroredOutputPath = `${cwd}/${mirroredOutput}`;
+		const mirroredSessionPath = `${cwd}/${mirroredSession}`;
 		const observability = await Bun.file(`${cwd}/workflow-output/omh-runtime/observability.json`).json();
 		expect(observability).toMatchObject({
 			version: 1,
@@ -235,13 +237,14 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 				},
 			],
 		});
-		expect(await Bun.file(mirroredOutput).text()).toBe("build markdown transcript");
-		expect(await Bun.file(mirroredSession).text()).toBe('{"type":"session"}\n');
+		expect(await Bun.file(mirroredOutputPath).text()).toBe("build markdown transcript");
+		expect(await Bun.file(mirroredSessionPath).text()).toBe('{"type":"session"}\n');
 		const progress = await Bun.file(`${cwd}/workflow-output/omh-runtime/progress.md`).text();
 		expect(progress).toContain("## Completed Activations");
 		expect(progress).toContain("build");
 		expect(progress).toContain("agent-output://agent-build");
 		expect(progress).toContain(mirroredOutput);
+		expect(progress).not.toContain(mirroredOutputPath);
 		expect(progress).not.toContain(`${cwd}/.agent-output/build.md`);
 		expect(progress).not.toContain(`local://${cwd}/.agent-output/build.md`);
 	});

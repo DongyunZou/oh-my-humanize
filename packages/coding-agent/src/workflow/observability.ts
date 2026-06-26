@@ -151,7 +151,7 @@ async function materializeWorkflowObservabilityArtifact(
 	const target = workflowObservabilityArtifactMirrorPath(cwd, event, source, indexValue);
 	try {
 		await Bun.write(target, await Bun.file(source).arrayBuffer());
-		return target;
+		return workflowObservabilityPortablePath(path.relative(cwd, target));
 	} catch (error) {
 		if (isEnoent(error)) return artifact;
 		throw error;
@@ -179,6 +179,10 @@ function workflowObservabilityArtifactMirrorPath(
 function sanitizeWorkflowObservabilityPathSegment(value: string): string {
 	const sanitized = value.replace(/[^A-Za-z0-9._-]+/gu, "_").replace(/^_+|_+$/gu, "");
 	return sanitized || "artifact";
+}
+
+function workflowObservabilityPortablePath(value: string): string {
+	return value.split(path.sep).join("/");
 }
 
 async function readWorkflowObservabilityIndex(indexPath: string): Promise<WorkflowObservabilityIndex> {
