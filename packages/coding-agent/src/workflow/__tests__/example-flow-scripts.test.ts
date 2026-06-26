@@ -1164,6 +1164,119 @@ describe("example workflow scripts", () => {
 		});
 	});
 
+	it("archives documentation rollback notes from patch evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-audit-patch-rollback-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const archiveScript = await Bun.file(`${DOCUMENTATION_AUDIT_SCRIPT_DIR}/archive-docs.js`).text();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Objective:", "Repair docs and carry rollback evidence into the archive."].join("\n"),
+		);
+		await Bun.write(`${cwd}/workflow-output/documentation-validation.md`, "44 passed\n");
+		await Bun.write(
+			`${cwd}/workflow-output/documentation-patch.md`,
+			[
+				"# Documentation Patch Evidence",
+				"",
+				"## Changed Files",
+				"",
+				"- `docs/advanced/clients.md`",
+				"",
+				"## Rollback Notes",
+				"",
+				"- Restore the previous header merge example in `docs/advanced/clients.md`.",
+			].join("\n"),
+		);
+
+		const result = await runExampleDefinition({
+			cwd,
+			previousCwd,
+			initialState: {
+				patch: {
+					status: "patched",
+					changed_files: ["docs/advanced/clients.md"],
+				},
+				validation: {
+					status: "pass",
+				},
+			},
+			definition: {
+				name: "documentation-archive-patch-rollback",
+				version: 1,
+				models: { roles: {}, defaults: {} },
+				nodes: [
+					{
+						id: "archiveDocs",
+						type: "script",
+						script: {
+							language: "js",
+							code: archiveScript,
+						},
+						writes: ["/archive"],
+					},
+				],
+				edges: [],
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "archiveDocs")?.status).toBe(
+			"completed",
+		);
+		const archive = await Bun.file(`${cwd}/workflow-output/documentation-audit-archive.md`).text();
+		expect(archive).toContain("Restore the previous header merge example");
+		expect(archive).not.toContain("No rollback notes were present.");
+	});
+
+	it("blocks documentation archive when changed files lack rollback evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-documentation-audit-missing-rollback-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const archiveScript = await Bun.file(`${DOCUMENTATION_AUDIT_SCRIPT_DIR}/archive-docs.js`).text();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Objective:", "Reject documentation archives that omit rollback evidence."].join("\n"),
+		);
+		await Bun.write(`${cwd}/workflow-output/documentation-validation.md`, "44 passed\n");
+
+		const result = await runExampleDefinition({
+			cwd,
+			previousCwd,
+			initialState: {
+				patch: {
+					status: "patched",
+					changed_files: ["docs/advanced/clients.md"],
+				},
+				validation: {
+					status: "pass",
+				},
+			},
+			definition: {
+				name: "documentation-archive-missing-rollback",
+				version: 1,
+				models: { roles: {}, defaults: {} },
+				nodes: [
+					{
+						id: "archiveDocs",
+						type: "script",
+						script: {
+							language: "js",
+							code: archiveScript,
+						},
+						writes: ["/archive"],
+					},
+				],
+				edges: [],
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "archiveDocs")?.status).toBe(
+			"failed",
+		);
+	});
+
 	it("blocks release archive when audit blockers lack repair or waiver evidence", async () => {
 		using tempDir = TempDir.createSync("@omh-release-gate-blockers-");
 		const cwd = tempDir.path();
@@ -1925,6 +2038,22 @@ describe("example workflow scripts", () => {
 			`${cwd}/workflow-output/refactor-migration-cleanup.md`,
 			["# Cleanup", "", "Rollback notes: no cleanup-only files were changed."].join("\n"),
 		);
+		await Bun.write(
+			`${cwd}/workflow-output/migration-caller-step.json`,
+			`${JSON.stringify(
+				{
+					status: "complete",
+					changed_files: [
+						{
+							path: "src.txt",
+							rollback_note: "Restore src.txt if the caller migration regresses.",
+						},
+					],
+				},
+				null,
+				2,
+			)}\n`,
+		);
 
 		const result = await runExampleScript({
 			cwd,
@@ -1945,12 +2074,14 @@ describe("example workflow scripts", () => {
 			validation: "pass",
 			rollbackEvidenceFiles: [
 				"workflow-output/compatibility-design.md",
+				"workflow-output/migration-caller-step.json",
 				"workflow-output/refactor-migration-cleanup.md",
 			],
 		});
 		const archive = await Bun.file(`${cwd}/workflow-output/refactor-migration-archive.md`).text();
 		expect(archive).toContain("Outcome: accepted");
 		expect(archive).toContain("workflow-output/compatibility-design.md");
+		expect(archive).toContain("workflow-output/migration-caller-step.json");
 		expect(archive).not.toContain("No rollback notes were present");
 	});
 

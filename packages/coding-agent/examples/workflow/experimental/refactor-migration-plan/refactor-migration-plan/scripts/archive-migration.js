@@ -81,9 +81,12 @@ async function rollbackEvidenceText() {
 async function rollbackEvidenceFilePaths() {
 	const paths = [
 		"workflow-output/refactor-migration-rollback.md",
-		"workflow-output/caller-migration.md",
-		"workflow-output/cleanup-dead-path.md",
 		"workflow-output/compatibility-design.md",
+		"workflow-output/compatibility-design.json",
+		"workflow-output/caller-migration.md",
+		"workflow-output/migration-caller-step.json",
+		"workflow-output/cleanup-dead-path.md",
+		"workflow-output/cleanup-dead-path.json",
 		"workflow-output/refactor-migration-cleanup.md",
 	];
 	const present = [];
@@ -96,7 +99,7 @@ async function rollbackEvidenceFilePaths() {
 }
 
 function hasRollbackEvidence(text) {
-	return /\brollback\b/iu.test(text);
+	return /\brollback(?:[_ -]?notes?)?\b/iu.test(text);
 }
 
 async function projectMaterialDiff() {

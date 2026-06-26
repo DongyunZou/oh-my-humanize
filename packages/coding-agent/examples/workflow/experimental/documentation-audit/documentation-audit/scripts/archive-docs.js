@@ -20,7 +20,14 @@ if (priorReviewFeedback.length > 0 && resolvedReviewFeedback.length === 0) {
 const archivePath = "workflow-output/documentation-audit-archive.md";
 const taskText = await readOptionalText("task.md");
 const validationText = await readOptionalText("workflow-output/documentation-validation.md");
-const rollbackText = await readOptionalText("workflow-output/documentation-rollback.md");
+const rollbackText = await rollbackEvidenceText();
+const changedFiles = stringArrayField(patch, "changed_files").concat(stringArrayField(patch, "changedFiles"));
+
+if (changedFiles.length > 0 && !rollbackText.trim()) {
+	throw new Error(
+		`cannot archive documentation audit with changed files but no rollback evidence: ${changedFiles.join(", ")}`,
+	);
+}
 
 await Bun.write(
 	archivePath,
@@ -58,6 +65,7 @@ return {
 				file: archivePath,
 				validation: "pass",
 				resolvedReviewFeedback,
+				rollbackEvidence: rollbackText.trim() ? "present" : "not-required",
 			},
 		},
 	],
@@ -131,9 +139,45 @@ async function readOptionalText(filePath) {
 	}
 }
 
+async function rollbackEvidenceText() {
+	const explicitRollback = (await readOptionalText("workflow-output/documentation-rollback.md")).trim();
+	const patchRollback = markdownSection(
+		await readOptionalText("workflow-output/documentation-patch.md"),
+		"Rollback Notes",
+	).trim();
+	return [explicitRollback, patchRollback].filter(Boolean).join("\n\n");
+}
+
+function markdownSection(text, heading) {
+	const lines = text.split(/\r?\n/u);
+	const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const headingPattern = new RegExp(`^#{2,6}\\s+${escapedHeading}\\s*$`, "iu");
+	let start = -1;
+	for (let index = 0; index < lines.length; index += 1) {
+		if (headingPattern.test(lines[index] ?? "")) {
+			start = index + 1;
+			break;
+		}
+	}
+	if (start < 0) return "";
+	const section = [];
+	for (const line of lines.slice(start)) {
+		if (/^#{1,6}\s+\S/u.test(line)) break;
+		section.push(line);
+	}
+	return section.join("\n").trim();
+}
+
 function boundedLines(text, limit) {
 	const lines = text.split(/\r?\n/u);
 	const kept = lines.slice(0, limit);
 	if (lines.length > limit) kept.push(`[truncated ${lines.length - limit} additional lines]`);
 	return kept.join("\n");
+}
+
+function stringArrayField(value, key) {
+	if (!value || typeof value !== "object") return [];
+	const field = value[key];
+	if (!Array.isArray(field)) return [];
+	return field.filter(item => typeof item === "string");
 }

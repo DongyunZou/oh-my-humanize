@@ -19,6 +19,12 @@
 
 ### Fixed
 
+- Fixed the experimental documentation-audit workflow so final archives carry
+  rollback notes from canonical patch evidence and fail closed when changed
+  files lack rollback evidence.
+- Fixed the experimental refactor-migration workflow so accepted archives
+  recognize rollback evidence in canonical JSON migration and cleanup artifacts,
+  not only legacy Markdown artifact names.
 - Fixed experimental workflow coverage so documentation-audit artifacts are
   loaded during tests, catching malformed `.omhflow` YAML before live canaries.
 - Fixed the experimental refactor-migration workflow so accepted archives fail
