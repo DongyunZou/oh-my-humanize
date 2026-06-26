@@ -72,6 +72,50 @@ describe("example workflow scripts", () => {
 		});
 	});
 
+	it("rejects multi-line research reproduction commands before they can be truncated", async () => {
+		using tempDir = TempDir.createSync("@omh-research-reproduction-multiline-command-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Reject command contracts that cannot be preserved as a single shell command.",
+				"",
+				"Setup Command:",
+				"```sh",
+				"PYTHONPATH=. python - <<'PY'",
+				"import pydantic",
+				"print(pydantic.__version__)",
+				"PY",
+				"```",
+				"",
+				"Reproduction Command:",
+				"echo reproduced",
+				"",
+				"Validation Command:",
+				"echo validated",
+			].join("\n"),
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "precheckTaskContract",
+			scriptFileName: "precheck-task-contract.js",
+			scriptDir: RESEARCH_REPRODUCTION_SCRIPT_DIR,
+			writes: ["/task", "/runtime", "/review"],
+		});
+
+		expect(
+			result.scheduler.activations.find(activation => activation.nodeId === "precheckTaskContract")?.status,
+		).toBe("failed");
+		expect(
+			result.scheduler.activations.find(activation => activation.nodeId === "precheckTaskContract")?.error,
+		).toContain("Setup Command must be a single-line command");
+	});
+
 	it("archives terminal research reproduction rejections instead of looping forever", async () => {
 		using tempDir = TempDir.createSync("@omh-research-reproduction-terminal-reject-");
 		const cwd = tempDir.path();

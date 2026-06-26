@@ -19,6 +19,8 @@
 
 ### Fixed
 
+- Fixed the experimental research-reproduction workflow so multi-line task
+  commands fail closed during precheck instead of being silently truncated.
 - Fixed workflow agent artifact references so project-local observability points
   to readable workspace-local mirrors instead of long encoded session paths or
   misused `local://` absolute session files.
