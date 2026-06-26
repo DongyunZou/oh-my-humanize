@@ -821,6 +821,71 @@ edges: []
 		});
 	});
 
+	it("extracts declared gates after a verdict label in reviewer explanation text", async () => {
+		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
+		const node = definition.nodes.find(candidate => candidate.id === "review");
+		if (!node) throw new Error("expected review node");
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: process.cwd(),
+			runAgentTask: async () => ({
+				exitCode: 0,
+				output: JSON.stringify({
+					overall_correctness: "correct",
+					explanation:
+						"Verdict complete: progress.md has 2 ROUND lines, validation passed, and the adaptive review upgrade request artifact is present.",
+					confidence: 0.92,
+				}),
+			}),
+		});
+
+		const output = await host.runReviewNode?.({
+			node,
+			activation: activation(node.id),
+			agent: node.agent,
+			prompt: node.prompt,
+			model: node.model,
+			gates: ["continue", "complete"],
+			fallbackVerdict: "continue",
+		});
+
+		expect(output).toEqual({
+			summary:
+				"Verdict complete: progress.md has 2 ROUND lines, validation passed, and the adaptive review upgrade request artifact is present.",
+			verdict: "complete",
+		});
+	});
+
+	it("maps reviewer correctness output to a declared completion gate when no fallback exists", async () => {
+		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
+		const node = definition.nodes.find(candidate => candidate.id === "review");
+		if (!node) throw new Error("expected review node");
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: process.cwd(),
+			runAgentTask: async () => ({
+				exitCode: 0,
+				output: JSON.stringify({
+					overall_correctness: "correct",
+					explanation: "No blocking findings remain.",
+					confidence: 0.91,
+				}),
+			}),
+		});
+
+		const output = await host.runReviewNode?.({
+			node,
+			activation: activation(node.id),
+			agent: node.agent,
+			prompt: node.prompt,
+			model: node.model,
+			gates: ["continue", "complete"],
+		});
+
+		expect(output).toEqual({
+			summary: "No blocking findings remain.",
+			verdict: "complete",
+		});
+	});
+
 	it("maps differently cased review gate tokens to the declared gate", async () => {
 		const definition = parseWorkflowDefinition(scriptWorkflow, { sourcePath: "workflow.yml" });
 		const node = definition.nodes.find(candidate => candidate.id === "review");

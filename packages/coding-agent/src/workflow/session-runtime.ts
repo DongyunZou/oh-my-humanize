@@ -732,12 +732,20 @@ function parseReviewTaskOutput(
 function gatePrefixFromLine(line: string, gates: string[] | undefined): string | undefined {
 	if (!gates?.length) return undefined;
 	const normalizedLine = line.toLowerCase();
+	const verdictLabelGate = gateAfterVerdictLabel(line, gates);
+	if (verdictLabelGate !== undefined) return verdictLabelGate;
 	for (const gate of [...gates].sort((left, right) => right.length - left.length)) {
 		if (!normalizedLine.startsWith(gate.toLowerCase())) continue;
 		const next = line[gate.length];
 		if (next === undefined || /[\s:;,.!?-]/u.test(next)) return gate;
 	}
 	return undefined;
+}
+
+function gateAfterVerdictLabel(line: string, gates: string[]): string | undefined {
+	const match = /^\s*verdict\s+([^\s:;,.!?-]+)/iu.exec(line);
+	const token = match?.[1];
+	return token === undefined ? undefined : declaredGateFor(token, gates);
 }
 
 function firstNonEmptyLine(output: string): string | undefined {
@@ -924,9 +932,23 @@ function verdictFromReviewerCorrectness(
 	if (gates) {
 		const declared = candidates.find(candidate => gates.includes(candidate));
 		if (declared) return declared;
+		const semantic = semanticGateForReviewerCorrectness(correctness, gates);
+		if (semantic !== undefined && fallbackVerdict === undefined) return semantic;
 	}
 	if (fallbackVerdict !== undefined) return fallbackVerdict;
 	return correctness === "correct" ? "pass" : "fail";
+}
+
+function semanticGateForReviewerCorrectness(correctness: "correct" | "incorrect", gates: string[]): string | undefined {
+	const aliases =
+		correctness === "correct"
+			? ["complete", "completed", "done", "finish", "finished", "accept", "accepted"]
+			: ["continue", "retry", "rework", "repair", "reject", "rejected", "fail"];
+	for (const alias of aliases) {
+		const declared = declaredGateFor(alias, gates);
+		if (declared !== undefined) return declared;
+	}
+	return undefined;
 }
 
 function parseJsonObject(source: string): Record<string, unknown> | undefined {

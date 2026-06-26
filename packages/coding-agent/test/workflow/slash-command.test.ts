@@ -1806,6 +1806,92 @@ edges: []
 		]);
 	});
 
+	it("preserves review and subflow contract fields in workflow change drafts", async () => {
+		const dir = await createTempDir();
+		const entries: CapturedEntry[] = [];
+		const { output, runtime } = createRuntime(entries);
+
+		await fs.mkdir(path.join(dir, "release"), { recursive: true });
+		await Bun.write(path.join(dir, "release.omhflow"), workflowDraftFidelityArtifactSource());
+		await Bun.write(path.join(dir, "change.json"), workflowDraftFidelityChangeSource());
+
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow freeze ${path.join(dir, "release.omhflow")} --family-id family-draft-fidelity`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		const freezeId = reconstructWorkflowFamilies(entries)[0]?.freezes[0]?.id;
+		expect(freezeId).toBeDefined();
+		const lifecycleHost = createHostFromEntries(entries);
+		startWorkflowAttempt(lifecycleHost, {
+			familyId: "family-draft-fidelity",
+			attemptId: "attempt-draft-fidelity",
+			freezeId: freezeId ?? "missing-freeze",
+			startNodeId: "build",
+			runtimeBindingSnapshot: binding("binding-draft-fidelity"),
+		});
+		requestWorkflowAttemptStop(lifecycleHost, {
+			attemptId: "attempt-draft-fidelity",
+			deadlineMs: 50,
+			reason: "draft fidelity approved change",
+		});
+		createWorkflowCheckpoint(lifecycleHost, {
+			checkpointId: "attempt-draft-fidelity:checkpoint-1",
+			familyId: "family-draft-fidelity",
+			attemptId: "attempt-draft-fidelity",
+			completedActivationIds: [],
+			abortedActivationIds: [],
+			frontierNodeIds: ["build"],
+			state: {},
+			sourceMapping: { build: "build" },
+		});
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow request-change ${path.join(dir, "change.json")} --family-id family-draft-fidelity --attempt-id attempt-draft-fidelity`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				"/workflow approve-change change-draft-fidelity --actor human:sihao",
+				runtime,
+			),
+		).toEqual({ consumed: true });
+
+		const draftPath = path.join(dir, "release-draft.omhflow");
+		expect(
+			await executeAcpBuiltinSlashCommand(
+				`/workflow apply-change change-draft-fidelity --draft-path ${draftPath} --actor human:sihao --reason draft generated`,
+				runtime,
+			),
+		).toEqual({ consumed: true });
+		expect(
+			output.some(
+				entry => entry === "Workflow change request applied: change-draft-fidelity -> draft release-draft.omhflow",
+			),
+		).toBeTrue();
+
+		const draftDefinition = parseWorkflowDefinition(workflowBlockFromDraft(await Bun.file(draftPath).text()), {
+			sourcePath: "release-draft.omhflow",
+		});
+		const review = draftDefinition.nodes.find(node => node.id === "review");
+		expect(review?.fallbackVerdict).toBe("continue");
+		expect(review?.workspaceAccess).toBe("read");
+		expect(draftDefinition.subflows).toEqual([
+			{
+				alias: "review-loop",
+				name: "review-loop",
+				version: 1,
+				namespace: "reviewLoop__",
+				nodeIds: ["build", "review"],
+				entryNodeIds: ["build"],
+				exitNodeIds: ["review"],
+				resourcePrefix: "review-loop",
+			},
+		]);
+	});
+
 	it("records shell script nodes in workflow change requests", async () => {
 		const dir = await createTempDir();
 		await fs.mkdir(path.join(dir, "release"), { recursive: true });
@@ -6164,6 +6250,70 @@ nodes:
 edges: []
 \`\`\`
 `;
+}
+
+function workflowDraftFidelityArtifactSource(): string {
+	return `---
+name: draft-fidelity-demo
+version: 1
+schema: omhflow/v1
+checkpoint:
+  stopDeadlineMs: 50
+changePolicy:
+  agentsCanPropose: true
+  humansCanApprove: true
+---
+# Draft Fidelity Demo
+
+\`\`\`yaml workflow
+nodes:
+  build:
+    type: script
+    script:
+      inline: |
+        return { summary: "built" };
+  review:
+    type: review
+    prompt: Review the build.
+    gates:
+      - continue
+      - complete
+    fallbackVerdict: continue
+    workspaceAccess: read
+edges:
+  - from: build
+    to: review
+subflows:
+  - alias: review-loop
+    name: review-loop
+    version: 1
+    namespace: reviewLoop__
+    nodeIds:
+      - build
+      - review
+    entryNodeIds:
+      - build
+    exitNodeIds:
+      - review
+    resourcePrefix: review-loop
+\`\`\`
+`;
+}
+
+function workflowDraftFidelityChangeSource(): string {
+	return JSON.stringify({
+		id: "change-draft-fidelity",
+		actor: "agent:reviewer",
+		origin: "internal-agent",
+		reason: "insert verification while preserving existing review contracts",
+		operations: [{ op: "add_node", node: { id: "verify", type: "script" } }],
+	});
+}
+
+function workflowBlockFromDraft(source: string): string {
+	const match = /```yaml workflow\n(?<body>[\s\S]*?)\n```/u.exec(source);
+	if (!match?.groups?.body) throw new Error("expected workflow code block");
+	return `name: parsed-draft\nversion: 1\n${match.groups.body}`;
 }
 
 function workflowChangeRequestSource(): string {

@@ -81,7 +81,12 @@ export function compileWorkflowDslBlock(
 	};
 	addWorkflowContracts(compiled, block);
 	mergeExternalContracts(compiled, compiler.externalResources, compiler.externalCapabilities);
-	if (compiler.externalSubflows.length > 0) compiled.subflows = compiler.externalSubflows;
+	if (compiler.externalSubflows.length > 0) {
+		compiled.subflows = [
+			...optionalRecordArray(compiled.subflows, "workflow subflows"),
+			...compiler.externalSubflows,
+		];
+	}
 	return compiled;
 }
 
@@ -90,6 +95,7 @@ function addWorkflowContracts(result: WorkflowDslCompileResult, block: Record<st
 	if (block.resources !== undefined) result.resources = block.resources;
 	if (block.capabilities !== undefined) result.capabilities = block.capabilities;
 	if (block.migrations !== undefined) result.migrations = block.migrations;
+	if (block.subflows !== undefined) result.subflows = block.subflows;
 	if (block.checkpoint_policy !== undefined) result.checkpointPolicy = block.checkpoint_policy;
 	if (block.change_policy !== undefined) result.changePolicy = block.change_policy;
 	if (block.change_request !== undefined && block.change_requests !== undefined) {
