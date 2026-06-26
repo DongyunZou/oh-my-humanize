@@ -8,21 +8,20 @@
 </p>
 
 <p align="center">
-  <a href="https://registry.npmjs.org/@oh-my-pi%2Fpi-coding-agent"><img src="https://img.shields.io/npm/v/@oh-my-pi/pi-coding-agent?style=flat&colorA=222222&colorB=CB3837" alt="npm version"></a>
   <a href="https://github.com/humanfia/oh-my-humanize/blob/main/packages/coding-agent/CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-keep-E05735?style=flat&colorA=222222" alt="Changelog"></a>
   <a href="https://github.com/humanfia/oh-my-humanize/actions"><img src="https://img.shields.io/github/actions/workflow/status/humanfia/oh-my-humanize/ci.yml?style=flat&colorA=222222&colorB=3FB950" alt="CI"></a>
   <a href="https://github.com/humanfia/oh-my-humanize/blob/main/LICENSE"><img src="https://img.shields.io/github/license/humanfia/oh-my-humanize?style=flat&colorA=222222&colorB=58A6FF" alt="License"></a>
   <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat&colorA=222222&logo=typescript&logoColor=white" alt="TypeScript"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-DEA584?style=flat&colorA=222222&logo=rust&logoColor=white" alt="Rust"></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f472b6?style=flat&colorA=222222" alt="Bun"></a>
-  <a href="https://discord.gg/4NMW9cdXZa"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&colorA=222222&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
-  Fork of <a href="https://github.com/badlogic/pi-mono">Pi</a> by <a href="https://github.com/mariozechner">@mariozechner</a> 
+  OMH began as a fork of <a href="https://github.com/badlogic/pi-mono">Pi</a> by <a href="https://github.com/mariozechner">@mariozechner</a>.
 </p>
 
-The most capable agent surface that ships. Continuously tuned by real-world use — complete out of the box, open all the way down.
+OMH is a workflow-native terminal coding agent for building, testing, editing,
+and supervising long-running agentic development flows.
 
 **40+** providers · **32** built-in tools · **14** lsp ops · **28** dap ops · **~55k** lines of Rust core.
 
@@ -56,26 +55,15 @@ policy, non-interactive usage, install/uninstall, and lifecycle commands.
 
 ## Install
 
+The supported install path today is the repository installer. Package-manager
+snippets that still point at old project names are intentionally omitted until
+OMH-specific distribution channels are published.
+
 **macOS · Linux**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/humanfia/oh-my-humanize/main/scripts/install.sh | sh
 ```
-
-**Homebrew**
-
-```sh
-brew install humanfia/tap/omh
-```
-
-**Bun (recommended)**
-
-```sh
-bun install -g @oh-my-pi/pi-coding-agent
-```
-
-The current npm package scope is retained for compatibility; the installed
-binary exposes `omh` as the primary command and `omp` as a legacy alias.
 
 **Windows (PowerShell)**
 
@@ -83,13 +71,8 @@ binary exposes `omh` as the primary command and `omp` as a legacy alias.
 irm https://raw.githubusercontent.com/humanfia/oh-my-humanize/main/scripts/install.ps1 | iex
 ```
 
-**Pinned versions (mise)**
-
-```sh
-mise use -g github:humanfia/oh-my-humanize
-```
-
-macOS · Linux · Windows · bun ≥ 1.3.14
+For source installs, use Bun ≥ 1.3.14. The installed binary exposes `omh` as the
+primary command.
 
 ### Shell completions
 
@@ -303,7 +286,7 @@ Ollama `local` · Ollama Cloud · LM Studio `local` · llama.cpp `local` · vLLM
 
 ### Four knobs that make routing useful
 
-- **Custom providers** — Declare anything that speaks `openai-completions`, `openai-responses`, `openai-codex-responses`, `azure-openai-responses`, `anthropic-messages`, `google-generative-ai`, or `google-vertex` in `~/.omp/agent/models.yml`.
+- **Custom providers** — Declare anything that speaks `openai-completions`, `openai-responses`, `openai-codex-responses`, `azure-openai-responses`, `anthropic-messages`, `google-generative-ai`, or `google-vertex` in the active OMH agent config directory. The compatibility path is currently `~/.omp/agent/models.yml`.
 - **Fallback chains** — Per-role chains under `retry.fallbackChains`. When the primary throws 429s or hits a quota wall, the next entry takes the rest of the turn — restored on cooldown.
 - **Path-scoped models** — Scope `enabledModels` and `disabledProviders` entries to a `path:` prefix to pin a different model set on one repo without touching the global config. Scoped entries cover the path and everything under it.
 - **Round-robin credentials** — Stack API keys per provider and the runtime rotates with session affinity and per-credential backoff. Useful when one key would burn its quota by lunch.
@@ -406,29 +389,10 @@ The same prompt cards surface over ACP, so editors get the picker without writin
 
 ### SDK — embed in Node
 
-`@oh-my-pi/pi-coding-agent`
-
-Node and TypeScript hosts pull the engine in directly. The package exposes `ModelRegistry`, `SessionManager`, `createAgentSession`, and `discoverAuthStorage`; the session emits typed events you subscribe to.
-
-```ts
-import {
-  ModelRegistry,
-  SessionManager,
-  createAgentSession,
-  discoverAuthStorage,
-} from "@oh-my-pi/pi-coding-agent";
-
-const auth = await discoverAuthStorage();
-const models = new ModelRegistry(auth);
-await models.refresh();
-
-const { session } = await createAgentSession({
-  sessionManager: SessionManager.inMemory(),
-  authStorage: auth,
-  modelRegistry: models,
-});
-await session.prompt("list .ts files");
-```
+The SDK surface lives with the CLI under [packages/coding-agent](packages/coding-agent).
+Public OMH package-install documentation will be added here once the package
+rename is complete. For now, use source checkout development or the CLI
+interfaces below.
 
 ### RPC — drive over stdio
 
@@ -500,7 +464,7 @@ bun setup
 bun dev
 ```
 
-`bun setup` installs Bun workspaces and builds `@oh-my-pi/pi-natives`. Re-run `bun run build:native` after changing Rust crates or `packages/natives`.
+`bun setup` installs Bun workspaces and builds the local native addon package. Re-run `bun run build:native` after changing Rust crates or `packages/natives`.
 
 For a non-interactive smoke check:
 
@@ -518,28 +482,28 @@ For architecture and contribution guidelines, see [packages/coding-agent/DEVELOP
 
 ## Monorepo Packages
 
-| Package                                                   | Description                                                                |
-| --------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **[@oh-my-pi/collab-web](packages/collab-web)**           | Browser guest client, mock host, and local relay for collab live sessions  |
-| **[@oh-my-pi/pi-ai](packages/ai)**                        | Multi-provider LLM client with streaming and model/provider integration    |
-| **[@oh-my-pi/pi-catalog](packages/catalog)**              | Model catalog: bundled model database, provider descriptors, and identity  |
-| **[@oh-my-pi/pi-agent-core](packages/agent)**             | Agent runtime with tool calling and state management                       |
-| **[@oh-my-pi/pi-coding-agent](packages/coding-agent)**    | Interactive coding agent CLI and SDK                                       |
-| **[@oh-my-pi/pi-tui](packages/tui)**                      | Terminal UI library with differential rendering                            |
-| **[@oh-my-pi/pi-natives](packages/natives)**              | N-API bindings for grep, shell, image, text, syntax highlighting, and more |
-| **[@oh-my-pi/omp-stats](packages/stats)**                 | Local observability dashboard for AI usage statistics                      |
-| **[@oh-my-pi/pi-utils](packages/utils)**                  | Shared utilities (logging, streams, dirs/env/process helpers)              |
-| **[@oh-my-pi/pi-wire](packages/wire)**                    | Shared collab live-session protocol types and relay constants              |
-| **[@oh-my-pi/hashline](packages/hashline)**               | Line-anchored patch language and applier behind the `edit` tool            |
-| **[@oh-my-pi/pi-mnemopi](packages/mnemopi)**              | Local SQLite memory engine for OMH agents                                  |
-| **[@oh-my-pi/snapcompact](packages/snapcompact)**         | Bitmap-frame context compression package and SQuAD eval suite              |
-| **[@oh-my-pi/swarm-extension](packages/swarm-extension)** | Swarm orchestration extension package                                      |
+| Package                                                  | Description                                                                |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **[packages/collab-web](packages/collab-web)**           | Browser guest client, mock host, and local relay for collab live sessions  |
+| **[packages/ai](packages/ai)**                           | Multi-provider LLM client with streaming and model/provider integration    |
+| **[packages/catalog](packages/catalog)**                 | Model catalog: bundled model database, provider descriptors, and identity  |
+| **[packages/agent](packages/agent)**                     | Agent runtime with tool calling and state management                       |
+| **[packages/coding-agent](packages/coding-agent)**       | Interactive coding agent CLI, SDK, and workflow runtime                    |
+| **[packages/tui](packages/tui)**                         | Terminal UI library with differential rendering                            |
+| **[packages/natives](packages/natives)**                 | N-API bindings for grep, shell, image, text, syntax highlighting, and more |
+| **[packages/stats](packages/stats)**                     | Local observability dashboard for AI usage statistics                      |
+| **[packages/utils](packages/utils)**                     | Shared utilities (logging, streams, dirs/env/process helpers)              |
+| **[packages/wire](packages/wire)**                       | Shared collab live-session protocol types and relay constants              |
+| **[packages/hashline](packages/hashline)**               | Line-anchored patch language and applier behind the `edit` tool            |
+| **[packages/mnemopi](packages/mnemopi)**                 | Local SQLite memory engine for OMH agents                                  |
+| **[packages/snapcompact](packages/snapcompact)**         | Bitmap-frame context compression package and SQuAD eval suite              |
+| **[packages/swarm-extension](packages/swarm-extension)** | Swarm orchestration extension package                                      |
 
 ### Rust Crates
 
 | Crate                                                         | Description                                                                                         |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| **[pi-natives](crates/pi-natives)**                           | Core Rust native addon (N-API `cdylib`) used by `@oh-my-pi/pi-natives`; aggregates the crates below |
+| **[pi-natives](crates/pi-natives)**                           | Core Rust native addon (N-API `cdylib`) used by the local native package; aggregates the crates below |
 | **[pi-shell](crates/pi-shell)**                               | Embedded shell / PTY / process management split out of `pi-natives` (wraps `brush-*`)               |
 | **[pi-ast](crates/pi-ast)**                                   | tree-sitter-based code summarizer and AST utilities (50+ language grammars)                         |
 | **[pi-iso](crates/pi-iso)**                                   | Task isolation backend resolver: APFS clones, btrfs/zfs reflinks, overlayfs, projfs, rcopy          |
@@ -568,6 +532,4 @@ _made for terminals that stay open_
 - [omh.sh](https://omh.sh)
 - [GitHub](https://github.com/humanfia/oh-my-humanize)
 - [Changelog](https://github.com/humanfia/oh-my-humanize/blob/main/packages/coding-agent/CHANGELOG.md)
-- [npm](https://registry.npmjs.org/@oh-my-pi%2Fpi-coding-agent)
-- [Discord](https://discord.gg/4NMW9cdXZa)
 - [MIT](https://github.com/humanfia/oh-my-humanize/blob/main/LICENSE)
