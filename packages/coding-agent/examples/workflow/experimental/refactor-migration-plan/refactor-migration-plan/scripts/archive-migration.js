@@ -11,6 +11,11 @@ const validationText = await readOptionalText("workflow-output/refactor-migratio
 const rollbackText = await rollbackEvidenceText();
 const materialProjectDiff = await projectMaterialDiff();
 const outcome = materialProjectDiff.status === "empty" ? "rejected" : "accepted";
+const rollbackEvidenceFiles = await rollbackEvidenceFilePaths();
+
+if (outcome === "accepted" && rollbackEvidenceFiles.length === 0) {
+	throw new Error("cannot archive accepted refactor migration without rollback evidence");
+}
 
 await Bun.write(
 	archivePath,
@@ -49,6 +54,7 @@ return {
 				status: outcome,
 				validation: "pass",
 				materialProjectDiff,
+				rollbackEvidenceFiles,
 			},
 		},
 	],
@@ -64,16 +70,33 @@ async function readOptionalText(filePath) {
 
 async function rollbackEvidenceText() {
 	const sections = [];
-	for (const filePath of [
-		"workflow-output/refactor-migration-rollback.md",
-		"workflow-output/caller-migration.md",
-		"workflow-output/cleanup-dead-path.md",
-	]) {
+	for (const filePath of await rollbackEvidenceFilePaths()) {
 		const text = await readOptionalText(filePath);
 		if (!text.trim()) continue;
 		sections.push(["### ", filePath, "\n\n", boundedLines(text, 120)].join(""));
 	}
 	return sections.join("\n\n");
+}
+
+async function rollbackEvidenceFilePaths() {
+	const paths = [
+		"workflow-output/refactor-migration-rollback.md",
+		"workflow-output/caller-migration.md",
+		"workflow-output/cleanup-dead-path.md",
+		"workflow-output/compatibility-design.md",
+		"workflow-output/refactor-migration-cleanup.md",
+	];
+	const present = [];
+	for (const filePath of paths) {
+		const text = await readOptionalText(filePath);
+		if (!hasRollbackEvidence(text)) continue;
+		present.push(filePath);
+	}
+	return present;
+}
+
+function hasRollbackEvidence(text) {
+	return /\brollback\b/iu.test(text);
 }
 
 async function projectMaterialDiff() {

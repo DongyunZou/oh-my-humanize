@@ -19,6 +19,11 @@
 
 ### Fixed
 
+- Fixed experimental workflow coverage so documentation-audit artifacts are
+  loaded during tests, catching malformed `.omhflow` YAML before live canaries.
+- Fixed the experimental refactor-migration workflow so accepted archives fail
+  closed without rollback evidence and include rollback notes from canonical
+  compatibility/cleanup artifacts.
 - Fixed the experimental documentation-audit workflow so review-driven retry
   loops fail closed unless the next patch records explicit resolution evidence
   for prior reviewer feedback before validation/archive can proceed.

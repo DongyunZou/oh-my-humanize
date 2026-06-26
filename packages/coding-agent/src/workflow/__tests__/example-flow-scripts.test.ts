@@ -5,6 +5,7 @@ import type { ToolSession } from "../../tools";
 import type { WorkflowDefinition } from "../definition";
 import { createEvalToolScriptRunner } from "../eval-tool-runtime";
 import type { WorkflowLifecycleBranchEntry } from "../lifecycle";
+import { loadWorkflowArtifact } from "../package-loader";
 import { runWorkflow, type WorkflowRunnerResult } from "../runner";
 import { createSessionWorkflowRuntimeHost } from "../session-runtime";
 
@@ -19,6 +20,15 @@ const RESEARCH_REPRODUCTION_SCRIPT_DIR = `${import.meta.dir}/../../../examples/w
 const RELEASE_HARDENING_SCRIPT_DIR = `${import.meta.dir}/../../../examples/workflow/experimental/release-hardening/release-hardening/scripts`;
 
 describe("example workflow scripts", () => {
+	it("loads the documentation-audit workflow artifact", async () => {
+		const artifact = await loadWorkflowArtifact(
+			`${import.meta.dir}/../../../examples/workflow/experimental/documentation-audit/documentation-audit.omhflow`,
+		);
+
+		expect(artifact.definition.nodes.some(node => node.id === "guardReviewRepair")).toBe(true);
+		expect(artifact.definition.nodes.some(node => node.id === "runDocsValidation")).toBe(true);
+	});
+
 	it("keeps research reproduction agent prompts read-only around command evidence", async () => {
 		const prompt = await Bun.file(
 			`${import.meta.dir}/../../../examples/workflow/experimental/research-reproduction/research-reproduction/prompts/reproduction.md`,
@@ -1878,6 +1888,115 @@ describe("example workflow scripts", () => {
 		expect(archive).toContain("Outcome: rejected");
 		expect(archive).toContain("No material project diff");
 		expect(archive).toContain("remove the temporary adapter");
+	});
+
+	it("archives accepted refactor migrations with canonical rollback evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-refactor-migration-canonical-rollback-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(`${cwd}/src.txt`, "baseline\n");
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Archive material refactor migration evidence.",
+				"",
+				"Validation Command:",
+				"echo validate",
+			].join("\n"),
+		);
+		await runGit(cwd, ["init"]);
+		await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+		await runGit(cwd, ["config", "user.name", "OMH Test"]);
+		await runGit(cwd, ["add", "src.txt", "task.md"]);
+		await runGit(cwd, ["commit", "-m", "baseline"]);
+		await Bun.write(`${cwd}/src.txt`, "material migration\n");
+		await Bun.write(
+			`${cwd}/workflow-output/refactor-migration-validation.md`,
+			["# Validation", "", "Exit code: 0"].join("\n"),
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/compatibility-design.md`,
+			["# Compatibility Design", "", "Rollback: restore src.txt to baseline."].join("\n"),
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/refactor-migration-cleanup.md`,
+			["# Cleanup", "", "Rollback notes: no cleanup-only files were changed."].join("\n"),
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "archiveMigration",
+			scriptFileName: "archive-migration.js",
+			scriptDir: REFACTOR_MIGRATION_SCRIPT_DIR,
+			writes: ["/archive"],
+			initialState: {
+				validation: {
+					status: "pass",
+				},
+			},
+		});
+
+		expect(result.scheduler.state.archive).toMatchObject({
+			status: "accepted",
+			validation: "pass",
+			rollbackEvidenceFiles: [
+				"workflow-output/compatibility-design.md",
+				"workflow-output/refactor-migration-cleanup.md",
+			],
+		});
+		const archive = await Bun.file(`${cwd}/workflow-output/refactor-migration-archive.md`).text();
+		expect(archive).toContain("Outcome: accepted");
+		expect(archive).toContain("workflow-output/compatibility-design.md");
+		expect(archive).not.toContain("No rollback notes were present");
+	});
+
+	it("blocks accepted refactor migrations without rollback evidence", async () => {
+		using tempDir = TempDir.createSync("@omh-refactor-migration-missing-rollback-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(`${cwd}/src.txt`, "baseline\n");
+		await Bun.write(
+			`${cwd}/task.md`,
+			[
+				"Objective:",
+				"Reject material refactor migration archive without rollback evidence.",
+				"",
+				"Validation Command:",
+				"echo validate",
+			].join("\n"),
+		);
+		await runGit(cwd, ["init"]);
+		await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+		await runGit(cwd, ["config", "user.name", "OMH Test"]);
+		await runGit(cwd, ["add", "src.txt", "task.md"]);
+		await runGit(cwd, ["commit", "-m", "baseline"]);
+		await Bun.write(`${cwd}/src.txt`, "material migration\n");
+		await Bun.write(
+			`${cwd}/workflow-output/refactor-migration-validation.md`,
+			["# Validation", "", "Exit code: 0"].join("\n"),
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "archiveMigration",
+			scriptFileName: "archive-migration.js",
+			scriptDir: REFACTOR_MIGRATION_SCRIPT_DIR,
+			writes: ["/archive"],
+			initialState: {
+				validation: {
+					status: "pass",
+				},
+			},
+		});
+
+		expect(result.scheduler.activations.find(activation => activation.nodeId === "archiveMigration")?.status).toBe(
+			"failed",
+		);
 	});
 
 	it("treats nested Humanize stop paths as structured handoffs instead of script failures", async () => {

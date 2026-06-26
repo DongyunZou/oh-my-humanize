@@ -295,12 +295,12 @@ sequence:
                 state: /auditDigest
               audit:
                 state: /audit
-                    patch:
-                      state: /patch
-                    reviewRepair:
-                      state: /reviewRepair
-                    validation:
-                      state: /validation
+              patch:
+                state: /patch
+              reviewRepair:
+                state: /reviewRepair
+              validation:
+                state: /validation
         gates:
           - continue
           - finish
