@@ -2091,6 +2091,111 @@ describe("example workflow scripts", () => {
 		);
 	});
 
+	it("finalizes performance repair no-win evidence after an isolation-blocked join", async () => {
+		using tempDir = TempDir.createSync("@omh-performance-repaired-no-win-validation-blocked-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const taskText = [
+			"# Performance repaired no-win canary",
+			"",
+			"Benchmark Command:",
+			"cargo run --release",
+			"",
+			"Validation Command:",
+			"cargo test",
+			"",
+			"No-Code/No-Change Allowed: Yes",
+		].join("\n");
+
+		await Bun.write(`${cwd}/README.md`, "baseline\n");
+		await Bun.write(`${cwd}/task.md`, taskText);
+		await runGit(cwd, ["init"]);
+		await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+		await runGit(cwd, ["config", "user.name", "OMH Test"]);
+		await runGit(cwd, ["add", "README.md", "task.md"]);
+		await runGit(cwd, ["commit", "-m", "baseline"]);
+
+		for (const name of ["algorithmic", "caching", "io"]) {
+			await Bun.write(
+				`${cwd}/workflow-output/perf-${name}.md`,
+				["# Branch", "", "final-selection: no", "rollback evidence: no retained changes"].join("\n"),
+			);
+		}
+		await Bun.write(
+			`${cwd}/workflow-output/perf-no-win.md`,
+			[
+				"# No-win terminal branch note",
+				"",
+				"final-selection: no",
+				"no-win-result: yes",
+				"rollback and no-change evidence: no project source, test, or documentation file is retained.",
+			].join("\n"),
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/performance-benchmark.md`,
+			["# Benchmark", "", "Project-Local Scratch Isolation Violation", "", "- workflow-output/tmp"].join("\n"),
+		);
+		await Bun.write(`${cwd}/workflow-output/repair-current-benchmark.log`, "exit code 0\n");
+		await Bun.write(`${cwd}/workflow-output/repair-current-validation.log`, "exit code 101\n");
+
+		const finalize = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "finalizePerformanceSelection",
+			scriptFileName: "finalize-performance-selection.js",
+			scriptDir: PERFORMANCE_OPTIMIZATION_SCRIPT_DIR,
+			writes: ["/selection"],
+			initialState: {
+				task: {
+					text: taskText,
+				},
+				benchmark: {
+					status: "fail",
+					isolationViolation: true,
+					outputPath: "workflow-output/performance-benchmark.md",
+				},
+				selectionRepair: {
+					status: "completed",
+					decision: "terminal-no-win-validation-blocked",
+					benchmark: {
+						status: "pass",
+						exit_code: 0,
+						log: "workflow-output/repair-current-benchmark.log",
+					},
+					validation: {
+						status: "fail",
+						exit_code: 101,
+						log: "workflow-output/repair-current-validation.log",
+					},
+				},
+			},
+		});
+
+		expect(finalize.scheduler.state.selection).toMatchObject({
+			status: "blocked",
+			terminalState: "no-win-validation-blocked",
+			validationPassed: false,
+			noWinBranches: ["no-win"],
+		});
+
+		const archive = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "archivePerformance",
+			scriptFileName: "archive-performance.js",
+			scriptDir: PERFORMANCE_OPTIMIZATION_SCRIPT_DIR,
+			writes: ["/archive"],
+			initialState: finalize.scheduler.state,
+		});
+
+		expect(archive.scheduler.state.archive).toMatchObject({
+			benchmark: "pass",
+			validation: "blocked",
+			noWin: true,
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/performance-archive.md`).text()).toContain("### No-win");
+	});
+
 	it("archives performance no-win evidence as rejected when the task lacks no-win authorization", async () => {
 		using tempDir = TempDir.createSync("@omh-performance-no-win-rejected-");
 		const cwd = tempDir.path();
@@ -2550,6 +2655,30 @@ describe("example workflow scripts", () => {
 				2,
 			)}\n`,
 		);
+		await Bun.write(
+			`${cwd}/workflow-output/migrateCallers.json`,
+			`${JSON.stringify(
+				{
+					status: "migrated-validated",
+					migrationChange: {
+						rollbackPath: "Revert the private helper and restore the two direct caller sites.",
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/cleanupDeadPath.json`,
+			`${JSON.stringify(
+				{
+					status: "complete-no-code-cleanup",
+					rollback: "No cleanup-only code rollback is needed; use the migration rollback if needed.",
+				},
+				null,
+				2,
+			)}\n`,
+		);
 
 		const result = await runExampleScript({
 			cwd,
@@ -2570,14 +2699,18 @@ describe("example workflow scripts", () => {
 			validation: "pass",
 			rollbackEvidenceFiles: [
 				"workflow-output/compatibility-design.md",
+				"workflow-output/migrateCallers.json",
 				"workflow-output/migration-caller-step.json",
+				"workflow-output/cleanupDeadPath.json",
 				"workflow-output/refactor-migration-cleanup.md",
 			],
 		});
 		const archive = await Bun.file(`${cwd}/workflow-output/refactor-migration-archive.md`).text();
 		expect(archive).toContain("Outcome: accepted");
 		expect(archive).toContain("workflow-output/compatibility-design.md");
+		expect(archive).toContain("workflow-output/migrateCallers.json");
 		expect(archive).toContain("workflow-output/migration-caller-step.json");
+		expect(archive).toContain("workflow-output/cleanupDeadPath.json");
 		expect(archive).not.toContain("No rollback notes were present");
 	});
 

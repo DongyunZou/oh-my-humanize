@@ -19,6 +19,12 @@
 
 ### Fixed
 
+- Fixed the experimental performance-optimization-search workflow so terminal
+  no-win repair artifacts flow through selection guard, finalization, and
+  archive nodes after an isolation-blocked join.
+- Fixed the experimental refactor-migration workflow so accepted archives
+  recognize current `migrateCallers.json` and `cleanupDeadPath.json` rollback
+  evidence, including `rollbackPath` fields.
 - Fixed the experimental performance-optimization-search workflow so empty
   project-local temp directories do not falsely trip the parallel lane
   isolation guard while non-empty scratch directories still fail closed.

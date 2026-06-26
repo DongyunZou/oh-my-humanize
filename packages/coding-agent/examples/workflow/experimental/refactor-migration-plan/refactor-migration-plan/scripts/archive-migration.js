@@ -84,9 +84,11 @@ async function rollbackEvidenceFilePaths() {
 		"workflow-output/compatibility-design.md",
 		"workflow-output/compatibility-design.json",
 		"workflow-output/caller-migration.md",
+		"workflow-output/migrateCallers.json",
 		"workflow-output/migration-caller-step.json",
 		"workflow-output/cleanup-dead-path.md",
 		"workflow-output/cleanup-dead-path.json",
+		"workflow-output/cleanupDeadPath.json",
 		"workflow-output/refactor-migration-cleanup.md",
 	];
 	const present = [];
@@ -99,7 +101,7 @@ async function rollbackEvidenceFilePaths() {
 }
 
 function hasRollbackEvidence(text) {
-	return /\brollback(?:[_ -]?notes?)?\b/iu.test(text);
+	return /\brollback(?:[_ -]?notes?)?\b|["']?rollbackPath["']?\s*:/iu.test(text);
 }
 
 async function projectMaterialDiff() {

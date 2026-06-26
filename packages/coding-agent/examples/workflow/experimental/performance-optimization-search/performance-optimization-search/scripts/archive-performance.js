@@ -2,8 +2,9 @@ const state = workflowContext.state && typeof workflowContext.state === "object"
 const task = state.task && typeof state.task === "object" ? state.task : {};
 const benchmark = state.benchmark && typeof state.benchmark === "object" ? state.benchmark : {};
 const selection = state.selection && typeof state.selection === "object" ? state.selection : {};
+const selectionRepair = state.selectionRepair && typeof state.selectionRepair === "object" ? state.selectionRepair : {};
 
-if (!benchmarkCommandPassed(benchmark)) {
+if (!benchmarkCommandPassed(benchmark, selectionRepair)) {
 	throw new Error("cannot archive performance search before the benchmark command passes");
 }
 if (!["pass", "blocked", "rejected"].includes(String(selection.status))) {
@@ -19,7 +20,8 @@ const benchmarkText = await readOptionalText("workflow-output/performance-benchm
 const algorithmicText = await readOptionalText("workflow-output/perf-algorithmic.md");
 const cachingText = await readOptionalText("workflow-output/perf-caching.md");
 const ioText = await readOptionalText("workflow-output/perf-io.md");
-const finalSelectionText = [algorithmicText, cachingText, ioText].join("\n");
+const noWinText = await readOptionalText("workflow-output/perf-no-win.md");
+const finalSelectionText = [algorithmicText, cachingText, ioText, noWinText].join("\n");
 const hasRollbackEvidence = /\brollback\b/iu.test(finalSelectionText);
 const hasFinalSelection = /\bfinal-selection\s*:\s*yes\b/iu.test(finalSelectionText);
 const hasNoWinEvidence = /\bno-win-result\s*:\s*yes\b/iu.test(finalSelectionText);
@@ -88,6 +90,10 @@ await Bun.write(
 		"",
 		boundedLines(ioText, 80),
 		"",
+		"### No-win",
+		"",
+		boundedLines(noWinText, 80),
+		"",
 	].join("\n"),
 );
 
@@ -136,9 +142,19 @@ function allowsNoWinArchive(taskValue) {
 	);
 }
 
-function benchmarkCommandPassed(benchmarkValue) {
+function benchmarkCommandPassed(benchmarkValue, selectionRepairValue) {
+	const repairBenchmark = commandPassedFromRepairEvidence(selectionRepairValue?.benchmark);
+	if (repairBenchmark !== undefined) return repairBenchmark;
 	if (typeof benchmarkValue.benchmarkExitCode === "number") return benchmarkValue.benchmarkExitCode === 0;
 	return benchmarkValue.status === "pass";
+}
+
+function commandPassedFromRepairEvidence(value) {
+	if (!value || typeof value !== "object") return undefined;
+	const exitCode = typeof value.exitCode === "number" ? value.exitCode : value.exit_code;
+	if (typeof exitCode === "number") return exitCode === 0;
+	if (typeof value.status === "string") return value.status.toLowerCase() === "pass";
+	return undefined;
 }
 
 function isNoWinTerminalState(terminalState) {

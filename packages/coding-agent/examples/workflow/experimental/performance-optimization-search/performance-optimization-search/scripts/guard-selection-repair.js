@@ -10,8 +10,8 @@ const branchReports = await readBranchReports();
 const joinedText = branchReports.map((report) => report.text).join("\n");
 const selectedBranches = branchReports.filter((report) => /\bfinal-selection\s*:\s*yes\b/iu.test(report.text));
 const noWinBranches = branchReports.filter((report) => /\bno-win-result\s*:\s*yes\b/iu.test(report.text));
-const validationPassed = validationCommandPassed(benchmark);
-const benchmarkPassed = benchmarkCommandPassed(benchmark);
+const validationPassed = validationCommandPassed(benchmark, selectionRepair);
+const benchmarkPassed = benchmarkCommandPassed(benchmark, selectionRepair);
 const outputPath = "workflow-output/performance-selection-guard.md";
 
 await Bun.write(
@@ -118,21 +118,33 @@ async function gitDiffHeadChangedFiles() {
 
 async function readBranchReports() {
 	const reports = [];
-	for (const name of ["algorithmic", "caching", "io"]) {
+	for (const name of ["algorithmic", "caching", "io", "no-win"]) {
 		const file = `workflow-output/perf-${name}.md`;
 		reports.push({ name, file, text: await readOptionalText(file) });
 	}
 	return reports;
 }
 
-function benchmarkCommandPassed(benchmarkValue) {
+function benchmarkCommandPassed(benchmarkValue, selectionRepairValue) {
+	const repairBenchmark = commandPassedFromRepairEvidence(selectionRepairValue?.benchmark);
+	if (repairBenchmark !== undefined) return repairBenchmark;
 	if (typeof benchmarkValue.benchmarkExitCode === "number") return benchmarkValue.benchmarkExitCode === 0;
 	return benchmarkValue.status === "pass";
 }
 
-function validationCommandPassed(benchmarkValue) {
+function validationCommandPassed(benchmarkValue, selectionRepairValue) {
+	const repairValidation = commandPassedFromRepairEvidence(selectionRepairValue?.validation);
+	if (repairValidation !== undefined) return repairValidation;
 	if (typeof benchmarkValue.validationExitCode === "number") return benchmarkValue.validationExitCode === 0;
 	return benchmarkValue.status === "pass";
+}
+
+function commandPassedFromRepairEvidence(value) {
+	if (!value || typeof value !== "object") return undefined;
+	const exitCode = typeof value.exitCode === "number" ? value.exitCode : value.exit_code;
+	if (typeof exitCode === "number") return exitCode === 0;
+	if (typeof value.status === "string") return value.status.toLowerCase() === "pass";
+	return undefined;
 }
 
 async function readOptionalText(filePath) {

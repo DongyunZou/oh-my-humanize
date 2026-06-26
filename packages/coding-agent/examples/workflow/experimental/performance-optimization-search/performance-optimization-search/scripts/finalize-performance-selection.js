@@ -1,8 +1,9 @@
 const state = workflowContext.state && typeof workflowContext.state === "object" ? workflowContext.state : {};
 const task = state.task && typeof state.task === "object" ? state.task : {};
 const benchmark = state.benchmark && typeof state.benchmark === "object" ? state.benchmark : {};
+const selectionRepair = state.selectionRepair && typeof state.selectionRepair === "object" ? state.selectionRepair : {};
 
-if (!benchmarkCommandPassed(benchmark)) {
+if (!benchmarkCommandPassed(benchmark, selectionRepair)) {
 	throw new Error("cannot finalize performance selection before the benchmark command passes");
 }
 
@@ -14,7 +15,7 @@ const selectedBranches = branchReports.filter((report) => /\bfinal-selection\s*:
 const noWinBranches = branchReports.filter((report) => /\bno-win-result\s*:\s*yes\b/iu.test(report.text));
 const hasRollbackEvidence = /\brollback\b/iu.test(joinedText);
 const noWinAllowed = allowsNoWinArchive(task);
-const validationPassed = validationCommandPassed(benchmark);
+const validationPassed = validationCommandPassed(benchmark, selectionRepair);
 
 let terminalState;
 let selectionStatus = "pass";
@@ -113,7 +114,7 @@ async function gitDiffHeadChangedFiles() {
 
 async function readBranchReports() {
 	const reports = [];
-	for (const name of ["algorithmic", "caching", "io"]) {
+	for (const name of ["algorithmic", "caching", "io", "no-win"]) {
 		const file = `workflow-output/perf-${name}.md`;
 		reports.push({ name, file, text: await readOptionalText(file) });
 	}
@@ -129,14 +130,26 @@ function allowsNoWinArchive(taskValue) {
 	);
 }
 
-function benchmarkCommandPassed(benchmarkValue) {
+function benchmarkCommandPassed(benchmarkValue, selectionRepairValue) {
+	const repairBenchmark = commandPassedFromRepairEvidence(selectionRepairValue?.benchmark);
+	if (repairBenchmark !== undefined) return repairBenchmark;
 	if (typeof benchmarkValue.benchmarkExitCode === "number") return benchmarkValue.benchmarkExitCode === 0;
 	return benchmarkValue.status === "pass";
 }
 
-function validationCommandPassed(benchmarkValue) {
+function validationCommandPassed(benchmarkValue, selectionRepairValue) {
+	const repairValidation = commandPassedFromRepairEvidence(selectionRepairValue?.validation);
+	if (repairValidation !== undefined) return repairValidation;
 	if (typeof benchmarkValue.validationExitCode === "number") return benchmarkValue.validationExitCode === 0;
 	return benchmarkValue.status === "pass";
+}
+
+function commandPassedFromRepairEvidence(value) {
+	if (!value || typeof value !== "object") return undefined;
+	const exitCode = typeof value.exitCode === "number" ? value.exitCode : value.exit_code;
+	if (typeof exitCode === "number") return exitCode === 0;
+	if (typeof value.status === "string") return value.status.toLowerCase() === "pass";
+	return undefined;
 }
 
 async function readOptionalText(filePath) {
