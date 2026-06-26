@@ -13,6 +13,7 @@ import {
 	appendWorkflowAttemptActivationCompleted,
 	appendWorkflowAttemptActivationFailed,
 	appendWorkflowAttemptActivationStarted,
+	type CreateWorkflowCheckpointOptions,
 	completeWorkflowAttempt,
 	createWorkflowCheckpoint,
 	failWorkflowAttempt,
@@ -28,6 +29,7 @@ import {
 import { diagnoseWorkflowLiveness } from "./liveness";
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "./model-resolution";
 import { executeWorkflowNode, type WorkflowNodeRuntimeHost, workflowNodeAbortedErrorReason } from "./node-runtime";
+import { recordWorkflowCheckpointObservability } from "./observability";
 import {
 	resolveWorkflowPrompt,
 	type WorkflowActivationInputSnapshot,
@@ -243,46 +245,51 @@ async function finishLifecycleAttempt(
 			error: failed.error ?? `workflow activation ${failed.id} failed`,
 		});
 		const failedFrontierNodeIds = failedWorkflowFrontierNodeIds(scheduler);
-		createWorkflowCheckpoint(options.host, {
-			checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
-			familyId: lifecycle.familyId,
-			attemptId: lifecycle.attemptId,
-			completedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "completed")
-				.map(activation => activation.id),
-			abortedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "aborted")
-				.map(activation => activation.id),
-			frontierNodeIds: failedFrontierNodeIds,
-			state: scheduler.state,
-			sourceMapping: lifecycleCheckpointSourceMapping(options, failedFrontierNodeIds),
-			workspace: await captureLifecycleCheckpointWorkspace(options),
-		});
+		await createAndRecordLifecycleCheckpoint(options, scheduler, failedFrontierNodeIds);
 		return;
 	}
 	const checkpointReason = workflowCheckpointReason(scheduler, signal);
 	if (checkpointReason !== undefined) {
 		requestWorkflowAttemptStopIfRunning(options, checkpointReason);
-		createWorkflowCheckpoint(options.host, {
-			checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
-			familyId: lifecycle.familyId,
-			attemptId: lifecycle.attemptId,
-			completedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "completed")
-				.map(activation => activation.id),
-			abortedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "aborted")
-				.map(activation => activation.id),
-			frontierNodeIds: scheduler.frontierNodeIds,
-			state: scheduler.state,
-			sourceMapping: lifecycleCheckpointSourceMapping(options, scheduler.frontierNodeIds),
-			workspace: await captureLifecycleCheckpointWorkspace(options),
-		});
+		await createAndRecordLifecycleCheckpoint(options, scheduler, scheduler.frontierNodeIds);
 		return;
 	}
 	completeWorkflowAttempt(options.host, {
 		attemptId: lifecycle.attemptId,
 		summary: "workflow completed",
+	});
+}
+
+async function createAndRecordLifecycleCheckpoint(
+	options: WorkflowRunnerOptions,
+	scheduler: WorkflowSchedulerResult,
+	frontierNodeIds: string[],
+): Promise<void> {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	const checkpointOptions: CreateWorkflowCheckpointOptions = {
+		checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
+		familyId: lifecycle.familyId,
+		attemptId: lifecycle.attemptId,
+		completedActivationIds: scheduler.activations
+			.filter(activation => activation.status === "completed")
+			.map(activation => activation.id),
+		abortedActivationIds: scheduler.activations
+			.filter(activation => activation.status === "aborted")
+			.map(activation => activation.id),
+		frontierNodeIds,
+		state: scheduler.state,
+		sourceMapping: lifecycleCheckpointSourceMapping(options, frontierNodeIds),
+		workspace: await captureLifecycleCheckpointWorkspace(options),
+	};
+	const checkpoint = createWorkflowCheckpoint(options.host, checkpointOptions);
+	await recordWorkflowCheckpointObservability(options.workspaceRoot, {
+		attemptId: checkpoint.attemptId,
+		checkpointId: checkpoint.id,
+		completedActivationIds: checkpoint.completedActivationIds,
+		abortedActivationIds: checkpoint.abortedActivationIds,
+		frontierNodeIds: checkpoint.frontierNodeIds,
+		workspace: checkpoint.workspace,
 	});
 }
 

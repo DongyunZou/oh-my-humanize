@@ -204,6 +204,24 @@ describe("runWorkflow lifecycle", () => {
 				dirtyPaths: ["src/partial.ts"],
 			});
 			expect(checkpoint?.workspace?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+			const observability = await Bun.file(
+				path.join(workspace, "workflow-output", "omh-runtime", "observability.json"),
+			).json();
+			expect(observability.lifecycle).toMatchObject([
+				{
+					event: "checkpoint_created",
+					attemptId: "attempt-1",
+					checkpointId: "attempt-1:checkpoint-1",
+					completedActivationIds: [],
+					abortedActivationIds: ["activation-1"],
+					frontierNodeIds: ["writePartial"],
+					workspaceStatus: "dirty",
+				},
+			]);
+			const progress = await Bun.file(path.join(workspace, "workflow-output", "omh-runtime", "progress.md")).text();
+			expect(progress).toContain("## Lifecycle Events");
+			expect(progress).toContain("checkpoint_created");
+			expect(progress).toContain("frontier writePartial");
 		} finally {
 			await fs.rm(workspace, { recursive: true, force: true });
 		}

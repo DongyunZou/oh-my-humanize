@@ -89,6 +89,9 @@
   project-local `workflow-output/omh-runtime/observability.json` and
   `workflow-output/omh-runtime/progress.md` indexes with node summaries and
   transcript artifact references.
+- Fixed workflow runtime progress indexes so Markdown summaries stay compact,
+  checkpoint/frontier/aborted lifecycle events are recorded, and infra-owned
+  `workflow-output/omh-runtime/` files do not dirty restart checkpoints.
 - Fixed experimental workflow contract guards so parallel implementation/review
   preserves validation command shell-prefix environment assignments, and
   performance optimization search fails closed when tracked or untracked lane

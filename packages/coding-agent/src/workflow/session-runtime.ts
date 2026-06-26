@@ -1,9 +1,10 @@
-import { extractRetryHint, isEnoent } from "@oh-my-pi/pi-utils";
+import { extractRetryHint } from "@oh-my-pi/pi-utils";
 import { workflowAgentTaskIdForNode } from "./agent-task-id";
-import type { WorkflowNode, WorkflowScriptLanguage } from "./definition";
+import type { WorkflowScriptLanguage } from "./definition";
 import { formatWorkflowAgentWorkItemLabel } from "./display";
 import type { WorkflowNodeRuntimeHost, WorkflowReviewNodeOutput, WorkflowScriptContext } from "./node-runtime";
 import { WorkflowNodeRuntimeError } from "./node-runtime";
+import { createWorkflowObservabilityRecorder, recordWorkflowActivationObservability } from "./observability";
 import {
 	DEFAULT_WORKFLOW_MAX_SUMMARY_BYTES,
 	validateWorkflowActivationOutput,
@@ -12,8 +13,6 @@ import {
 
 const WORKFLOW_SUMMARY_TRUNCATION_SUFFIX =
 	"\n\n[workflow summary truncated; full output is stored outside inline workflow state.]";
-const WORKFLOW_OBSERVABILITY_INDEX_PATH = "workflow-output/omh-runtime/observability.json";
-const WORKFLOW_OBSERVABILITY_PROGRESS_PATH = "workflow-output/omh-runtime/progress.md";
 
 export interface WorkflowSessionRuntimeOptions {
 	cwd: string;
@@ -151,7 +150,7 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 			}
 			const result = await runAgentTaskWithTransientRetry(options, request);
 			const output = activationOutputFromTaskResult(input.node.id, result);
-			await recordWorkflowActivation(recordObservability, input.node, input.activation.id, output);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
 			return output;
 		},
 		runScriptNode: async input => {
@@ -169,7 +168,7 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				throw new WorkflowNodeRuntimeError(`workflow script node "${input.node.id}" failed: ${reason}`);
 			}
 			const output = activationOutputFromScriptResult(input.node.id, result);
-			await recordWorkflowActivation(recordObservability, input.node, input.activation.id, output);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
 			return output;
 		},
 		runHumanNode: async input => {
@@ -188,7 +187,7 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 			if (input.signal !== undefined) request.signal = input.signal;
 			const result = await options.runHumanInput(request);
 			const output = activationOutputFromHumanInputResult({ ...result, question });
-			await recordWorkflowActivation(recordObservability, input.node, input.activation.id, output);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
 			return output;
 		},
 		runReviewNode: async input => {
@@ -222,158 +221,10 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 			}
 			const result = await runAgentTaskWithTransientRetry(options, request);
 			const output = reviewOutputFromTaskResult(input.node.id, result, input.gates, input.fallbackVerdict);
-			await recordWorkflowActivation(recordObservability, input.node, input.activation.id, output);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
 			return output;
 		},
 	};
-}
-
-type WorkflowObservabilityRecorder = (event: WorkflowObservabilityActivation) => Promise<void>;
-
-interface WorkflowObservabilityIndex {
-	version: 1;
-	activations: WorkflowObservabilityActivation[];
-}
-
-interface WorkflowObservabilityActivation {
-	ts: string;
-	activationId: string;
-	nodeId: string;
-	type: WorkflowNode["type"];
-	status: "completed";
-	summary: string;
-	artifacts: string[];
-	verdict?: string;
-}
-
-function createWorkflowObservabilityRecorder(cwd: string): WorkflowObservabilityRecorder {
-	let pendingWrite: Promise<void> = Promise.resolve();
-	return event => {
-		const write = pendingWrite.then(() => writeWorkflowObservabilityEvent(cwd, event)).catch(() => undefined);
-		pendingWrite = write;
-		return write;
-	};
-}
-
-async function recordWorkflowActivation(
-	record: WorkflowObservabilityRecorder,
-	node: WorkflowNode,
-	activationId: string,
-	output: WorkflowActivationOutput | WorkflowReviewNodeOutput,
-): Promise<void> {
-	await record(workflowObservabilityActivation(node, activationId, output));
-}
-
-function workflowObservabilityActivation(
-	node: WorkflowNode,
-	activationId: string,
-	output: WorkflowActivationOutput | WorkflowReviewNodeOutput,
-): WorkflowObservabilityActivation {
-	const summarySource =
-		typeof output.summary === "string" ? output.summary : "verdict" in output ? output.verdict : "";
-	const boundedSummary = boundWorkflowSummary(summarySource, `workflow node "${node.id}" completed`);
-	const event: WorkflowObservabilityActivation = {
-		ts: new Date().toISOString(),
-		activationId,
-		nodeId: node.id,
-		type: node.type,
-		status: "completed",
-		summary: boundedSummary.summary,
-		artifacts: output.artifacts ?? [],
-	};
-	if ("verdict" in output) event.verdict = output.verdict;
-	return event;
-}
-
-async function writeWorkflowObservabilityEvent(cwd: string, event: WorkflowObservabilityActivation): Promise<void> {
-	const indexPath = `${cwd}/${WORKFLOW_OBSERVABILITY_INDEX_PATH}`;
-	const previous = await readWorkflowObservabilityIndex(indexPath);
-	const next: WorkflowObservabilityIndex = {
-		version: 1,
-		activations: [...previous.activations, event],
-	};
-	await Bun.write(indexPath, `${JSON.stringify(next, null, 2)}\n`);
-	await Bun.write(`${cwd}/${WORKFLOW_OBSERVABILITY_PROGRESS_PATH}`, renderWorkflowObservabilityProgress(next));
-}
-
-async function readWorkflowObservabilityIndex(indexPath: string): Promise<WorkflowObservabilityIndex> {
-	try {
-		const parsed: unknown = JSON.parse(await Bun.file(indexPath).text());
-		if (isWorkflowObservabilityIndex(parsed)) return parsed;
-		return emptyWorkflowObservabilityIndex();
-	} catch (error) {
-		if (isEnoent(error)) return emptyWorkflowObservabilityIndex();
-		throw error;
-	}
-}
-
-function isWorkflowObservabilityIndex(value: unknown): value is WorkflowObservabilityIndex {
-	if (!isWorkflowRecord(value)) return false;
-	if (value.version !== 1) return false;
-	if (!Array.isArray(value.activations)) return false;
-	return value.activations.every(isWorkflowObservabilityActivation);
-}
-
-function isWorkflowObservabilityActivation(value: unknown): value is WorkflowObservabilityActivation {
-	if (!isWorkflowRecord(value)) return false;
-	return (
-		typeof value.ts === "string" &&
-		typeof value.activationId === "string" &&
-		typeof value.nodeId === "string" &&
-		typeof value.type === "string" &&
-		value.status === "completed" &&
-		typeof value.summary === "string" &&
-		Array.isArray(value.artifacts) &&
-		value.artifacts.every(artifact => typeof artifact === "string") &&
-		(value.verdict === undefined || typeof value.verdict === "string")
-	);
-}
-
-function isWorkflowRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function emptyWorkflowObservabilityIndex(): WorkflowObservabilityIndex {
-	return { version: 1, activations: [] };
-}
-
-function renderWorkflowObservabilityProgress(index: WorkflowObservabilityIndex): string {
-	const lines = [
-		"# OMH Workflow Progress",
-		"",
-		`Last updated: ${index.activations.at(-1)?.ts ?? "n/a"}`,
-		`Completed activations: ${index.activations.length}`,
-		"",
-		"## Completed Activations",
-		"",
-		"| # | Node | Type | Activation | Summary |",
-		"| - | - | - | - | - |",
-	];
-	for (const [indexValue, activation] of index.activations.entries()) {
-		lines.push(
-			`| ${[
-				String(indexValue + 1),
-				markdownTableCell(activation.nodeId),
-				markdownTableCell(activation.type),
-				markdownTableCell(activation.activationId),
-				markdownTableCell(activation.summary),
-			].join(" | ")} |`,
-		);
-	}
-	lines.push("", "## Artifact References", "");
-	for (const activation of index.activations) {
-		if (activation.artifacts.length === 0) continue;
-		lines.push(`### ${activation.nodeId} (${activation.activationId})`, "");
-		for (const artifact of activation.artifacts) {
-			lines.push(`- ${artifact}`);
-		}
-		lines.push("");
-	}
-	return `${lines.join("\n").trimEnd()}\n`;
-}
-
-function markdownTableCell(value: string): string {
-	return value.replaceAll("\n", " ").replaceAll("|", "\\|").trim();
 }
 
 interface NormalizedWorkflowAgentTaskRetryPolicy {

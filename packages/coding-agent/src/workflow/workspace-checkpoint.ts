@@ -112,6 +112,7 @@ export function assertWorkflowWorkspaceSnapshotUnchanged(
 export function workflowRuntimeScratchDirtyPathPrefixes(workspaceRoot: string | undefined): string[] {
 	if (workspaceRoot === undefined) return [];
 	return normalizeIgnoredDirtyPathPrefixes(workspaceRoot, [
+		"workflow-output/omh-runtime",
 		process.env.OMH_RUN_TMP,
 		Bun.env.OMH_RUN_TMP,
 		process.env.TMPDIR,

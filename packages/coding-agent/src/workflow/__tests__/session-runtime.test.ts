@@ -237,6 +237,36 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		expect(progress).toContain("agent-output://agent-build");
 	});
 
+	it("keeps workflow progress tables compact while preserving full observability summaries", async () => {
+		using tempDir = TempDir.createSync("@omh-workflow-observability-compact-");
+		const cwd = tempDir.path();
+		const longSummary = `agent produced ${"evidence ".repeat(80)}`;
+		const host = createSessionWorkflowRuntimeHost({
+			cwd,
+			runAgentTask: async () => ({
+				exitCode: 0,
+				output: JSON.stringify({ summary: longSummary }),
+				agentId: "agent-audit",
+			}),
+		});
+		if (host.runAgentNode === undefined) throw new Error("agent runtime missing");
+
+		const node: WorkflowNode = { id: "audit", type: "agent", prompt: "Audit the thing." };
+		await host.runAgentNode({
+			node,
+			activation: workflowActivation(node.id),
+			agent: "auditor",
+			prompt: node.prompt,
+		});
+
+		const observability = await Bun.file(`${cwd}/workflow-output/omh-runtime/observability.json`).json();
+		expect(observability.activations[0].summary).toBe(longSummary.trim());
+		const progress = await Bun.file(`${cwd}/workflow-output/omh-runtime/progress.md`).text();
+		expect(progress).toContain("agent produced evidence evidence");
+		expect(progress).toContain("...");
+		expect(progress).not.toContain("evidence ".repeat(40));
+	});
+
 	it("preserves the human node prompt in activation output for closeout audit", async () => {
 		const requests: WorkflowHumanInputRequest[] = [];
 		const host = createSessionWorkflowRuntimeHost({
