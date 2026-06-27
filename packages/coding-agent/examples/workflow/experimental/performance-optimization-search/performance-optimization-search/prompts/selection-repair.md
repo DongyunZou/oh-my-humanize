@@ -35,6 +35,10 @@ that the reviewer can evaluate:
 - reject writable bare `/tmp` sandbox mounts such as `bwrap --tmpfs /tmp`,
   `--bind /tmp`, `--dir /tmp`, or `TMPDIR=/tmp`; sandbox scratch must be backed
   by a lane directory under `task.scratchRoot`;
+- reject branch evidence where build, benchmark, validation, apply-check, or
+  candidate execution ran from `cwd: .`, the task workspace, or the unmodified
+  shared workspace. Shared project files may be inspected, but branch execution
+  evidence must come from lane-local worktrees or copies under `task.scratchRoot`;
 - if validation or benchmark failed, preserve the failure evidence and explain
   the minimal next repair needed;
 - if one branch has a measured positive result, apply at most one selected candidate patch
@@ -63,6 +67,8 @@ Before yielding, write `workflow-output/performance-selection-repair.md` with:
   selection, and whether all branch scratch paths were under `task.scratchRoot`;
 - whether branch evidence avoided writable bare `/tmp` sandbox mounts and
   `TMPDIR=/tmp` execution surfaces;
+- whether branch build, benchmark, validation, apply-check, and candidate
+  execution cwd/worktree paths were lane-local under `task.scratchRoot`;
 - exact rollback/no-change evidence;
 - the branch report files you updated.
 

@@ -129,6 +129,30 @@ if (bareTmpSandboxReferences.length > 0) {
 	};
 }
 
+const sharedWorkspaceExecutionReferences = await branchEvidenceWithSharedWorkspaceExecutionReferences();
+if (sharedWorkspaceExecutionReferences.length > 0) {
+	const outputPath = "workflow-output/performance-benchmark.md";
+	await Bun.write(outputPath, sharedWorkspaceExecutionViolationMarkdown(sharedWorkspaceExecutionReferences));
+	return {
+		summary: `parallel lane isolation violation: ${sharedWorkspaceExecutionReferences.length} shared workspace execution evidence file(s) found`,
+		data: { isolationViolation: true, sharedWorkspaceExecutionReferences },
+		statePatch: [
+			{
+				op: "set",
+				path: "/benchmark",
+				value: {
+					status: "fail",
+					isolationViolation: true,
+					sharedWorkspaceExecutionReferences,
+					benchmarkCommand,
+					validationCommand,
+					outputPath,
+				},
+			},
+		],
+	};
+}
+
 const benchmark = await runShell(benchmarkCommand);
 const validation = await runShell(validationCommand);
 const outputPath = "workflow-output/performance-benchmark.md";
@@ -248,6 +272,17 @@ async function branchEvidenceWithBareTmpSandboxReferences() {
 	return references.sort();
 }
 
+async function branchEvidenceWithSharedWorkspaceExecutionReferences() {
+	const evidenceGlob = new Bun.Glob("workflow-output/perf-*");
+	const references = [];
+	const workspaceRoot = normalizeAbsolutePath(process.cwd());
+	for await (const filePath of evidenceGlob.scan({ cwd: process.cwd(), onlyFiles: true })) {
+		const text = await Bun.file(filePath).text();
+		if (hasSharedWorkspaceExecutionReference(text, workspaceRoot)) references.push(filePath);
+	}
+	return references.sort();
+}
+
 function allowedScratchRoots(task) {
 	const taskText = typeof task?.text === "string" ? task.text : "";
 	return [
@@ -296,6 +331,13 @@ function hasBareTmpSandboxReference(text) {
 		.some(line => hasBareTmpExecutionSurface(line));
 }
 
+function hasSharedWorkspaceExecutionReference(text, workspaceRoot) {
+	return text
+		.split(/\r?\n/u)
+		.filter(line => !isNegativeSharedWorkspaceDeclaration(line))
+		.some(line => hasSharedWorkspaceExecutionSurface(line, workspaceRoot));
+}
+
 function scratchEvidenceLines(text) {
 	return text
 		.split(/\r?\n/u)
@@ -309,6 +351,27 @@ function hasBareTmpExecutionSurface(line) {
 	);
 }
 
+function hasSharedWorkspaceExecutionSurface(line, workspaceRoot) {
+	const executionWords = /\b(?:benchmark|validation|validate|test|tests|apply-check|build|cargo|bun|npm|pnpm|yarn|make|command|run|ran|running|execute|executed|execution)\b/iu;
+	if (!executionWords.test(line)) return false;
+	if (
+		/\b(?:shared|unmodified|task|project|current)\s+(?:workspace|project directory|project tree)\b/iu.test(line)
+	) {
+		return true;
+	}
+	if (/\b(?:cwd|workdir|working directory)\s*[:=]\s*["'`]?\.["'`]?(?:$|[\s,.;)])/iu.test(line)) {
+		return true;
+	}
+	if (
+		workspaceRoot !== "" &&
+		/\b(?:cwd|workdir|working directory)\s*[:=]/iu.test(line) &&
+		extractEvidencePaths(line).some(path => normalizeAbsolutePath(path) === workspaceRoot)
+	) {
+		return true;
+	}
+	return false;
+}
+
 function extractEvidencePaths(line) {
 	const matches = line.match(/(?:\/[^\s`"'<>),;]+)+/gu);
 	return matches ?? [];
@@ -316,6 +379,12 @@ function extractEvidencePaths(line) {
 
 function isNegativeScratchDeclaration(line) {
 	return /\b(?:did not use|never used|not used|no)\b.{0,80}\b(?:\/tmp|workflow-output\/tmp|\.\.\/workflow-scratch)\b/iu.test(
+		line,
+	);
+}
+
+function isNegativeSharedWorkspaceDeclaration(line) {
+	return /\b(?:did not|never|not|no)\b.{0,100}\b(?:run|ran|execute|executed|execution|benchmark|validation|test|build|command)\b.{0,100}\b(?:shared|task|project|current)\s+(?:workspace|project directory|project tree)\b/iu.test(
 		line,
 	);
 }
@@ -443,6 +512,22 @@ function disallowedScratchRootViolationMarkdown(disallowedScratchReferences, roo
 		"## Evidence Files With Disallowed Scratch Roots",
 		"",
 		disallowedScratchReferences.map((file) => `- ${file}`).join("\n"),
+		"",
+	].join("\n");
+}
+
+function sharedWorkspaceExecutionViolationMarkdown(sharedWorkspaceExecutionReferences) {
+	return [
+		"# Performance Benchmark Evidence",
+		"",
+		"## Shared Workspace Execution Violation",
+		"",
+		"Parallel optimization branches may inspect the shared workspace and write durable artifacts under `workflow-output/`, but branch build, benchmark, validation, apply-check, and candidate execution must run from lane-local worktrees or copies under `task.scratchRoot`.",
+		"Evidence that a branch command ran from `cwd: .`, the task workspace, or the unmodified shared workspace cannot prove lane isolation.",
+		"",
+		"## Evidence Files With Shared Workspace Execution",
+		"",
+		sharedWorkspaceExecutionReferences.map((file) => `- ${file}`).join("\n"),
 		"",
 	].join("\n");
 }

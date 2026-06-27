@@ -15,13 +15,14 @@ Previous review, if any:
 {{jsonStringify review}}
 
 Work from the current project directory, but keep the shared workspace clean.
-Do not leave project-file edits in the shared workspace. For any code
-candidate, create a lane-local scratch copy or git worktree outside the project tree
-and scoped to this workflow run. Use the absolute `task.scratchRoot` value from
-the task contract JSON, for example `<task.scratchRoot>/{{strategy}}-*`. Do not
-try to rediscover this from the shell environment. Never use bare `/tmp`, shared
-sibling scratch such as `../workflow-scratch`, or any scratch root outside
-`task.scratchRoot`.
+Use the shared project directory only for read-only inspection plus durable
+`workflow-output/` artifacts. Do not leave project-file edits in the shared
+workspace. For any code candidate, create a lane-local scratch copy or git
+worktree outside the project tree and scoped to this workflow run. Use the
+absolute `task.scratchRoot` value from the task contract JSON, for example
+`<task.scratchRoot>/{{strategy}}-*`. Do not try to rediscover this from the
+shell environment. Never use bare `/tmp`, shared sibling scratch such as
+`../workflow-scratch`, or any scratch root outside `task.scratchRoot`.
 Never create a writable bare `/tmp` execution surface inside a sandbox. Commands
 such as `bwrap --tmpfs /tmp`, `--bind /tmp`, `--dir /tmp`, or `TMPDIR=/tmp`
 are invalid; bind or mount a lane directory under `task.scratchRoot` instead.
@@ -34,6 +35,9 @@ project-file diff with `git diff HEAD --name-only` except `workflow-output/`
 artifacts and `task.md`. If a candidate cannot be tested without mutating
 another branch's shared files, record the conflict in
 `workflow-output/perf-{{strategy}}.md` instead of editing the shared workspace.
+Do not run branch build, benchmark, validation, apply-check, or candidate
+execution commands from `cwd: .` or the shared task workspace. Those commands
+must run from the lane-local worktree or copy under `task.scratchRoot`.
 
 When you create a candidate patch, preserve enough evidence for selection:
 
@@ -42,7 +46,7 @@ When you create a candidate patch, preserve enough evidence for selection:
 - the exact command used to apply-check the patch in a clean checkout, including
   `git apply --check <candidate patch>`;
 - benchmark or validation logs from the project-external lane-local scratch
-  workspace, with scratch paths scoped to `task.scratchRoot`;
+  workspace, with command cwd/worktree paths scoped to `task.scratchRoot`;
 - stdout/stderr equivalence evidence when the benchmark observes program output.
 
 If the previous review or shared hypotheses ask for selection/rollback repair,
@@ -58,6 +62,8 @@ Before yielding, write `workflow-output/perf-{{strategy}}.md` with:
   produced;
 - project-external run-local scratch path and the `git apply --check` result
   when a candidate patch exists; the scratch path must be under `task.scratchRoot`;
+- benchmark, validation, build, and apply-check command cwd values, all under
+  `task.scratchRoot` when those commands were run;
 - rollback instructions for this branch;
 - `final-selection: yes` only if this branch is the single retained candidate
   after the selection/repair node applies it in the shared workspace;

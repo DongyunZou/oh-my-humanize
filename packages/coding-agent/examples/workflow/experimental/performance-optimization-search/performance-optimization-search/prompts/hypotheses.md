@@ -21,6 +21,11 @@ path. Do not use bare `/tmp` or shared sibling scratch such as
 Do not create writable bare `/tmp` sandbox mounts either; commands such as
 `bwrap --tmpfs /tmp`, `--bind /tmp`, `--dir /tmp`, or `TMPDIR=/tmp` are invalid
 even when another environment variable points at `task.scratchRoot`.
+The shared project directory is for read-only inspection and durable
+`workflow-output/` artifacts. Each branch's build, benchmark, validation,
+apply-check, and candidate execution commands must run from a lane-local
+worktree or copy under `task.scratchRoot`, not from `cwd: .` or the shared task
+workspace.
 
 If the previous performance review is a selection/rollback repair request after
 a passing benchmark and validation, do not invent a new broad optimization

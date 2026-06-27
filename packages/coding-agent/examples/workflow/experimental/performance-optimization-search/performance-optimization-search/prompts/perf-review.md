@@ -36,6 +36,10 @@ Return `finish` only when:
 - branch execution did not create writable bare `/tmp` sandbox mounts such as
   `bwrap --tmpfs /tmp`, `--bind /tmp`, `--dir /tmp`, or `TMPDIR=/tmp`; sandbox
   scratch must be backed by a lane directory under `task.scratchRoot`;
+- branch build, benchmark, validation, apply-check, and candidate execution did
+  not run from `cwd: .`, the task workspace, or the unmodified shared workspace;
+  shared project files may be inspected, but branch execution evidence must come
+  from lane-local worktrees or copies under `task.scratchRoot`;
 - there is a clearly selected positive optimization or a documented no-win
   result with rollback evidence;
 - losing or negative branches are reverted or explicitly isolated;

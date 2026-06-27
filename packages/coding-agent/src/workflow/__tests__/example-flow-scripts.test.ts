@@ -1838,7 +1838,7 @@ describe("example workflow scripts", () => {
 			`${import.meta.dir}/../../../examples/workflow/experimental/performance-optimization-search/performance-optimization-search/prompts/perf-review.md`,
 		).text();
 
-		expect(optimizationPrompt).toContain("Do not leave project-file edits in the shared workspace");
+		expect(optimizationPrompt).toContain("Do not leave project-file edits in the shared\nworkspace");
 		expect(optimizationPrompt).toContain("candidate patch");
 		expect(optimizationPrompt).toContain("git apply --check");
 		expect(optimizationPrompt).toContain("outside the project tree");
@@ -1846,6 +1846,9 @@ describe("example workflow scripts", () => {
 		expect(optimizationPrompt).toContain("Never use bare `/tmp`");
 		expect(optimizationPrompt).toContain("writable bare `/tmp` execution surface");
 		expect(optimizationPrompt).toContain("bwrap --tmpfs /tmp");
+		expect(optimizationPrompt).toContain("read-only inspection plus durable");
+		expect(optimizationPrompt).toContain("Do not run branch build, benchmark, validation, apply-check");
+		expect(optimizationPrompt).toContain("from `cwd: .` or the shared task workspace");
 		expect(optimizationPrompt).not.toContain("workflow-output/tmp/{{strategy}}-*");
 		expect(optimizationPrompt).not.toContain("../workflow-scratch/{{strategy}}-*");
 		expect(repairPrompt).toContain("apply at most one selected candidate patch");
@@ -1854,12 +1857,15 @@ describe("example workflow scripts", () => {
 		expect(repairPrompt).toContain("shared sibling scratch");
 		expect(repairPrompt).toContain("bare `/tmp` scratch");
 		expect(repairPrompt).toContain("writable bare `/tmp` sandbox mounts");
+		expect(repairPrompt).toContain("reject branch evidence where build, benchmark, validation, apply-check");
+		expect(repairPrompt).toContain("or the unmodified\n  shared workspace");
 		expect(repairPrompt).toContain("task.scratchRoot");
 		expect(reviewPrompt).toContain("branch left no project-file edits in the shared workspace");
 		expect(reviewPrompt).toContain("outside the project tree");
 		expect(reviewPrompt).toContain("shared sibling scratch");
 		expect(reviewPrompt).toContain("bare `/tmp` scratch");
 		expect(reviewPrompt).toContain("writable bare `/tmp` sandbox mounts");
+		expect(reviewPrompt).toContain("did\n  not run from `cwd: .`");
 		expect(reviewPrompt).toContain("task.scratchRoot");
 	});
 
@@ -2330,6 +2336,71 @@ describe("example workflow scripts", () => {
 			});
 			expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
 				"Disallowed Scratch Root Violation",
+			);
+		} finally {
+			if (previousRunTmp === undefined) {
+				delete process.env.OMH_RUN_TMP;
+			} else {
+				process.env.OMH_RUN_TMP = previousRunTmp;
+			}
+		}
+	});
+
+	it("blocks performance benchmark joins when branch evidence runs validation from the shared workspace", async () => {
+		using tempDir = TempDir.createSync("@omh-performance-shared-workspace-exec-guard-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+		const previousRunTmp = process.env.OMH_RUN_TMP;
+		const runTmp = `${cwd}/run-tmp`;
+		process.env.OMH_RUN_TMP = runTmp;
+
+		try {
+			await Bun.write(`${cwd}/src.txt`, "baseline\n");
+			await Bun.write(
+				`${cwd}/task.md`,
+				["Benchmark Command:", "echo benchmark", "", "Validation Command:", "echo validation"].join("\n"),
+			);
+			await runGit(cwd, ["init"]);
+			await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+			await runGit(cwd, ["config", "user.name", "OMH Test"]);
+			await runGit(cwd, ["add", "src.txt", "task.md"]);
+			await runGit(cwd, ["commit", "-m", "baseline"]);
+			await Bun.write(
+				`${cwd}/workflow-output/perf-io.md`,
+				[
+					"# IO candidate",
+					"",
+					`worktree: ${runTmp}/branches/io/worktree`,
+					"Benchmark command run in the lane worktree: echo benchmark",
+					"Validation command run from the unmodified shared workspace with cwd: .",
+					"candidate patch path: workflow-output/perf-io-candidate.diff",
+				].join("\n"),
+			);
+
+			const result = await runExampleScript({
+				cwd,
+				previousCwd,
+				nodeId: "benchmarkCandidates",
+				scriptFileName: "run-benchmark-validation.js",
+				scriptDir: PERFORMANCE_OPTIMIZATION_SCRIPT_DIR,
+				writes: ["/benchmark"],
+				initialState: {
+					task: {
+						text: await Bun.file(`${cwd}/task.md`).text(),
+						scratchRoot: runTmp,
+						benchmarkCommand: "echo benchmark",
+						validationCommand: "echo validation",
+					},
+				},
+			});
+
+			expect(result.scheduler.state.benchmark).toMatchObject({
+				status: "fail",
+				isolationViolation: true,
+				sharedWorkspaceExecutionReferences: ["workflow-output/perf-io.md"],
+			});
+			expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
+				"Shared Workspace Execution Violation",
 			);
 		} finally {
 			if (previousRunTmp === undefined) {
