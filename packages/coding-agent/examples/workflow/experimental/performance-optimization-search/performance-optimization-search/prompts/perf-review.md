@@ -26,9 +26,11 @@ Return `finish` only when:
   before selection; candidate code must be represented as a branch-local patch
   and project-external lane-local measurement evidence until the selection
   repair node applies at most one selected candidate;
-- lane scratch, worktrees, benchmark fixtures, and temporary data stayed outside the project tree;
-  durable candidate patches and reports may live under `workflow-output/`, but
-  execution scratch must not live under `workflow-output/tmp`;
+- lane scratch, worktrees, benchmark fixtures, and temporary data stayed outside the project tree
+  and were scoped to this workflow run; durable candidate
+  patches and reports may live under `workflow-output/`, but execution scratch
+  must not live under `workflow-output/tmp` or shared sibling scratch such as
+  `../workflow-scratch`;
 - there is a clearly selected positive optimization or a documented no-win
   result with rollback evidence;
 - losing or negative branches are reverted or explicitly isolated;

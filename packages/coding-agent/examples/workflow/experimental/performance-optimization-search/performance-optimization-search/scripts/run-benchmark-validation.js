@@ -56,6 +56,30 @@ if (projectLocalScratchPaths.length > 0) {
 	};
 }
 
+const sharedScratchReferences = await branchEvidenceWithSharedScratchReferences();
+if (sharedScratchReferences.length > 0) {
+	const outputPath = "workflow-output/performance-benchmark.md";
+	await Bun.write(outputPath, sharedScratchIsolationViolationMarkdown(sharedScratchReferences));
+	return {
+		summary: `parallel lane isolation violation: ${sharedScratchReferences.length} shared scratch evidence file(s) found`,
+		data: { isolationViolation: true, sharedScratchReferences },
+		statePatch: [
+			{
+				op: "set",
+				path: "/benchmark",
+				value: {
+					status: "fail",
+					isolationViolation: true,
+					sharedScratchReferences,
+					benchmarkCommand,
+					validationCommand,
+					outputPath,
+				},
+			},
+		],
+	};
+}
+
 const benchmark = await runShell(benchmarkCommand);
 const validation = await runShell(validationCommand);
 const outputPath = "workflow-output/performance-benchmark.md";
@@ -137,6 +161,22 @@ async function existingProjectLocalScratchPaths() {
 	return existingPaths;
 }
 
+async function branchEvidenceWithSharedScratchReferences() {
+	const evidenceGlob = new Bun.Glob("workflow-output/perf-*");
+	const references = [];
+	for await (const filePath of evidenceGlob.scan({ cwd: process.cwd(), onlyFiles: true })) {
+		const text = await Bun.file(filePath).text();
+		if (hasSharedScratchReference(text)) references.push(filePath);
+	}
+	return references.sort();
+}
+
+function hasSharedScratchReference(text) {
+	return /(?:^|[\s"'`(=])(?:\.\.\/)+workflow-scratch(?:\/|$)|(?:^|[\s"'`(=])workflow-scratch(?:\/|$)|\/workflow-scratch\//u.test(
+		text,
+	);
+}
+
 async function pathHasChildren(path) {
 	const childGlob = new Bun.Glob(`${path}/**`);
 	for await (const _match of childGlob.scan({ cwd: process.cwd(), onlyFiles: false })) return true;
@@ -204,6 +244,22 @@ function projectLocalScratchIsolationViolationMarkdown(projectLocalScratchPaths)
 		"## Project-Local Scratch Paths",
 		"",
 		projectLocalScratchPaths.map((file) => `- ${file}`).join("\n"),
+		"",
+	].join("\n");
+}
+
+function sharedScratchIsolationViolationMarkdown(sharedScratchReferences) {
+	return [
+		"# Performance Benchmark Evidence",
+		"",
+		"## Shared Scratch Isolation Violation",
+		"",
+		"Parallel optimization lanes must use run-local scratch or worktrees.",
+		"Branch evidence that points at shared sibling scratch such as `../workflow-scratch` cannot prove lane isolation and may reuse stale work from another tuple.",
+		"",
+		"## Evidence Files With Shared Scratch References",
+		"",
+		sharedScratchReferences.map((file) => `- ${file}`).join("\n"),
 		"",
 	].join("\n");
 }

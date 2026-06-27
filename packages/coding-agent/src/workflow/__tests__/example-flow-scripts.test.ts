@@ -1807,12 +1807,16 @@ describe("example workflow scripts", () => {
 		expect(optimizationPrompt).toContain("candidate patch");
 		expect(optimizationPrompt).toContain("git apply --check");
 		expect(optimizationPrompt).toContain("outside the project tree");
+		expect(optimizationPrompt).toContain("$OMH_RUN_TMP/{{strategy}}-*");
 		expect(optimizationPrompt).not.toContain("workflow-output/tmp/{{strategy}}-*");
+		expect(optimizationPrompt).not.toContain("../workflow-scratch/{{strategy}}-*");
 		expect(repairPrompt).toContain("apply at most one selected candidate patch");
 		expect(repairPrompt).toContain("clean shared workspace");
 		expect(repairPrompt).toContain("project-local scratch");
+		expect(repairPrompt).toContain("shared sibling scratch");
 		expect(reviewPrompt).toContain("branch left no project-file edits in the shared workspace");
 		expect(reviewPrompt).toContain("outside the project tree");
+		expect(reviewPrompt).toContain("shared sibling scratch");
 	});
 
 	it("blocks performance benchmark joins when parallel lanes leave shared project edits", async () => {
@@ -1979,6 +1983,63 @@ describe("example workflow scripts", () => {
 		});
 		expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
 			"Parallel Lane Isolation Violation",
+		);
+	});
+
+	it("blocks performance benchmark joins when branch evidence references shared sibling scratch", async () => {
+		using tempDir = TempDir.createSync("@omh-performance-shared-sibling-scratch-guard-");
+		const cwd = tempDir.path();
+		const previousCwd = process.cwd();
+
+		await Bun.write(`${cwd}/src.txt`, "baseline\n");
+		await Bun.write(
+			`${cwd}/task.md`,
+			["Benchmark Command:", "echo benchmark", "", "Validation Command:", "echo validation"].join("\n"),
+		);
+		await runGit(cwd, ["init"]);
+		await runGit(cwd, ["config", "user.email", "omh@example.invalid"]);
+		await runGit(cwd, ["config", "user.name", "OMH Test"]);
+		await runGit(cwd, ["add", "src.txt", "task.md"]);
+		await runGit(cwd, ["commit", "-m", "baseline"]);
+		await Bun.write(
+			`${cwd}/workflow-output/perf-io.md`,
+			[
+				"# IO candidate",
+				"",
+				"project-external lane-local scratch path: ../workflow-scratch/io-worktree",
+				"candidate patch path: workflow-output/perf-io-candidate.diff",
+			].join("\n"),
+		);
+		await Bun.write(
+			`${cwd}/workflow-output/perf-io-candidate-cargo-test-no-run.md`,
+			"Built from /tmp/old-tuple/performance-optimization-search/workflow-scratch/algorithmic-worktree\n",
+		);
+
+		const result = await runExampleScript({
+			cwd,
+			previousCwd,
+			nodeId: "benchmarkCandidates",
+			scriptFileName: "run-benchmark-validation.js",
+			scriptDir: PERFORMANCE_OPTIMIZATION_SCRIPT_DIR,
+			writes: ["/benchmark"],
+			initialState: {
+				task: {
+					benchmarkCommand: "echo benchmark",
+					validationCommand: "echo validation",
+				},
+			},
+		});
+
+		expect(result.scheduler.state.benchmark).toMatchObject({
+			status: "fail",
+			isolationViolation: true,
+			sharedScratchReferences: [
+				"workflow-output/perf-io-candidate-cargo-test-no-run.md",
+				"workflow-output/perf-io.md",
+			],
+		});
+		expect(await Bun.file(`${cwd}/workflow-output/performance-benchmark.md`).text()).toContain(
+			"Shared Scratch Isolation Violation",
 		);
 	});
 
