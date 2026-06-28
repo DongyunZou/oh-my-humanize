@@ -1,7 +1,8 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import type { ToolSession } from "../../tools";
+import { EvalTool, type EvalToolParams } from "../../tools/eval";
 import type { WorkflowDefinition, WorkflowNode } from "../definition";
 import { createEvalToolScriptRunner } from "../eval-tool-runtime";
 import { runWorkflow } from "../runner";
@@ -126,6 +127,74 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		expect(output.summary).toBe("agent recovered after capped retry");
 	});
 
+	it("retries transient HTTP/2 transport errors for workflow agent nodes", async () => {
+		const calls: string[] = [];
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: "/workspace",
+			agentTaskRetryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
+			runAgentTask: async request => {
+				calls.push(request.nodeId);
+				if (calls.length === 1) {
+					return {
+						exitCode: 1,
+						output: "",
+						error: "HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)",
+					};
+				}
+				return {
+					exitCode: 0,
+					output: JSON.stringify({ summary: "agent recovered after HTTP/2 transport retry" }),
+				};
+			},
+		});
+		if (host.runAgentNode === undefined) throw new Error("agent runtime missing");
+
+		const node: WorkflowNode = { id: "build", type: "agent", prompt: "Build the thing." };
+		const output = await host.runAgentNode({
+			node,
+			activation: workflowActivation(node.id),
+			agent: "builder",
+			prompt: node.prompt,
+		});
+
+		expect(calls).toEqual(["build", "build"]);
+		expect(output.summary).toBe("agent recovered after HTTP/2 transport retry");
+	});
+
+	it("retries interrupted provider streams for workflow agent nodes", async () => {
+		const calls: string[] = [];
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: "/workspace",
+			agentTaskRetryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
+			runAgentTask: async request => {
+				calls.push(request.nodeId);
+				if (calls.length === 1) {
+					return {
+						exitCode: 1,
+						output: "",
+						error: "Error Code stream_read_error: stream_read_error",
+					};
+				}
+				return {
+					exitCode: 0,
+					output: JSON.stringify({ summary: "agent recovered after interrupted stream retry" }),
+				};
+			},
+		});
+		if (host.runAgentNode === undefined) throw new Error("agent runtime missing");
+
+		const node: WorkflowNode = { id: "build", type: "agent", prompt: "Build the thing." };
+		const output = await host.runAgentNode({
+			node,
+			activation: workflowActivation(node.id),
+			agent: "builder",
+			prompt: node.prompt,
+		});
+
+		expect(calls).toEqual(["build", "build"]);
+		expect(output.summary).toBe("agent recovered after interrupted stream retry");
+	});
+
 	it("does not retry non-transient agent failures", async () => {
 		let calls = 0;
 		const host = createSessionWorkflowRuntimeHost({
@@ -153,6 +222,95 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		).rejects.toThrow('workflow agent node "build" failed: implementation review rejected the candidate');
 
 		expect(calls).toBe(1);
+	});
+
+	it("writes a project-local workflow observability index for completed agent nodes", async () => {
+		using tempDir = TempDir.createSync("@omh-workflow-observability-");
+		const cwd = tempDir.path();
+		const outputPath = `${cwd}/.agent-output/build.md`;
+		const sessionFile = `${cwd}/.omh/sessions/build.jsonl`;
+		const host = createSessionWorkflowRuntimeHost({
+			cwd,
+			runAgentTask: async () => {
+				await Bun.write(outputPath, "build markdown transcript");
+				await Bun.write(sessionFile, '{"type":"session"}\n');
+				return {
+					exitCode: 0,
+					output: JSON.stringify({ summary: "agent produced a bounded patch" }),
+					agentId: "agent-build",
+					outputPath,
+					sessionFile,
+				};
+			},
+		});
+		if (host.runAgentNode === undefined) throw new Error("agent runtime missing");
+
+		const node: WorkflowNode = { id: "build", type: "agent", prompt: "Build the thing." };
+		await host.runAgentNode({
+			node,
+			activation: workflowActivation(node.id),
+			agent: "builder",
+			prompt: node.prompt,
+		});
+
+		const mirroredOutput = "workflow-output/omh-runtime/artifacts/build_activation-1/1-build.md";
+		const mirroredSession = "workflow-output/omh-runtime/artifacts/build_activation-1/2-build.jsonl";
+		const mirroredOutputPath = `${cwd}/${mirroredOutput}`;
+		const mirroredSessionPath = `${cwd}/${mirroredSession}`;
+		const observability = await Bun.file(`${cwd}/workflow-output/omh-runtime/observability.json`).json();
+		expect(observability).toMatchObject({
+			version: 1,
+			activations: [
+				{
+					activationId: "build:activation-1",
+					nodeId: "build",
+					type: "agent",
+					status: "completed",
+					summary: "agent produced a bounded patch",
+					artifacts: ["agent-output://agent-build", mirroredOutput, mirroredSession],
+				},
+			],
+		});
+		expect(await Bun.file(mirroredOutputPath).text()).toBe("build markdown transcript");
+		expect(await Bun.file(mirroredSessionPath).text()).toBe('{"type":"session"}\n');
+		const progress = await Bun.file(`${cwd}/workflow-output/omh-runtime/progress.md`).text();
+		expect(progress).toContain("## Completed Activations");
+		expect(progress).toContain("build");
+		expect(progress).toContain("agent-output://agent-build");
+		expect(progress).toContain(mirroredOutput);
+		expect(progress).not.toContain(mirroredOutputPath);
+		expect(progress).not.toContain(`${cwd}/.agent-output/build.md`);
+		expect(progress).not.toContain(`local://${cwd}/.agent-output/build.md`);
+	});
+
+	it("keeps workflow progress tables compact while preserving full observability summaries", async () => {
+		using tempDir = TempDir.createSync("@omh-workflow-observability-compact-");
+		const cwd = tempDir.path();
+		const longSummary = `agent produced ${"evidence ".repeat(80)}`;
+		const host = createSessionWorkflowRuntimeHost({
+			cwd,
+			runAgentTask: async () => ({
+				exitCode: 0,
+				output: JSON.stringify({ summary: longSummary }),
+				agentId: "agent-audit",
+			}),
+		});
+		if (host.runAgentNode === undefined) throw new Error("agent runtime missing");
+
+		const node: WorkflowNode = { id: "audit", type: "agent", prompt: "Audit the thing." };
+		await host.runAgentNode({
+			node,
+			activation: workflowActivation(node.id),
+			agent: "auditor",
+			prompt: node.prompt,
+		});
+
+		const observability = await Bun.file(`${cwd}/workflow-output/omh-runtime/observability.json`).json();
+		expect(observability.activations[0].summary).toBe(longSummary.trim());
+		const progress = await Bun.file(`${cwd}/workflow-output/omh-runtime/progress.md`).text();
+		expect(progress).toContain("agent produced evidence evidence");
+		expect(progress).toContain("...");
+		expect(progress).not.toContain("evidence ".repeat(40));
 	});
 
 	it("preserves the human node prompt in activation output for closeout audit", async () => {
@@ -189,6 +347,29 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 			selectedOptions: ["Approve"],
 		});
 		expect(output.summary).toBe("Approve");
+	});
+
+	it("passes the human node abort signal to the human input runner", async () => {
+		let capturedRequest: WorkflowHumanInputRequest | undefined;
+		const host = createSessionWorkflowRuntimeHost({
+			cwd: "/workspace",
+			runHumanInput: async request => {
+				capturedRequest = request;
+				return { response: "Reject", selectedOptions: ["Reject"] };
+			},
+		});
+		if (host.runHumanNode === undefined) throw new Error("human runtime missing");
+
+		const controller = new AbortController();
+		const node: WorkflowNode = { id: "operatorGate", type: "human", prompt: "Approve the plan." };
+		await host.runHumanNode({
+			node,
+			activation: workflowActivation(node.id),
+			prompt: node.prompt,
+			signal: controller.signal,
+		});
+
+		expect(capturedRequest?.signal).toBe(controller.signal);
 	});
 
 	it("retries transient provider failures for review nodes before parsing verdicts", async () => {
@@ -479,6 +660,42 @@ describe("createSessionWorkflowRuntimeHost review nodes", () => {
 		});
 
 		expect(result.scheduler.state).toEqual({ ledger: { round: 3 } });
+	});
+
+	it("gives js workflow script nodes the workflow script timeout by default", async () => {
+		const calls: EvalToolParams[] = [];
+		const executeSpy = spyOn(EvalTool.prototype, "execute").mockImplementation(async (_toolCallId, params) => {
+			calls.push(params);
+			return {
+				content: [{ type: "text", text: "ok" }],
+				details: undefined,
+			};
+		});
+		try {
+			using tempDir = TempDir.createSync("@omp-workflow-eval-timeout-");
+			const settings = await Settings.init();
+			const session: ToolSession = {
+				cwd: tempDir.path(),
+				hasUI: false,
+				getSessionFile: () => null,
+				getSessionSpawns: () => null,
+				settings,
+			};
+			const runner = createEvalToolScriptRunner(session);
+
+			const result = await runner({
+				activationId: "activation-timeout-js",
+				nodeId: "runValidation",
+				code: "return { summary: 'ok' };",
+				language: "js",
+				title: "run-validation.js",
+			});
+
+			expect(result.exitCode).toBe(0);
+			expect(calls[0]?.timeout).toBe(3600);
+		} finally {
+			executeSpy.mockRestore();
+		}
 	});
 
 	it("cancels a running js workflow script through the real eval tool runner", async () => {

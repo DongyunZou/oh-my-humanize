@@ -11,6 +11,7 @@ import { ImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
 import { getProjectDir, isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
 import { type } from "arktype";
 import { type BashResult, executeBash } from "../exec/bash-executor";
+import { buildShellEnvironment, type ShellEnvironmentPolicy } from "../exec/shell-environment-policy";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { InternalUrlRouter } from "../internal-urls";
 import { truncateToVisualLines } from "../modes/components/visual-truncate";
@@ -40,6 +41,13 @@ export const BASH_DEFAULT_PREVIEW_LINES = 10;
 
 const BASH_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DEFAULT_AUTO_BACKGROUND_THRESHOLD_MS = 60_000;
+
+function resolveTerminalEnvironment(
+	policy: ShellEnvironmentPolicy | undefined,
+	env: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+	return policy === "workflow" ? buildShellEnvironment(policy, env) : env;
+}
 
 /**
  * Bash patterns flagged as safety critical for approval policy.
@@ -399,8 +407,8 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 			autoBackgroundThresholdSeconds: Math.max(0, Math.floor(this.#autoBackgroundThresholdMs / 1000)),
 			hasAstGrep: this.session.settings.get("astGrep.enabled"),
 			hasAstEdit: this.session.settings.get("astEdit.enabled"),
-			hasSearch: this.session.settings.get("search.enabled"),
-			hasFind: this.session.settings.get("find.enabled"),
+			hasGrep: this.session.settings.get("grep.enabled"),
+			hasGlob: this.session.settings.get("glob.enabled"),
 		});
 	}
 
@@ -568,6 +576,7 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 						timeout: options.timeoutMs,
 						signal: runSignal,
 						env: options.resolvedEnv,
+						environmentPolicy: this.session.shellEnvironmentPolicy,
 						artifactPath,
 						artifactId,
 						onChunk: chunk => {
@@ -866,11 +875,12 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 		// Skip when pty=true (PTY needs the local terminal UI).
 		if (clientBridge?.capabilities.terminal && clientBridge.createTerminal && !pty) {
 			const bridgeWallTimeStart = performance.now();
+			const bridgeEnv = resolveTerminalEnvironment(this.session.shellEnvironmentPolicy, resolvedEnv);
 			const handle = await clientBridge.createTerminal({
 				command,
 				cwd: commandCwd,
-				env: resolvedEnv
-					? Object.entries(resolvedEnv).map(([name, value]) => ({ name, value: value as string }))
+				env: bridgeEnv
+					? Object.entries(bridgeEnv).map(([name, value]) => ({ name, value: value as string }))
 					: undefined,
 				outputByteLimit: DEFAULT_MAX_BYTES,
 			});
@@ -1050,7 +1060,7 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 					cwd: commandCwd,
 					timeoutMs,
 					signal,
-					env: resolvedEnv,
+					env: resolveTerminalEnvironment(this.session.shellEnvironmentPolicy, resolvedEnv),
 					artifactPath,
 					artifactId,
 				})
@@ -1060,6 +1070,7 @@ export class BashTool implements AgentTool<typeof bashSchemaBase | typeof bashSc
 					timeout: timeoutMs,
 					signal,
 					env: resolvedEnv,
+					environmentPolicy: this.session.shellEnvironmentPolicy,
 					artifactPath,
 					artifactId,
 					onChunk: streamTailUpdates(tailBuffer, onUpdate),

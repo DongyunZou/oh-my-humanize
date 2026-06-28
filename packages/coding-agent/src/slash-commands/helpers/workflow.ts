@@ -921,6 +921,18 @@ function abortWorkflowActivation(controller: AbortController, reason: string): v
 	}
 }
 
+function workflowFreezeControlArtifactPaths(workspaceRoot: string, freeze: FlowFreeze): string[] {
+	const paths: string[] = [];
+	for (const candidate of [freeze.flowPath, freeze.resourceDir]) {
+		if (candidate.length === 0) continue;
+		const resolved = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(workspaceRoot, candidate);
+		const relative = path.relative(workspaceRoot, resolved);
+		if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+		paths.push(resolved);
+	}
+	return paths;
+}
+
 async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime): Promise<SlashCommandResult> {
 	const parsed = parseWorkflowRestartArgs(rest);
 	if ("error" in parsed) return usage(parsed.error, runtime);
@@ -949,7 +961,9 @@ async function handleRestartCommand(rest: string, runtime: SlashCommandRuntime):
 		return usage(`Workflow checkpoint has no restartable frontier: ${parsed.checkpointId}`, runtime);
 	}
 	try {
-		await assertWorkflowCheckpointWorkspaceMatches(located.checkpoint, runtime.cwd);
+		await assertWorkflowCheckpointWorkspaceMatches(located.checkpoint, runtime.cwd, {
+			ignoredDirtyPathPrefixes: workflowFreezeControlArtifactPaths(runtime.cwd, freeze),
+		});
 	} catch (error) {
 		return usage(errorMessage(error), runtime);
 	}
@@ -2251,6 +2265,7 @@ function workflowDefinitionToBlock(definition: WorkflowDefinition): Record<strin
 	if (definition.resources !== undefined) block.resources = definition.resources;
 	if (definition.capabilities !== undefined) block.capabilities = definition.capabilities;
 	if (definition.migrations !== undefined) block.migrations = definition.migrations;
+	if (definition.subflows !== undefined) block.subflows = definition.subflows;
 	return block;
 }
 
@@ -2262,8 +2277,10 @@ function workflowNodeToBlock(node: WorkflowNode): Record<string, unknown> {
 	else if (node.prompt !== undefined) block.prompt = node.prompt;
 	if (node.script !== undefined) block.script = workflowScriptSourceToBlock(node.script);
 	if (node.gates !== undefined) block.gates = node.gates;
+	if (node.fallbackVerdict !== undefined) block.fallbackVerdict = node.fallbackVerdict;
 	if (node.reads !== undefined) block.reads = node.reads;
 	if (node.writes !== undefined) block.writes = node.writes;
+	if (node.workspaceAccess !== undefined) block.workspaceAccess = node.workspaceAccess;
 	if (node.waitFor !== undefined) block.waitFor = node.waitFor;
 	return block;
 }
@@ -2304,12 +2321,14 @@ function workflowScriptSourceToBlock(source: WorkflowScriptSource): Record<strin
 	if (source.language !== undefined) block.language = source.language;
 	if (source.code !== undefined) block.inline = source.code;
 	if (source.file !== undefined) block.file = source.file;
+	if (source.timeoutMs !== undefined) block.timeoutMs = source.timeoutMs;
 	return block;
 }
 
 function workflowEdgeToBlock(edge: WorkflowEdge): Record<string, unknown> {
 	const block: Record<string, unknown> = { from: edge.from, to: edge.to };
 	if (edge.condition !== undefined) block.when = edge.condition.source;
+	if (edge.label !== undefined) block.label = edge.label;
 	return block;
 }
 

@@ -11,7 +11,7 @@ import { Settings, type ShellMinimizerSettings } from "../config/settings";
 import { OutputSink } from "../session/streaming-output";
 import { resolveOutputMaxColumns, resolveOutputSinkHeadBytes } from "../tools/output-meta";
 import { getOrCreateSnapshot } from "../utils/shell-snapshot";
-import { buildNonInteractiveEnv } from "./non-interactive-env";
+import { buildShellEnvironment, type ShellEnvironmentPolicy } from "./shell-environment-policy";
 
 export interface BashExecutorOptions {
 	cwd?: string;
@@ -23,6 +23,8 @@ export interface BashExecutorOptions {
 	sessionKey?: string;
 	/** Additional environment variables to inject */
 	env?: Record<string, string>;
+	/** Shell environment policy for this command. Defaults to isolated non-interactive execution. */
+	environmentPolicy?: ShellEnvironmentPolicy;
 	/** Run through the configured user shell instead of brush parsing directly. */
 	useUserShell?: boolean;
 	/** Reuse a persistent native shell session when possible. Defaults to true. */
@@ -224,7 +226,7 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	const minimizer = buildMinimizerOptions(settings.getGroup("shellMinimizer"));
 
 	const commandCwd = await resolveShellCwd(options?.cwd);
-	const commandEnv = buildNonInteractiveEnv(options?.env);
+	const commandEnv = buildShellEnvironment(options?.environmentPolicy, options?.env);
 
 	// Apply command prefix if configured
 	const prefixedCommand = prefix ? `${prefix} ${command}` : command;

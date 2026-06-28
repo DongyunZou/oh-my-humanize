@@ -86,19 +86,31 @@ function optionalCommand(taskContract, label) {
 		if (!match) continue;
 		const inline = match[1]?.trim();
 		if (inline) return inline;
-		return firstFollowingCommandLine(lines, index + 1);
+		return followingSingleLineCommand(lines, index + 1, label);
 	}
 	return "";
 }
 
-function firstFollowingCommandLine(lines, startIndex) {
+function followingSingleLineCommand(lines, startIndex, label) {
+	const commandLines = [];
+	let inFence = false;
 	for (const line of lines.slice(startIndex)) {
 		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith("```")) continue;
-		if (isTaskSectionHeading(trimmed)) return "";
-		return trimmed;
+		if (!trimmed) continue;
+		if (trimmed.startsWith("```")) {
+			if (inFence) break;
+			inFence = true;
+			continue;
+		}
+		if (!inFence && isTaskSectionHeading(trimmed)) break;
+		commandLines.push(trimmed);
 	}
-	return "";
+	if (commandLines.length > 1) {
+		throw new Error(
+			`${label} must be a single-line command; put multi-line setup in a project script and call that script from task.md`,
+		);
+	}
+	return commandLines[0] ?? "";
 }
 
 function isTaskSectionHeading(line) {

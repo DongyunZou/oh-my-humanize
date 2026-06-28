@@ -4,6 +4,7 @@ import { parseWorkflowStateSchema, type WorkflowStateSchema, WorkflowStateSchema
 
 export type WorkflowNodeType = "agent" | "script" | "human" | "review";
 export type WorkflowWorkspaceAccess = "read" | "write";
+export type WorkflowNodeCheckpoint = "after";
 export type WorkflowModelUnavailablePolicy = "fallback-to-parent" | "fail";
 export type WorkflowScriptLanguage = "js" | "py" | "sh";
 export const WORKFLOW_SCRIPT_TIMEOUT_MAX_MS = 60 * 60 * 1000;
@@ -135,6 +136,7 @@ export interface WorkflowNode {
 	writes?: string[];
 	workspaceAccess?: WorkflowWorkspaceAccess;
 	waitFor?: string[];
+	checkpoint?: WorkflowNodeCheckpoint;
 }
 
 export interface WorkflowDefinition {
@@ -237,6 +239,7 @@ function parseNodes(value: unknown, sourcePath?: string): WorkflowNode[] {
 		const writes = parseOptionalStringList(node.writes, `${path}.writes`, sourcePath);
 		const workspaceAccess = parseWorkspaceAccess(node.workspaceAccess, `${path}.workspaceAccess`, sourcePath);
 		const waitFor = parseOptionalStringList(node.waitFor, `${path}.waitFor`, sourcePath);
+		const checkpoint = parseNodeCheckpoint(node.checkpoint, `${path}.checkpoint`, sourcePath);
 		return compactNode({
 			id,
 			type,
@@ -250,6 +253,7 @@ function parseNodes(value: unknown, sourcePath?: string): WorkflowNode[] {
 			writes,
 			workspaceAccess,
 			waitFor,
+			checkpoint,
 		});
 	});
 }
@@ -719,6 +723,12 @@ function parseWorkspaceAccess(value: unknown, path: string, sourcePath?: string)
 	throw new WorkflowDefinitionError(`${path} must be "read" or "write"`, sourcePath);
 }
 
+function parseNodeCheckpoint(value: unknown, path: string, sourcePath?: string): WorkflowNodeCheckpoint | undefined {
+	if (value === undefined) return undefined;
+	if (value === "after") return value;
+	throw new WorkflowDefinitionError(`${path} must be "after"`, sourcePath);
+}
+
 function parsePromptActivationSelector(
 	value: unknown,
 	path: string,
@@ -741,6 +751,7 @@ function compactNode(node: WorkflowNode): WorkflowNode {
 	if (node.writes !== undefined) result.writes = node.writes;
 	if (node.workspaceAccess !== undefined) result.workspaceAccess = node.workspaceAccess;
 	if (node.waitFor !== undefined) result.waitFor = node.waitFor;
+	if (node.checkpoint !== undefined) result.checkpoint = node.checkpoint;
 	return result;
 }
 

@@ -3,7 +3,7 @@
  *
  * Replaces the old auto-reply model: a `send` never blocks on the recipient
  * generating anything. Delivery resolves the recipient via the global
- * AgentRegistry — parked agents are revived through the
+ * AgentRegistry — revivable parked agents are revived through the
  * AgentLifecycleManager, idle agents are woken with a real turn, and busy
  * agents receive the message as a non-interrupting aside at the next step
  * boundary (see AgentSession.deliverIrcMessage). Replies are real turns by
@@ -91,8 +91,16 @@ export class IrcBus {
 	 * disabled — e.g. blocked in a synchronous task spawn awaiting the
 	 * sender's own batch) can generate an ephemeral side-channel auto-reply
 	 * instead of stranding the sender until timeout.
+	 *
+	 * `opts.suppressRelay` skips the display-only main-UI relay for this leg.
+	 * Set by broadcast fan-out when the same broadcast also targets the main
+	 * agent directly: the main agent then already sees the body as its own
+	 * incoming card, so relaying the sibling legs would duplicate it.
 	 */
-	async send(msg: Omit<IrcMessage, "id" | "ts">, opts?: { expectsReply?: boolean }): Promise<IrcDeliveryReceipt> {
+	async send(
+		msg: Omit<IrcMessage, "id" | "ts">,
+		opts?: { expectsReply?: boolean; suppressRelay?: boolean },
+	): Promise<IrcDeliveryReceipt> {
 		const message: IrcMessage = { ...msg, id: Snowflake.next(), ts: Date.now() };
 		const ref = this.#registry.get(message.to);
 		if (!ref || ref.status === "aborted") {
@@ -127,7 +135,7 @@ export class IrcBus {
 		const waiter = this.#takeMatchingWaiter(message.to, message.from);
 		if (waiter) {
 			waiter.resolve(message);
-			this.#relayToMainUi(message);
+			if (!opts?.suppressRelay) this.#relayToMainUi(message);
 			return { to: message.to, outcome: revived ? "revived" : "injected" };
 		}
 
@@ -138,7 +146,7 @@ export class IrcBus {
 
 		try {
 			const delivery = await session.deliverIrcMessage(message, opts);
-			this.#relayToMainUi(message);
+			if (!opts?.suppressRelay) this.#relayToMainUi(message);
 			return { to: message.to, outcome: revived ? "revived" : delivery };
 		} catch (error) {
 			// Live hand-off failed (e.g. recipient disposed mid-shutdown): buffer

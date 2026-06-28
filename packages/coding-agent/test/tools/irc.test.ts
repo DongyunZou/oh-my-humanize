@@ -434,6 +434,27 @@ describe("IRC", () => {
 			expect(text).toContain("Parked agents are revived automatically");
 		});
 
+		it("op=list labels history-only parked peers as transcript refs", async () => {
+			registry.register({
+				id: "0-WorkflowNode",
+				displayName: "workflow node",
+				kind: "sub",
+				session: null,
+				status: "parked",
+				revivalPolicy: "history-only",
+			});
+			registry.register({ id: "0-Main", displayName: "main", kind: "main", session: makeFakeSession().session });
+
+			const tool = new IrcTool(makeToolSession(registry, "0-Main"));
+			const result = await tool.execute("call-history-only", { op: "list" });
+			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+
+			expect(text).toContain("0-WorkflowNode [workflow node · sub · history-only]");
+			expect(text).toContain("History-only agents are finished transcript refs");
+			expect(text).not.toContain("Parked agents are revived automatically");
+			expect(result.details?.peers?.[0]?.revivalPolicy).toBe("history-only");
+		});
+
 		it("op=list hides advisor-kind refs from the peer roster", async () => {
 			const sub = makeFakeSession();
 			registry.register({ id: "0-Worker", displayName: "task", kind: "sub", session: sub.session });
@@ -480,6 +501,24 @@ describe("IRC", () => {
 				{ to: "0-B", outcome: "failed", error: "kaput" },
 			]);
 			expect(a.delivered.map(msg => msg.body)).toEqual(["anyone there?"]);
+		});
+
+		it("op=send to=all does not relay sibling legs when the broadcast also reaches main", async () => {
+			const main = makeFakeSession();
+			registry.register({ id: "Main", displayName: "main", kind: "main", session: main.session });
+			const b = makeFakeSession();
+			registry.register({ id: "0-B", displayName: "task", kind: "sub", session: b.session });
+			registry.register({ id: "0-A", displayName: "task", kind: "sub", session: makeFakeSession().session });
+
+			const tool = new IrcTool(makeToolSession(registry, "0-A"));
+			await tool.execute("call-1", { op: "send", to: "all", message: "anyone there?" });
+
+			// Main receives the broadcast directly (its own incoming card) ...
+			expect(main.delivered.map(msg => msg.body)).toEqual(["anyone there?"]);
+			// ... so the 0-A → 0-B sibling leg must NOT also be relayed to main: it
+			// would render the identical body a second time.
+			expect(main.relayed).toEqual([]);
+			expect(b.delivered.map(msg => msg.body)).toEqual(["anyone there?"]);
 		});
 
 		it("op=send await=true round-trips the recipient's reply", async () => {

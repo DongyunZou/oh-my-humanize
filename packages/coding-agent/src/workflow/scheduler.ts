@@ -1,5 +1,6 @@
 import { evaluateWorkflowCondition } from "./condition";
 import type { WorkflowDefinition, WorkflowNode } from "./definition";
+import { workflowNodeAbortedErrorReason } from "./node-runtime";
 import { applyWorkflowStatePatch, validateWorkflowActivationOutput, type WorkflowActivationOutput } from "./state";
 
 export type WorkflowActivationStatus = "queued" | "running" | "completed" | "failed" | "aborted";
@@ -46,6 +47,7 @@ export interface WorkflowSchedulerResult {
 	limitReached: boolean;
 	frontierNodeIds: string[];
 	state: Record<string, unknown>;
+	stopReason?: string;
 }
 
 interface RunningWorkflowActivation {
@@ -94,6 +96,7 @@ export async function runWorkflowScheduler(
 	const running = new Map<string, RunningWorkflowActivation>();
 	let limitReached = false;
 	let stoppedFrontierNodeIds: string[] | undefined;
+	let stopReason: string | undefined;
 	let stopScheduling = false;
 	const completedActivationSnapshot = (): WorkflowActivation[] => [
 		...externalCompletedActivations,
@@ -149,6 +152,7 @@ export async function runWorkflowScheduler(
 		if (result.aborted === true) {
 			result.activation.status = "aborted";
 			result.activation.reason = result.error ?? "workflow activation aborted";
+			stopReason ??= result.activation.reason;
 			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
 			pushUnique(stoppedFrontierNodeIds, result.activation.nodeId);
 			stopScheduling = true;
@@ -193,17 +197,28 @@ export async function runWorkflowScheduler(
 		completed.push(result.activation);
 		completedByNode.set(result.activation.nodeId, completed);
 		completedById.set(result.activation.id, result.activation);
-		if (workflowAbortReason(schedulerSignal)) {
+		const frontierAfterCompletion = eligibleFrontierNodeIds(
+			definition,
+			result.activation,
+			nodesById,
+			completedByNode,
+			completedById,
+			state,
+			outputsByNode,
+		);
+		const checkpointReason = workflowNodeCheckpointReason(result.node);
+		if (checkpointReason !== undefined) {
 			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
-			for (const nodeId of eligibleFrontierNodeIds(
-				definition,
-				result.activation,
-				nodesById,
-				completedByNode,
-				completedById,
-				state,
-				outputsByNode,
-			)) {
+			for (const nodeId of frontierAfterCompletion) {
+				pushUnique(stoppedFrontierNodeIds, nodeId);
+			}
+			stopReason ??= checkpointReason;
+			stopScheduling = true;
+			continue;
+		}
+		if (workflowAbortReason(schedulerSignal) || stopScheduling) {
+			if (stoppedFrontierNodeIds === undefined) stoppedFrontierNodeIds = uniqueNodeIds(queue);
+			for (const nodeId of frontierAfterCompletion) {
 				pushUnique(stoppedFrontierNodeIds, nodeId);
 			}
 			stopScheduling = true;
@@ -226,7 +241,19 @@ export async function runWorkflowScheduler(
 		startReadyActivations();
 	}
 
-	return { activations, limitReached, frontierNodeIds: stoppedFrontierNodeIds ?? uniqueNodeIds(queue), state };
+	const schedulerResult: WorkflowSchedulerResult = {
+		activations,
+		limitReached,
+		frontierNodeIds: stoppedFrontierNodeIds ?? uniqueNodeIds(queue),
+		state,
+	};
+	if (stopReason !== undefined) schedulerResult.stopReason = stopReason;
+	return schedulerResult;
+}
+
+function workflowNodeCheckpointReason(node: WorkflowNode): string | undefined {
+	if (node.checkpoint !== "after") return undefined;
+	return `workflow node "${node.id}" requested checkpoint after completion`;
 }
 
 function combineSchedulerAbortSignals(first: AbortSignal | undefined, second: AbortSignal): AbortSignal {
@@ -259,7 +286,10 @@ async function executeSchedulerActivation(
 			}),
 		};
 	} catch (error) {
-		const abortReason = workflowAbortReason(context.nodeAbortSignal) ?? workflowAbortReason(context.signal);
+		const abortReason =
+			workflowAbortReason(context.nodeAbortSignal) ??
+			workflowAbortReason(context.signal) ??
+			workflowNodeAbortedErrorReason(error);
 		if (abortReason) {
 			return {
 				activation,

@@ -7,12 +7,62 @@ import type { WorkflowDefinition } from "../definition";
 import type { FlowFreeze } from "../freeze";
 import type { RuntimeBindingSnapshot, WorkflowLifecycleBranchEntry } from "../lifecycle";
 import { reconstructWorkflowFamilies } from "../lifecycle";
-import type { WorkflowNodeRuntimeHost } from "../node-runtime";
+import { WorkflowNodeAbortedError, type WorkflowNodeRuntimeHost } from "../node-runtime";
 import { runWorkflow } from "../runner";
 import type { WorkflowActivation } from "../scheduler";
 import { assertWorkflowCheckpointWorkspaceMatches } from "../workspace-checkpoint";
 
 describe("runWorkflow lifecycle", () => {
+	it("fails fast when an agent output declares a fail-closed terminal status", async () => {
+		const host = new MemoryWorkflowHost();
+		const definition = failClosedAgentDefinition();
+		const freeze = freezeForDefinition(definition);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runAgentNode: async () => ({
+				summary: "validation unavailable",
+				data: {
+					status: "mapped_fail_closed_no_edits",
+					blocker: "pytest is not available in this environment",
+				},
+			}),
+			runScriptNode: async () => {
+				throw new Error("after node should not run");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			graphRevisionId: "graph-1",
+			startNodeId: "inspect",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				freeze,
+				runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+			},
+		});
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["inspect", "failed"],
+		]);
+		expect(result.scheduler.activations[0]?.error).toContain("pytest is not available");
+		expect(result.scheduler.state).toEqual({});
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		expect(family.attempts[0]).toMatchObject({
+			status: "failed",
+			error: expect.stringContaining("pytest is not available"),
+		});
+		expect(family.checkpoints[0]).toMatchObject({
+			frontierNodeIds: ["inspect"],
+			state: {},
+			completedActivationIds: [],
+		});
+	});
+
 	it("creates a restartable checkpoint when an activation fails", async () => {
 		const host = new MemoryWorkflowHost();
 		const definition = failureRecoveryDefinition();
@@ -154,9 +204,127 @@ describe("runWorkflow lifecycle", () => {
 				dirtyPaths: ["src/partial.ts"],
 			});
 			expect(checkpoint?.workspace?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+			const observability = await Bun.file(
+				path.join(workspace, "workflow-output", "omh-runtime", "observability.json"),
+			).json();
+			expect(observability.lifecycle).toMatchObject([
+				{
+					event: "checkpoint_created",
+					attemptId: "attempt-1",
+					checkpointId: "attempt-1:checkpoint-1",
+					completedActivationIds: [],
+					abortedActivationIds: ["activation-1"],
+					frontierNodeIds: ["writePartial"],
+					workspaceStatus: "dirty",
+				},
+			]);
+			const progress = await Bun.file(path.join(workspace, "workflow-output", "omh-runtime", "progress.md")).text();
+			expect(progress).toContain("## Lifecycle Events");
+			expect(progress).toContain("checkpoint_created");
+			expect(progress).toContain("frontier writePartial");
 		} finally {
 			await fs.rm(workspace, { recursive: true, force: true });
 		}
+	});
+
+	it("creates a restartable checkpoint when the operator leaves a human checkpoint prompt", async () => {
+		const host = new MemoryWorkflowHost();
+		const definition = humanCheckpointDefinition();
+		const freeze = freezeForDefinition(definition);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runHumanNode: async () => {
+				throw new WorkflowNodeAbortedError("operator left human checkpoint");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			graphRevisionId: "graph-1",
+			startNodeId: "operatorGate",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				freeze,
+				runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+			},
+		});
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["operatorGate", "aborted"],
+		]);
+		expect(result.scheduler.stopReason).toBe("operator left human checkpoint");
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		expect(family.attempts[0]).toMatchObject({
+			status: "stopped",
+			stop: {
+				reason: "operator left human checkpoint",
+			},
+		});
+		expect(family.checkpoints[0]).toMatchObject({
+			id: "attempt-1:checkpoint-1",
+			attemptId: "attempt-1",
+			frontierNodeIds: ["operatorGate"],
+			completedActivationIds: [],
+			abortedActivationIds: ["activation-1"],
+		});
+	});
+
+	it("creates a restartable checkpoint after a lifecycle checkpoint node completes", async () => {
+		const host = new MemoryWorkflowHost();
+		const definition = humanCheckpointAfterDefinition();
+		const freeze = freezeForDefinition(definition);
+		const runtimeHost: WorkflowNodeRuntimeHost = {
+			runHumanNode: async () => ({
+				summary: "operator approved maintenance window",
+				data: { response: "Approve" },
+				statePatch: [{ op: "set", path: "/gate", value: { response: "Approve" } }],
+			}),
+			runScriptNode: async () => {
+				throw new Error("continuation should wait for checkpoint restart");
+			},
+		};
+
+		const result = await runWorkflow({
+			host,
+			definition,
+			runId: "run-1",
+			graphRevisionId: "graph-1",
+			startNodeId: "operatorGate",
+			runtimeHost,
+			lifecycle: {
+				familyId: "family-1",
+				attemptId: "attempt-1",
+				freeze,
+				runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+			},
+		});
+
+		expect(result.scheduler.activations.map(activation => [activation.nodeId, activation.status])).toEqual([
+			["operatorGate", "completed"],
+		]);
+		expect(result.scheduler.stopReason).toBe('workflow node "operatorGate" requested checkpoint after completion');
+		expect(result.scheduler.state).toEqual({ gate: { response: "Approve" } });
+
+		const family = reconstructWorkflowFamilies(host.getBranch())[0]!;
+		expect(family.attempts[0]).toMatchObject({
+			status: "stopped",
+			stop: {
+				reason: 'workflow node "operatorGate" requested checkpoint after completion',
+			},
+		});
+		expect(family.checkpoints[0]).toMatchObject({
+			id: "attempt-1:checkpoint-1",
+			attemptId: "attempt-1",
+			frontierNodeIds: ["continueWork"],
+			completedActivationIds: ["activation-1"],
+			abortedActivationIds: [],
+			state: { gate: { response: "Approve" } },
+			sourceMapping: { continueWork: "continueWork" },
+		});
 	});
 
 	it("rejects restart validation when the checkpoint workspace snapshot no longer matches", async () => {
@@ -213,6 +381,68 @@ describe("runWorkflow lifecycle", () => {
 			await fs.rm(workspace, { recursive: true, force: true });
 		}
 	});
+
+	it("omits runtime scratch from checkpoint workspace snapshots", async () => {
+		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "omp-workflow-checkpoint-scratch-"));
+		const scratchRoot = path.join(workspace, "workflow-output", "tmp");
+		const previousRunTmp = process.env.OMH_RUN_TMP;
+		try {
+			process.env.OMH_RUN_TMP = scratchRoot;
+			await initializeGitWorkspace(workspace);
+			const host = new MemoryWorkflowHost();
+			const definition = stoppedWorkspaceDefinition();
+			const freeze = freezeForDefinition(definition);
+			const controller = new AbortController();
+			const wrotePartialFile = Promise.withResolvers<void>();
+			const runtimeHost: WorkflowNodeRuntimeHost = {
+				runScriptNode: async input => {
+					await Bun.write(path.join(workspace, "src", "partial.ts"), "export const partial = true;\n");
+					await Bun.write(
+						path.join(scratchRoot, "omp-python-runner", "runner-novmd3thesia.py"),
+						"print('transient runner')\n",
+					);
+					wrotePartialFile.resolve();
+					const parked = Promise.withResolvers<never>();
+					input.signal?.addEventListener("abort", () => parked.reject(new Error("workflow activation stopped")), {
+						once: true,
+					});
+					return parked.promise;
+				},
+			};
+
+			const runPromise = runWorkflow({
+				host,
+				definition,
+				runId: "run-1",
+				graphRevisionId: "graph-1",
+				startNodeId: "writePartial",
+				runtimeHost,
+				workspaceRoot: workspace,
+				signal: controller.signal,
+				nodeAbortSignal: controller.signal,
+				lifecycle: {
+					familyId: "family-1",
+					attemptId: "attempt-1",
+					freeze,
+					runtimeBindingSnapshot: bindingSnapshot("attempt-1:binding-1"),
+				},
+			});
+			await wrotePartialFile.promise;
+			controller.abort("operator stop");
+			await runPromise;
+
+			const checkpoint = reconstructWorkflowFamilies(host.getBranch())[0]?.checkpoints[0];
+			if (checkpoint === undefined) throw new Error("expected workflow checkpoint");
+			expect(checkpoint.workspace?.dirtyPaths).toEqual(["src/partial.ts"]);
+
+			await fs.rm(scratchRoot, { recursive: true, force: true });
+			await expect(assertWorkflowCheckpointWorkspaceMatches(checkpoint, workspace)).resolves.toBeUndefined();
+		} finally {
+			if (previousRunTmp === undefined) delete process.env.OMH_RUN_TMP;
+			else process.env.OMH_RUN_TMP = previousRunTmp;
+			await fs.rm(workspace, { recursive: true, force: true });
+		}
+	});
 });
 
 class MemoryWorkflowHost {
@@ -227,6 +457,30 @@ class MemoryWorkflowHost {
 	getBranch(): WorkflowLifecycleBranchEntry[] {
 		return this.#entries;
 	}
+}
+
+function failClosedAgentDefinition(): WorkflowDefinition {
+	return {
+		name: "fail-closed-agent",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [
+			{
+				id: "inspect",
+				type: "agent",
+				agent: "task",
+				prompt: "Inspect the project.",
+				writes: ["/inspection"],
+			},
+			{
+				id: "after",
+				type: "script",
+				script: { language: "sh", code: "after" },
+				writes: ["/done"],
+			},
+		],
+		edges: [{ from: "inspect", to: "after" }],
+	};
 }
 
 function failureRecoveryDefinition(): WorkflowDefinition {
@@ -274,6 +528,49 @@ function stoppedWorkspaceDefinition(): WorkflowDefinition {
 			},
 		],
 		edges: [],
+	};
+}
+
+function humanCheckpointDefinition(): WorkflowDefinition {
+	return {
+		name: "human-checkpoint",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		nodes: [
+			{
+				id: "operatorGate",
+				type: "human",
+				prompt: "Approve after inspecting the adaptive workflow proposal.",
+			},
+		],
+		edges: [],
+	};
+}
+
+function humanCheckpointAfterDefinition(): WorkflowDefinition {
+	return {
+		name: "human-checkpoint-after",
+		version: 1,
+		models: { roles: {}, defaults: {} },
+		stateSchema: {
+			version: 1,
+			shape: { gate: "object" },
+		},
+		nodes: [
+			{
+				id: "operatorGate",
+				type: "human",
+				prompt: "Approve after inspecting the adaptive workflow proposal.",
+				checkpoint: "after",
+				writes: ["/gate"],
+			},
+			{
+				id: "continueWork",
+				type: "script",
+				script: { language: "sh", code: "continue" },
+			},
+		],
+		edges: [{ from: "operatorGate", to: "continueWork" }],
 	};
 }
 

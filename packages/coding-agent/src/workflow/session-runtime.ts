@@ -4,6 +4,7 @@ import type { WorkflowScriptLanguage } from "./definition";
 import { formatWorkflowAgentWorkItemLabel } from "./display";
 import type { WorkflowNodeRuntimeHost, WorkflowReviewNodeOutput, WorkflowScriptContext } from "./node-runtime";
 import { WorkflowNodeRuntimeError } from "./node-runtime";
+import { createWorkflowObservabilityRecorder, recordWorkflowActivationObservability } from "./observability";
 import {
 	DEFAULT_WORKFLOW_MAX_SUMMARY_BYTES,
 	validateWorkflowActivationOutput,
@@ -106,6 +107,7 @@ export interface WorkflowHumanInputRequest {
 	activationId: string;
 	nodeId: string;
 	question: string;
+	signal?: AbortSignal;
 }
 
 export interface WorkflowHumanInputResult {
@@ -118,6 +120,7 @@ export interface WorkflowHumanInputResult {
 export type WorkflowHumanInputRunner = (request: WorkflowHumanInputRequest) => Promise<WorkflowHumanInputResult>;
 
 export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntimeOptions): WorkflowNodeRuntimeHost {
+	const recordObservability = createWorkflowObservabilityRecorder(options.cwd);
 	return {
 		runAgentNode: async input => {
 			if (!options.runAgentTask) {
@@ -146,7 +149,9 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				request.signal = input.signal;
 			}
 			const result = await runAgentTaskWithTransientRetry(options, request);
-			return activationOutputFromTaskResult(input.node.id, result);
+			const output = activationOutputFromTaskResult(input.node.id, result);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
+			return output;
 		},
 		runScriptNode: async input => {
 			const code = input.script?.trim();
@@ -162,7 +167,9 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				const reason = result.error || `exit code ${result.exitCode}`;
 				throw new WorkflowNodeRuntimeError(`workflow script node "${input.node.id}" failed: ${reason}`);
 			}
-			return activationOutputFromScriptResult(input.node.id, result);
+			const output = activationOutputFromScriptResult(input.node.id, result);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
+			return output;
 		},
 		runHumanNode: async input => {
 			if (!options.runHumanInput) {
@@ -172,12 +179,16 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 			if (!question) {
 				throw new WorkflowNodeRuntimeError(`workflow human node "${input.node.id}" must define a question prompt`);
 			}
-			const result = await options.runHumanInput({
+			const request: WorkflowHumanInputRequest = {
 				activationId: input.activation.id,
 				nodeId: input.node.id,
 				question,
-			});
-			return activationOutputFromHumanInputResult({ ...result, question });
+			};
+			if (input.signal !== undefined) request.signal = input.signal;
+			const result = await options.runHumanInput(request);
+			const output = activationOutputFromHumanInputResult({ ...result, question });
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
+			return output;
 		},
 		runReviewNode: async input => {
 			if (!options.runAgentTask) {
@@ -209,7 +220,9 @@ export function createSessionWorkflowRuntimeHost(options: WorkflowSessionRuntime
 				request.signal = input.signal;
 			}
 			const result = await runAgentTaskWithTransientRetry(options, request);
-			return reviewOutputFromTaskResult(input.node.id, result, input.gates, input.fallbackVerdict);
+			const output = reviewOutputFromTaskResult(input.node.id, result, input.gates, input.fallbackVerdict);
+			await recordWorkflowActivationObservability(recordObservability, input.node, input.activation.id, output);
+			return output;
 		},
 	};
 }
@@ -312,7 +325,7 @@ function workflowAgentTaskReasonIsTransient(reason: string): boolean {
 }
 
 const WORKFLOW_AGENT_TRANSIENT_PROVIDER_ERROR_PATTERN =
-	/(?:\b429\b|too many requests|rate[_ -]?limit|temporar(?:y|ily) unavailable|overloaded|service unavailable|bad gateway|gateway timeout|upstream[^.\n]*(?:unavailable|timeout|rate limit)|\b5\d\d\b|ECONNRESET|ETIMEDOUT|EAI_AGAIN)/iu;
+	/(?:\b429\b|too many requests|rate[_ -]?limit|temporar(?:y|ily) unavailable|overloaded|service unavailable|bad gateway|gateway timeout|upstream[^.\n]*(?:unavailable|timeout|rate limit)|\b5\d\d\b|HTTP\/2[^.\n]*(?:error|not closed cleanly)|\bINTERNAL_ERROR\b|stream[_ -]read[_ -]error|stream[_ -]interrupted(?:[_ -]after[_ -]content)?|ECONNRESET|ETIMEDOUT|EAI_AGAIN)/iu;
 
 function formatWorkflowErrorReason(error: unknown): string {
 	if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -637,8 +650,8 @@ function reviewOutputFromTaskResult(
 function taskResultArtifactReferences(result: WorkflowAgentTaskResult): string[] {
 	const artifacts: string[] = [];
 	if (result.agentId !== undefined) artifacts.push(`agent-output://${result.agentId}`);
-	if (result.outputPath !== undefined) artifacts.push(`local://${result.outputPath}`);
-	if (result.sessionFile !== undefined) artifacts.push(`local://${result.sessionFile}`);
+	if (result.outputPath !== undefined) artifacts.push(result.outputPath);
+	if (result.sessionFile !== undefined) artifacts.push(result.sessionFile);
 	return artifacts;
 }
 
@@ -732,12 +745,20 @@ function parseReviewTaskOutput(
 function gatePrefixFromLine(line: string, gates: string[] | undefined): string | undefined {
 	if (!gates?.length) return undefined;
 	const normalizedLine = line.toLowerCase();
+	const verdictLabelGate = gateAfterVerdictLabel(line, gates);
+	if (verdictLabelGate !== undefined) return verdictLabelGate;
 	for (const gate of [...gates].sort((left, right) => right.length - left.length)) {
 		if (!normalizedLine.startsWith(gate.toLowerCase())) continue;
 		const next = line[gate.length];
 		if (next === undefined || /[\s:;,.!?-]/u.test(next)) return gate;
 	}
 	return undefined;
+}
+
+function gateAfterVerdictLabel(line: string, gates: string[]): string | undefined {
+	const match = /^\s*verdict\s+([^\s:;,.!?-]+)/iu.exec(line);
+	const token = match?.[1];
+	return token === undefined ? undefined : declaredGateFor(token, gates);
 }
 
 function firstNonEmptyLine(output: string): string | undefined {
@@ -924,9 +945,23 @@ function verdictFromReviewerCorrectness(
 	if (gates) {
 		const declared = candidates.find(candidate => gates.includes(candidate));
 		if (declared) return declared;
+		const semantic = semanticGateForReviewerCorrectness(correctness, gates);
+		if (semantic !== undefined && fallbackVerdict === undefined) return semantic;
 	}
 	if (fallbackVerdict !== undefined) return fallbackVerdict;
 	return correctness === "correct" ? "pass" : "fail";
+}
+
+function semanticGateForReviewerCorrectness(correctness: "correct" | "incorrect", gates: string[]): string | undefined {
+	const aliases =
+		correctness === "correct"
+			? ["complete", "completed", "done", "finish", "finished", "accept", "accepted"]
+			: ["continue", "retry", "rework", "repair", "reject", "rejected", "fail"];
+	for (const alias of aliases) {
+		const declared = declaredGateFor(alias, gates);
+		if (declared !== undefined) return declared;
+	}
+	return undefined;
 }
 
 function parseJsonObject(source: string): Record<string, unknown> | undefined {

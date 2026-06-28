@@ -13,6 +13,7 @@ import {
 	appendWorkflowAttemptActivationCompleted,
 	appendWorkflowAttemptActivationFailed,
 	appendWorkflowAttemptActivationStarted,
+	type CreateWorkflowCheckpointOptions,
 	completeWorkflowAttempt,
 	createWorkflowCheckpoint,
 	failWorkflowAttempt,
@@ -27,7 +28,8 @@ import {
 } from "./lifecycle";
 import { diagnoseWorkflowLiveness } from "./liveness";
 import { resolveWorkflowNodeModel, type WorkflowModelResolutionAudit } from "./model-resolution";
-import { executeWorkflowNode, type WorkflowNodeRuntimeHost } from "./node-runtime";
+import { executeWorkflowNode, type WorkflowNodeRuntimeHost, workflowNodeAbortedErrorReason } from "./node-runtime";
+import { recordWorkflowCheckpointObservability } from "./observability";
 import {
 	resolveWorkflowPrompt,
 	type WorkflowActivationInputSnapshot,
@@ -243,46 +245,59 @@ async function finishLifecycleAttempt(
 			error: failed.error ?? `workflow activation ${failed.id} failed`,
 		});
 		const failedFrontierNodeIds = failedWorkflowFrontierNodeIds(scheduler);
-		createWorkflowCheckpoint(options.host, {
-			checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
-			familyId: lifecycle.familyId,
-			attemptId: lifecycle.attemptId,
-			completedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "completed")
-				.map(activation => activation.id),
-			abortedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "aborted")
-				.map(activation => activation.id),
-			frontierNodeIds: failedFrontierNodeIds,
-			state: scheduler.state,
-			sourceMapping: lifecycleCheckpointSourceMapping(options, failedFrontierNodeIds),
-			workspace: await captureWorkflowCheckpointWorkspace(options.workspaceRoot),
-		});
+		await createAndRecordLifecycleCheckpoint(options, scheduler, failedFrontierNodeIds);
 		return;
 	}
 	const checkpointReason = workflowCheckpointReason(scheduler, signal);
 	if (checkpointReason !== undefined) {
 		requestWorkflowAttemptStopIfRunning(options, checkpointReason);
-		createWorkflowCheckpoint(options.host, {
-			checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
-			familyId: lifecycle.familyId,
-			attemptId: lifecycle.attemptId,
-			completedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "completed")
-				.map(activation => activation.id),
-			abortedActivationIds: scheduler.activations
-				.filter(activation => activation.status === "aborted")
-				.map(activation => activation.id),
-			frontierNodeIds: scheduler.frontierNodeIds,
-			state: scheduler.state,
-			sourceMapping: lifecycleCheckpointSourceMapping(options, scheduler.frontierNodeIds),
-			workspace: await captureWorkflowCheckpointWorkspace(options.workspaceRoot),
-		});
+		await createAndRecordLifecycleCheckpoint(options, scheduler, scheduler.frontierNodeIds);
 		return;
 	}
 	completeWorkflowAttempt(options.host, {
 		attemptId: lifecycle.attemptId,
 		summary: "workflow completed",
+	});
+}
+
+async function createAndRecordLifecycleCheckpoint(
+	options: WorkflowRunnerOptions,
+	scheduler: WorkflowSchedulerResult,
+	frontierNodeIds: string[],
+): Promise<void> {
+	const lifecycle = options.lifecycle;
+	if (!lifecycle) return;
+	const checkpointOptions: CreateWorkflowCheckpointOptions = {
+		checkpointId: `${lifecycle.attemptId}:checkpoint-1`,
+		familyId: lifecycle.familyId,
+		attemptId: lifecycle.attemptId,
+		completedActivationIds: scheduler.activations
+			.filter(activation => activation.status === "completed")
+			.map(activation => activation.id),
+		abortedActivationIds: scheduler.activations
+			.filter(activation => activation.status === "aborted")
+			.map(activation => activation.id),
+		frontierNodeIds,
+		state: scheduler.state,
+		sourceMapping: lifecycleCheckpointSourceMapping(options, frontierNodeIds),
+		workspace: await captureLifecycleCheckpointWorkspace(options),
+	};
+	const checkpoint = createWorkflowCheckpoint(options.host, checkpointOptions);
+	await recordWorkflowCheckpointObservability(options.workspaceRoot, {
+		attemptId: checkpoint.attemptId,
+		checkpointId: checkpoint.id,
+		completedActivationIds: checkpoint.completedActivationIds,
+		abortedActivationIds: checkpoint.abortedActivationIds,
+		frontierNodeIds: checkpoint.frontierNodeIds,
+		workspace: checkpoint.workspace,
+	});
+}
+
+function captureLifecycleCheckpointWorkspace(
+	options: WorkflowRunnerOptions,
+): Promise<WorkflowCheckpointWorkspaceSnapshot | undefined> {
+	return captureWorkflowCheckpointWorkspace(options.workspaceRoot, {
+		ignoredDirtyPathPrefixes: workflowRuntimeScratchDirtyPathPrefixes(options.workspaceRoot),
 	});
 }
 
@@ -306,7 +321,9 @@ function workflowCheckpointReason(
 	signal: AbortSignal | undefined,
 ): string | undefined {
 	if (scheduler.limitReached) return "activation limit reached";
-	if (scheduler.frontierNodeIds.length === 0 || !signal?.aborted) return undefined;
+	if (scheduler.frontierNodeIds.length === 0) return undefined;
+	if (scheduler.stopReason !== undefined) return scheduler.stopReason;
+	if (!signal?.aborted) return undefined;
 	const reason: unknown = signal.reason;
 	if (reason instanceof Error) return reason.message;
 	if (typeof reason === "string" && reason.length > 0) return reason;
@@ -409,6 +426,7 @@ async function executeAndPersistActivation(
 			allowedWritePaths: node.writes,
 			stateSchema: options.definition.stateSchema,
 		});
+		assertWorkflowOutputAllowsContinuation(node, output);
 		if (output.statePatch) {
 			appendWorkflowStatePatch(options.host, run.id, {
 				patch: output.statePatch,
@@ -433,7 +451,8 @@ async function executeAndPersistActivation(
 			appendLifecycleActivationStarted(options, activation, node);
 		}
 		const message = error instanceof Error ? error.message : String(error);
-		const abortReason = workflowNodeAbortReason(workflowNodeCompletionSignal(context));
+		const abortReason =
+			workflowNodeAbortReason(workflowNodeCompletionSignal(context)) ?? workflowNodeAbortedErrorReason(error);
 		if (abortReason !== undefined) {
 			appendWorkflowActivationAborted(options.host, run.id, {
 				activationId: activation.id,
@@ -567,6 +586,35 @@ function materializeSingleWriteData(node: WorkflowNode, output: WorkflowActivati
 function hasStructuredWorkflowData(data: Record<string, unknown> | undefined): data is Record<string, unknown> {
 	if (data === undefined) return false;
 	return Object.keys(data).some(key => key !== "exitCode" && key !== "summaryTruncated" && key !== "summaryBytes");
+}
+
+function assertWorkflowOutputAllowsContinuation(node: WorkflowNode, output: WorkflowActivationOutput): void {
+	const status = workflowOutputStatus(output);
+	if (status === undefined || !workflowOutputStatusIsFailClosed(status)) return;
+	const reason = workflowOutputFailureReason(output);
+	const suffix = reason === undefined ? "" : `: ${reason}`;
+	throw new WorkflowRunnerError(
+		`workflow node "${node.id}" returned terminal fail-closed status "${status}"${suffix}`,
+	);
+}
+
+function workflowOutputStatus(output: WorkflowActivationOutput): string | undefined {
+	const status = output.data?.status;
+	return typeof status === "string" && status.trim().length > 0 ? status.trim() : undefined;
+}
+
+function workflowOutputStatusIsFailClosed(status: string): boolean {
+	return /(^|[^a-z0-9])fail[_-]?closed([^a-z0-9]|$)/u.test(status.toLowerCase());
+}
+
+function workflowOutputFailureReason(output: WorkflowActivationOutput): string | undefined {
+	if (output.data !== undefined) {
+		for (const key of ["blocker", "reason", "error", "message"]) {
+			const value = output.data[key];
+			if (typeof value === "string" && value.trim().length > 0) return value.trim();
+		}
+	}
+	return output.summary;
 }
 
 function appendLifecycleActivationStarted(

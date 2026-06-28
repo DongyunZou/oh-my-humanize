@@ -114,7 +114,7 @@ function analyzeExercise(result) {
 		text.includes("no test files")
 	);
 	return {
-		exercised: positiveSignals.length > 0 || !negativeSignals,
+		exercised: positiveSignals.length > 0 && !negativeSignals,
 		positiveSignals,
 		negativeSignals,
 		okPackages: countMatches(text, /^ok\s+\S+/gmu),
@@ -132,8 +132,6 @@ function exerciseSignals(text) {
 	if (/\b\d+\s+passed\b/u.test(text)) signals.push("passed-count");
 	if (/\b\d+\s+tests?\s+passed\b/u.test(text)) signals.push("tests-passed-count");
 	if (/\b\d+\s+examples?\b/u.test(text)) signals.push("examples-count");
-	if (/\bexercised\b/u.test(text)) signals.push("exercised-marker");
-	if (/\bvalidated\b/u.test(text)) signals.push("validated-marker");
 	return signals;
 }
 

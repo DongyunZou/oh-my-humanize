@@ -24,9 +24,20 @@ Validation:
 
 {{jsonStringify validation}}
 
+Treat the structured `Validation` object above as the canonical validation
+state. Do not return `finish` when `validation.status` is not `pass`, even if
+the migration or cleanup text claims that commands passed later. In that case,
+return `continue` and ask for the program validation node to rerun so `/validation`
+is updated by the workflow runtime.
+
 Return `finish` only when the migration preserves behavior, validation is real
-and passing, cleanup is justified or explicitly deferred, and rollback notes are
-clear.
+and passing, cleanup is justified or explicitly deferred, rollback notes are
+clear, and the final project diff contains material non-whitespace migration
+work tied to the task objective. A temporary adapter that is immediately removed
+or a final whitespace-only diff is a rejected migration, not a successful
+finish.
 
 Return `continue` when compatibility risk, caller coverage, validation,
-cleanup, or rollback evidence is incomplete.
+cleanup, rollback evidence, or material migration evidence is incomplete. If no
+safe caller migration exists, explain the blocker rather than approving padding
+edits.
